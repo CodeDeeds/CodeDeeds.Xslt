@@ -1,0 +1,903 @@
+<?xml version="1.0" encoding="utf-8"?>
+<products>
+  <product>
+    <id>1</id>
+    <name>Laptop Computer</name>
+    <category>Electronics</category>
+    <price currency="USD">999.99</price>
+    <description>High-performance laptop with 16GB RAM and 512GB SSD</description>
+    <inStock>true</inStock>
+    <rating>4.5</rating>
+  </product>
+  <product>
+    <id>2</id>
+    <name>Wireless Mouse</name>
+    <category>Electronics</category>
+    <price currency="USD">29.99</price>
+    <description>Ergonomic wireless mouse with 3-year battery life</description>
+    <inStock>true</inStock>
+    <rating>4.2</rating>
+  </product>
+  <product>
+    <id>3</id>
+    <name>USB-C Cable</name>
+    <category>Electronics</category>
+    <price currency="USD">12.99</price>
+    <description>High-speed USB-C charging and data cable, 2 meters</description>
+    <inStock>true</inStock>
+    <rating>4.7</rating>
+  </product>
+  <product>
+    <id>4</id>
+    <name>Mechanical Keyboard</name>
+    <category>Electronics</category>
+    <price currency="USD">159.99</price>
+    <description>RGB mechanical keyboard with Cherry MX switches</description>
+    <inStock>false</inStock>
+    <rating>4.8</rating>
+  </product>
+  <product>
+    <id>5</id>
+    <name>4K Monitor</name>
+    <category>Electronics</category>
+    <price currency="USD">499.99</price>
+    <description>27-inch 4K UHD monitor with USB-C and built-in speakers</description>
+    <inStock>true</inStock>
+    <rating>4.6</rating>
+  </product>
+  <product>
+    <id>6</id>
+    <name>Webcam Pro</name>
+    <category>Electronics</category>
+    <price currency="USD">89.99</price>
+    <description>1080p HD webcam with autofocus and noise-canceling microphone</description>
+    <inStock>true</inStock>
+    <rating>4.4</rating>
+  </product>
+  <product>
+    <id>7</id>
+    <name>Portable SSD</name>
+    <category>Storage</category>
+    <price currency="USD">129.99</price>
+    <description>1TB portable SSD with USB 3.2 Gen 2, max 1050MB/s</description>
+    <inStock>true</inStock>
+    <rating>4.9</rating>
+  </product>
+  <product>
+    <id>8</id>
+    <name>Desk Lamp</name>
+    <category>Lighting</category>
+    <price currency="USD">39.99</price>
+    <description>LED desk lamp with adjustable brightness and color temperature</description>
+    <inStock>true</inStock>
+    <rating>4.3</rating>
+  </product>
+  <product>
+    <id>9</id>
+    <name>Cable Organizer</name>
+    <category>Accessories</category>
+    <price currency="USD">19.99</price>
+    <description>Silicone cable organizer set with 5 pieces</description>
+    <inStock>true</inStock>
+    <rating>4.1</rating>
+  </product>
+  <product>
+    <id>10</id>
+    <name>Laptop Stand</name>
+    <category>Accessories</category>
+    <price currency="USD">49.99</price>
+    <description>Adjustable aluminum laptop stand, supports up to 15kg</description>
+    <inStock>true</inStock>
+    <rating>4.5</rating>
+  </product>
+  <product>
+    <id>11</id>
+    <name>Wireless Headphones</name>
+    <category>Audio</category>
+    <price currency="USD">199.99</price>
+    <description>Noise-cancelling wireless headphones with 30-hour battery</description>
+    <inStock>true</inStock>
+    <rating>4.7</rating>
+  </product>
+  <product>
+    <id>12</id>
+    <name>USB Hub 7-Port</name>
+    <category>Electronics</category>
+    <price currency="USD">34.99</price>
+    <description>Multi-port USB 3.0 hub with power adapter</description>
+    <inStock>true</inStock>
+    <rating>4.3</rating>
+  </product>
+  <product>
+    <id>13</id>
+    <name>Wireless Charging Pad</name>
+    <category>Accessories</category>
+    <price currency="USD">24.99</price>
+    <description>Qi-certified wireless charging pad for smartphones</description>
+    <inStock>true</inStock>
+    <rating>4.4</rating>
+  </product>
+  <product>
+    <id>14</id>
+    <name>Mechanical Switch Tester</name>
+    <category>Electronics</category>
+    <price currency="USD">44.99</price>
+    <description>12-switch mechanical keyboard switch tester kit</description>
+    <inStock>true</inStock>
+    <rating>4.6</rating>
+  </product>
+  <product>
+    <id>15</id>
+    <name>Monitor Arm Stand</name>
+    <category>Accessories</category>
+    <price currency="USD">79.99</price>
+    <description>Single monitor articulating arm supports up to 27 inches</description>
+    <inStock>true</inStock>
+    <rating>4.5</rating>
+  </product>
+  <product>
+    <id>16</id>
+    <name>External Hard Drive 2TB</name>
+    <category>Storage</category>
+    <price currency="USD">59.99</price>
+    <description>2TB external HDD with USB 3.0 interface</description>
+    <inStock>true</inStock>
+    <rating>4.4</rating>
+  </product>
+  <product>
+    <id>17</id>
+    <name>Desk Organizer Set</name>
+    <category>Accessories</category>
+    <price currency="USD">29.99</price>
+    <description>5-piece bamboo desk organizer with pen holder and drawer</description>
+    <inStock>true</inStock>
+    <rating>4.2</rating>
+  </product>
+  <product>
+    <id>18</id>
+    <name>USB-C Docking Station</name>
+    <category>Electronics</category>
+    <price currency="USD">129.99</price>
+    <description>Multi-port USB-C dock with HDMI, USB 3.0, and SD card reader</description>
+    <inStock>false</inStock>
+    <rating>4.3</rating>
+  </product>
+  <product>
+    <id>19</id>
+    <name>Mechanical Gaming Mouse</name>
+    <category>Electronics</category>
+    <price currency="USD">89.99</price>
+    <description>High-precision gaming mouse with 16000 DPI sensor</description>
+    <inStock>true</inStock>
+    <rating>4.6</rating>
+  </product>
+  <product>
+    <id>20</id>
+    <name>Monitor Light Bar</name>
+    <category>Lighting</category>
+    <price currency="USD">99.99</price>
+    <description>USB-powered monitor light bar reduces eye strain</description>
+    <inStock>true</inStock>
+    <rating>4.5</rating>
+  </product>
+  <product>
+    <id>21</id>
+    <name>Wireless Keyboard</name>
+    <category>Electronics</category>
+    <price currency="USD">69.99</price>
+    <description>Slim wireless keyboard with quiet keys and 2-year battery</description>
+    <inStock>true</inStock>
+    <rating>4.3</rating>
+  </product>
+  <product>
+    <id>22</id>
+    <name>Privacy Screen Filter</name>
+    <category>Accessories</category>
+    <price currency="USD">44.99</price>
+    <description>Privacy filter for 24-inch monitor blocks side-angle viewing</description>
+    <inStock>true</inStock>
+    <rating>4.1</rating>
+  </product>
+  <product>
+    <id>23</id>
+    <name>Miniature Projector</name>
+    <category>Electronics</category>
+    <price currency="USD">299.99</price>
+    <description>Compact 1080p projector with LED light source, 3000 lumens</description>
+    <inStock>true</inStock>
+    <rating>4.4</rating>
+  </product>
+  <product>
+    <id>24</id>
+    <name>Desk Cable Management Box</name>
+    <category>Accessories</category>
+    <price currency="USD">19.99</price>
+    <description>Wire management box hides cables and power strips</description>
+    <inStock>true</inStock>
+    <rating>4.0</rating>
+  </product>
+  <product>
+    <id>25</id>
+    <name>Power Supply 750W Gold</name>
+    <category>Components</category>
+    <price currency="USD">139.99</price>
+    <description>750W modular power supply with 80+ Gold efficiency</description>
+    <inStock>true</inStock>
+    <rating>4.7</rating>
+  </product>
+  <product>
+    <id>26</id>
+    <name>Graphics Card RTX 4070</name>
+    <category>Components</category>
+    <price currency="USD">699.99</price>
+    <description>NVIDIA GeForce RTX 4070 graphics card with 12GB VRAM</description>
+    <inStock>false</inStock>
+    <rating>4.8</rating>
+  </product>
+  <product>
+    <id>27</id>
+    <name>CPU Cooler Tower</name>
+    <category>Components</category>
+    <price currency="USD">79.99</price>
+    <description>Dual-tower CPU cooler with PWM fan, supports Intel and AMD</description>
+    <inStock>true</inStock>
+    <rating>4.6</rating>
+  </product>
+  <product>
+    <id>28</id>
+    <name>RAM DDR5 32GB Kit</name>
+    <category>Components</category>
+    <price currency="USD">249.99</price>
+    <description>32GB DDR5 memory kit (2x16GB) with RGB lighting</description>
+    <inStock>true</inStock>
+    <rating>4.5</rating>
+  </product>
+  <product>
+    <id>29</id>
+    <name>SSD NVMe 2TB</name>
+    <category>Storage</category>
+    <price currency="USD">179.99</price>
+    <description>2TB NVMe M.2 SSD with read speed up to 7000MB/s</description>
+    <inStock>true</inStock>
+    <rating>4.7</rating>
+  </product>
+  <product>
+    <id>30</id>
+    <name>Motherboard Z790</name>
+    <category>Components</category>
+    <price currency="USD">299.99</price>
+    <description>Z790 chipset motherboard supports Intel 13th Gen processors</description>
+    <inStock>true</inStock>
+    <rating>4.6</rating>
+  </product>
+  <product>
+    <id>31</id>
+    <name>Computer Case RGB</name>
+    <category>Components</category>
+    <price currency="USD">119.99</price>
+    <description>Mid-tower PC case with tempered glass and RGB fans</description>
+    <inStock>true</inStock>
+    <rating>4.4</rating>
+  </product>
+  <product>
+    <id>32</id>
+    <name>Mechanical Keyboard Prof</name>
+    <category>Electronics</category>
+    <price currency="USD">249.99</price>
+    <description>Professional mechanical keyboard with hot-swappable switches</description>
+    <inStock>true</inStock>
+    <rating>4.8</rating>
+  </product>
+  <product>
+    <id>33</id>
+    <name>USB Microphone</name>
+    <category>Audio</category>
+    <price currency="USD">99.99</price>
+    <description>Professional USB condenser microphone with pop filter</description>
+    <inStock>true</inStock>
+    <rating>4.5</rating>
+  </product>
+  <product>
+    <id>34</id>
+    <name>Desk Chair Gaming</name>
+    <category>Furniture</category>
+    <price currency="USD">349.99</price>
+    <description>Ergonomic gaming chair with lumbar support and armrests</description>
+    <inStock>true</inStock>
+    <rating>4.6</rating>
+  </product>
+  <product>
+    <id>35</id>
+    <name>Standing Desk Electric</name>
+    <category>Furniture</category>
+    <price currency="USD">499.99</price>
+    <description>Electric standing desk with memory presets and USB charging</description>
+    <inStock>false</inStock>
+    <rating>4.7</rating>
+  </product>
+  <product>
+    <id>36</id>
+    <name>Monitor Stand Riser</name>
+    <category>Accessories</category>
+    <price currency="USD">34.99</price>
+    <description>Adjustable monitor stand with storage desk organizer</description>
+    <inStock>true</inStock>
+    <rating>4.3</rating>
+  </product>
+  <product>
+    <id>37</id>
+    <name>Keyboard Wrist Rest</name>
+    <category>Accessories</category>
+    <price currency="USD">24.99</price>
+    <description>Memory foam wrist rest for ergonomic keyboard support</description>
+    <inStock>true</inStock>
+    <rating>4.2</rating>
+  </product>
+  <product>
+    <id>38</id>
+    <name>Mouse Pad XL</name>
+    <category>Accessories</category>
+    <price currency="USD">44.99</price>
+    <description>Extra-large mouse pad 90x40cm with RGB lighting</description>
+    <inStock>true</inStock>
+    <rating>4.4</rating>
+  </product>
+  <product>
+    <id>39</id>
+    <name>USB Cable Organizer</name>
+    <category>Accessories</category>
+    <price currency="USD">14.99</price>
+    <description>Self-adhesive cable clips for organizing desk cables</description>
+    <inStock>true</inStock>
+    <rating>4.0</rating>
+  </product>
+  <product>
+    <id>40</id>
+    <name>Laptop Backpack</name>
+    <category>Bags</category>
+    <price currency="USD">79.99</price>
+    <description>Water-resistant laptop backpack with USB charging port</description>
+    <inStock>true</inStock>
+    <rating>4.5</rating>
+  </product>
+  <product>
+    <id>41</id>
+    <name>Desk Lamp OLED</name>
+    <category>Lighting</category>
+    <price currency="USD">199.99</price>
+    <description>OLED desk lamp with adjustable color temperature and dimming</description>
+    <inStock>true</inStock>
+    <rating>4.7</rating>
+  </product>
+  <product>
+    <id>42</id>
+    <name>Surge Protector Strip</name>
+    <category>Accessories</category>
+    <price currency="USD">29.99</price>
+    <description>6-outlet surge protector with 2 USB ports and indicator light</description>
+    <inStock>true</inStock>
+    <rating>4.3</rating>
+  </product>
+  <product>
+    <id>43</id>
+    <name>Monitor Privacy Screen</name>
+    <category>Accessories</category>
+    <price currency="USD">49.99</price>
+    <description>Anti-glare privacy filter for 27-inch monitors</description>
+    <inStock>true</inStock>
+    <rating>4.2</rating>
+  </product>
+  <product>
+    <id>44</id>
+    <name>Phone Stand Desk</name>
+    <category>Accessories</category>
+    <price currency="USD">19.99</price>
+    <description>Adjustable phone stand for desk or table use</description>
+    <inStock>true</inStock>
+    <rating>4.1</rating>
+  </product>
+  <product>
+    <id>45</id>
+    <name>Tablet Stand Mount</name>
+    <category>Accessories</category>
+    <price currency="USD">34.99</price>
+    <description>Adjustable tablet stand for iPad or Android tablets</description>
+    <inStock>true</inStock>
+    <rating>4.4</rating>
+  </product>
+  <product>
+    <id>46</id>
+    <name>Laptop Cooling Pad</name>
+    <category>Accessories</category>
+    <price currency="USD">54.99</price>
+    <description>Laptop cooling pad with 5 ultra-quiet fans and USB power</description>
+    <inStock>true</inStock>
+    <rating>4.5</rating>
+  </product>
+  <product>
+    <id>47</id>
+    <name>Screen Cleaning Kit</name>
+    <category>Accessories</category>
+    <price currency="USD">14.99</price>
+    <description>Professional screen cleaning solution and microfiber cloth set</description>
+    <inStock>true</inStock>
+    <rating>4.0</rating>
+  </product>
+  <product>
+    <id>48</id>
+    <name>USB-C Hub 11-in-1</name>
+    <category>Electronics</category>
+    <price currency="USD">149.99</price>
+    <description>Multi-port USB-C hub with HDMI, USB 3.0, SD card, and more</description>
+    <inStock>true</inStock>
+    <rating>4.6</rating>
+  </product>
+  <product>
+    <id>49</id>
+    <name>Mechanical Watch Luxury</name>
+    <category>Luxury</category>
+    <price currency="USD">9999.99</price>
+    <description>Swiss-made mechanical watch with sapphire crystal and leather strap</description>
+    <inStock>false</inStock>
+    <rating>4.9</rating>
+  </product>
+  <product>
+    <id>50</id>
+    <name>Diamond Necklace</name>
+    <category>Jewelry</category>
+    <price currency="USD">49999.99</price>
+    <description>18K gold necklace with 2-carat certified diamond pendant</description>
+    <inStock>false</inStock>
+    <rating>5.0</rating>
+  </product>
+  <product>
+    <id>51</id>
+    <name>Luxury Gaming Monitor</name>
+    <category>Electronics</category>
+    <price currency="USD">1999.99</price>
+    <description>240Hz 4K gaming monitor with 1ms response time and NVIDIA G-Sync</description>
+    <inStock>true</inStock>
+    <rating>4.8</rating>
+  </product>
+  <product>
+    <id>52</id>
+    <name>High-End Speakers Pair</name>
+    <category>Audio</category>
+    <price currency="USD">2499.99</price>
+    <description>Studio-quality stereo speakers with active crossover</description>
+    <inStock>false</inStock>
+    <rating>4.9</rating>
+  </product>
+  <product>
+    <id>53</id>
+    <name>Professional Camera</name>
+    <category>Photography</category>
+    <price currency="USD">4999.99</price>
+    <description>Full-frame mirrorless camera with 45MP sensor and 4K 60fps video</description>
+    <inStock>true</inStock>
+    <rating>4.8</rating>
+  </product>
+  <product>
+    <id>54</id>
+    <name>Monitor Professional 32in</name>
+    <category>Electronics</category>
+    <price currency="USD">1799.99</price>
+    <description>32-inch 4K color-accurate monitor for professional design work</description>
+    <inStock>true</inStock>
+    <rating>4.7</rating>
+  </product>
+  <product>
+    <id>55</id>
+    <name>Platinum Ring</name>
+    <category>Jewelry</category>
+    <price currency="USD">9999999.99</price>
+    <description>Handcrafted platinum ring with rare gemstone inlay</description>
+    <inStock>false</inStock>
+    <rating>5.0</rating>
+  </product>
+  <product>
+    <id>56</id>
+    <name>Ergonomic Office Chair</name>
+    <category>Furniture</category>
+    <price currency="USD">799.99</price>
+    <description>Premium ergonomic chair with mesh backing and lumbar support</description>
+    <inStock>true</inStock>
+    <rating>4.7</rating>
+  </product>
+  <product>
+    <id>57</id>
+    <name>Executive Desk</name>
+    <category>Furniture</category>
+    <price currency="USD">1499.99</price>
+    <description>Premium solid wood executive desk with cable management</description>
+    <inStock>true</inStock>
+    <rating>4.6</rating>
+  </product>
+  <product>
+    <id>58</id>
+    <name>Rolex Submarine Watch</name>
+    <category>Luxury</category>
+    <price currency="USD">14999.99</price>
+    <description>Professional dive watch with date window and luminous hands</description>
+    <inStock>false</inStock>
+    <rating>4.9</rating>
+  </product>
+  <product>
+    <id>59</id>
+    <name>Gaming PC Build</name>
+    <category>Computers</category>
+    <price currency="USD">3999.99</price>
+    <description>Pre-built gaming PC with RTX 4090 and Intel i9-13900K</description>
+    <inStock>false</inStock>
+    <rating>4.8</rating>
+  </product>
+  <product>
+    <id>60</id>
+    <name>Workstation PC</name>
+    <category>Computers</category>
+    <price currency="USD">5999.99</price>
+    <description>Professional workstation with dual GPUs and 256GB RAM</description>
+    <inStock>false</inStock>
+    <rating>4.8</rating>
+  </product>
+  <product>
+    <id>61</id>
+    <name>Desk Organizer Leather</name>
+    <category>Accessories</category>
+    <price currency="USD">79.99</price>
+    <description>Premium leather desk organizer with multiple compartments</description>
+    <inStock>true</inStock>
+    <rating>4.4</rating>
+  </product>
+  <product>
+    <id>62</id>
+    <name>Monitor Arm Dual</name>
+    <category>Accessories</category>
+    <price currency="USD">149.99</price>
+    <description>Dual monitor articulating arm fits two 27-inch monitors</description>
+    <inStock>true</inStock>
+    <rating>4.6</rating>
+  </product>
+  <product>
+    <id>63</id>
+    <name>USB Cable Gold Plated</name>
+    <category>Accessories</category>
+    <price currency="USD">34.99</price>
+    <description>Premium gold-plated USB 3.0 cable with shielding</description>
+    <inStock>true</inStock>
+    <rating>4.3</rating>
+  </product>
+  <product>
+    <id>64</id>
+    <name>HDMI Cable 4K</name>
+    <category>Accessories</category>
+    <price currency="USD">24.99</price>
+    <description>High-speed HDMI 2.1 cable supports 8K and eARC</description>
+    <inStock>true</inStock>
+    <rating>4.4</rating>
+  </product>
+  <product>
+    <id>65</id>
+    <name>DisplayPort Cable</name>
+    <category>Accessories</category>
+    <price currency="USD">19.99</price>
+    <description>DisplayPort 1.4 cable supports up to 8K resolution</description>
+    <inStock>true</inStock>
+    <rating>4.2</rating>
+  </product>
+  <product>
+    <id>66</id>
+    <name>Thunderbolt Cable 3</name>
+    <category>Accessories</category>
+    <price currency="USD">49.99</price>
+    <description>Thunderbolt 3 cable with 40Gbps data transfer speed</description>
+    <inStock>true</inStock>
+    <rating>4.5</rating>
+  </product>
+  <product>
+    <id>67</id>
+    <name>Ethernet Cable Cat8</name>
+    <category>Accessories</category>
+    <price currency="USD">29.99</price>
+    <description>Cat8 shielded ethernet cable supports 40Gbps</description>
+    <inStock>true</inStock>
+    <rating>4.3</rating>
+  </product>
+  <product>
+    <id>68</id>
+    <name>Power Cable Braided</name>
+    <category>Accessories</category>
+    <price currency="USD">14.99</price>
+    <description>Heavy-duty braided power cable with surge protection</description>
+    <inStock>true</inStock>
+    <rating>4.1</rating>
+  </product>
+  <product>
+    <id>69</id>
+    <name>USB Extension Cable</name>
+    <category>Accessories</category>
+    <price currency="USD">12.99</price>
+    <description>5-meter USB 3.0 extension cable with amplified signal</description>
+    <inStock>true</inStock>
+    <rating>4.0</rating>
+  </product>
+  <product>
+    <id>70</id>
+    <name>Cable Tie Set</name>
+    <category>Accessories</category>
+    <price currency="USD">9.99</price>
+    <description>Reusable velcro cable ties 50-pack in various colors</description>
+    <inStock>true</inStock>
+    <rating>3.9</rating>
+  </product>
+  <product>
+    <id>71</id>
+    <name>Screen Protector Glass</name>
+    <category>Accessories</category>
+    <price currency="USD">19.99</price>
+    <description>Tempered glass screen protector for 24-inch monitor</description>
+    <inStock>true</inStock>
+    <rating>4.2</rating>
+  </product>
+  <product>
+    <id>72</id>
+    <name>Keyboard Key Puller</name>
+    <category>Accessories</category>
+    <price currency="USD">9.99</price>
+    <description>Mechanical keyboard key puller tool for cleaning</description>
+    <inStock>true</inStock>
+    <rating>4.0</rating>
+  </product>
+  <product>
+    <id>73</id>
+    <name>Cleaning Brush Set</name>
+    <category>Accessories</category>
+    <price currency="USD">14.99</price>
+    <description>5-piece anti-static brush set for electronics cleaning</description>
+    <inStock>true</inStock>
+    <rating>4.1</rating>
+  </product>
+  <product>
+    <id>74</id>
+    <name>Thermal Paste Syringe</name>
+    <category>Components</category>
+    <price currency="USD">9.99</price>
+    <description>High-performance thermal paste for CPU and GPU cooling</description>
+    <inStock>true</inStock>
+    <rating>4.4</rating>
+  </product>
+  <product>
+    <id>75</id>
+    <name>Thermal Pads Kit</name>
+    <category>Components</category>
+    <price currency="USD">24.99</price>
+    <description>Thermal pads assortment for graphics cards and memory</description>
+    <inStock>true</inStock>
+    <rating>4.3</rating>
+  </product>
+  <product>
+    <id>76</id>
+    <name>Laptop Screen Replacement</name>
+    <category>Components</category>
+    <price currency="USD">199.99</price>
+    <description>15.6-inch FHD laptop screen replacement panel</description>
+    <inStock>true</inStock>
+    <rating>4.5</rating>
+  </product>
+  <product>
+    <id>77</id>
+    <name>Laptop Battery</name>
+    <category>Components</category>
+    <price currency="USD">79.99</price>
+    <description>High-capacity replacement laptop battery with 8000 mAh</description>
+    <inStock>true</inStock>
+    <rating>4.4</rating>
+  </product>
+  <product>
+    <id>78</id>
+    <name>Laptop Keyboard</name>
+    <category>Components</category>
+    <price currency="USD">89.99</price>
+    <description>OEM replacement keyboard with backlit keys</description>
+    <inStock>true</inStock>
+    <rating>4.3</rating>
+  </product>
+  <product>
+    <id>79</id>
+    <name>Laptop Touchpad</name>
+    <category>Components</category>
+    <price currency="USD">49.99</price>
+    <description>Replacement touchpad with multi-touch support</description>
+    <inStock>true</inStock>
+    <rating>4.2</rating>
+  </product>
+  <product>
+    <id>80</id>
+    <name>Monitor LED Strip</name>
+    <category>Lighting</category>
+    <price currency="USD">34.99</price>
+    <description>USB-powered RGB LED strip lights for monitor bias lighting</description>
+    <inStock>true</inStock>
+    <rating>4.4</rating>
+  </product>
+  <product>
+    <id>81</id>
+    <name>Desk Fan</name>
+    <category>Accessories</category>
+    <price currency="USD">29.99</price>
+    <description>Quiet USB-powered desk fan with adjustable speed</description>
+    <inStock>true</inStock>
+    <rating>4.2</rating>
+  </product>
+  <product>
+    <id>82</id>
+    <name>Air Purifier Desktop</name>
+    <category>Accessories</category>
+    <price currency="USD">79.99</price>
+    <description>Small desktop air purifier with HEPA filter</description>
+    <inStock>true</inStock>
+    <rating>4.3</rating>
+  </product>
+  <product>
+    <id>83</id>
+    <name>Humidifier Ultrasonic</name>
+    <category>Accessories</category>
+    <price currency="USD">54.99</price>
+    <description>Quiet ultrasonic humidifier with adjustable mist levels</description>
+    <inStock>true</inStock>
+    <rating>4.2</rating>
+  </product>
+  <product>
+    <id>84</id>
+    <name>White Noise Machine</name>
+    <category>Audio</category>
+    <price currency="USD">39.99</price>
+    <description>Desktop white noise machine with 20 different sounds</description>
+    <inStock>true</inStock>
+    <rating>4.4</rating>
+  </product>
+  <product>
+    <id>85</id>
+    <name>Premium Desk Calendar</name>
+    <category>Accessories</category>
+    <price currency="USD">24.99</price>
+    <description>Wooden desk calendar with leather stand</description>
+    <inStock>true</inStock>
+    <rating>4.0</rating>
+  </product>
+  <product>
+    <id>86</id>
+    <name>Desk Note Holder</name>
+    <category>Accessories</category>
+    <price currency="USD">19.99</price>
+    <description>Stainless steel desk note and photo clip holder</description>
+    <inStock>true</inStock>
+    <rating>4.1</rating>
+  </product>
+  <product>
+    <id>87</id>
+    <name>Pen Holder Bamboo</name>
+    <category>Accessories</category>
+    <price currency="USD">29.99</price>
+    <description>Natural bamboo pen holder with compartments</description>
+    <inStock>true</inStock>
+    <rating>4.2</rating>
+  </product>
+  <product>
+    <id>88</id>
+    <name>Sticky Notes Dispenser</name>
+    <category>Accessories</category>
+    <price currency="USD">14.99</price>
+    <description>Automatic sticky notes dispenser with pop-up function</description>
+    <inStock>true</inStock>
+    <rating>4.0</rating>
+  </product>
+  <product>
+    <id>89</id>
+    <name>Desk Clock Digital</name>
+    <category>Accessories</category>
+    <price currency="USD">34.99</price>
+    <description>LED digital desk clock with temperature display</description>
+    <inStock>true</inStock>
+    <rating>4.3</rating>
+  </product>
+  <product>
+    <id>90</id>
+    <name>Desk Mirror</name>
+    <category>Accessories</category>
+    <price currency="USD">24.99</price>
+    <description>Compact desktop mirror with tilting mount</description>
+    <inStock>true</inStock>
+    <rating>4.1</rating>
+  </product>
+  <product>
+    <id>91</id>
+    <name>Plant Pot Desktop</name>
+    <category>Accessories</category>
+    <price currency="USD">19.99</price>
+    <description>Self-watering desktop plant pot for small succulents</description>
+    <inStock>true</inStock>
+    <rating>4.2</rating>
+  </product>
+  <product>
+    <id>92</id>
+    <name>Desk Organizer Box</name>
+    <category>Accessories</category>
+    <price currency="USD">39.99</price>
+    <description>Multi-compartment desk organizer box with drawer</description>
+    <inStock>true</inStock>
+    <rating>4.3</rating>
+  </product>
+  <product>
+    <id>93</id>
+    <name>Under Desk Cable Tray</name>
+    <category>Accessories</category>
+    <price currency="USD">44.99</price>
+    <description>Adhesive under-desk cable management tray</description>
+    <inStock>true</inStock>
+    <rating>4.4</rating>
+  </product>
+  <product>
+    <id>94</id>
+    <name>Monitor Riser Drawer</name>
+    <category>Accessories</category>
+    <price currency="USD">89.99</price>
+    <description>Adjustable monitor riser with built-in storage drawer</description>
+    <inStock>true</inStock>
+    <rating>4.5</rating>
+  </product>
+  <product>
+    <id>95</id>
+    <name>Desk Shelf Floating</name>
+    <category>Accessories</category>
+    <price currency="USD">54.99</price>
+    <description>Floating wall shelf for above-desk storage</description>
+    <inStock>true</inStock>
+    <rating>4.3</rating>
+  </product>
+  <product>
+    <id>96</id>
+    <name>Wall Mount Cabinet</name>
+    <category>Accessories</category>
+    <price currency="USD">99.99</price>
+    <description>Wall-mounted locking cabinet for equipment storage</description>
+    <inStock>true</inStock>
+    <rating>4.4</rating>
+  </product>
+  <product>
+    <id>97</id>
+    <name>Computer Desk Bamboo</name>
+    <category>Furniture</category>
+    <price currency="USD">349.99</price>
+    <description>Natural bamboo computer desk with cable management</description>
+    <inStock>true</inStock>
+    <rating>4.6</rating>
+  </product>
+  <product>
+    <id>98</id>
+    <name>Corner Desk L-shaped</name>
+    <category>Furniture</category>
+    <price currency="USD">499.99</price>
+    <description>Large L-shaped corner desk with shelves and storage</description>
+    <inStock>true</inStock>
+    <rating>4.5</rating>
+  </product>
+  <product>
+    <id>99</id>
+    <name>Premium Desk Pad</name>
+    <category>Accessories</category>
+    <price currency="USD">69.99</price>
+    <description>Large leather desk pad with mouse pad and cord holder</description>
+    <inStock>true</inStock>
+    <rating>4.5</rating>
+  </product>
+  <product>
+    <id>100</id>
+    <name>Desk Lamp Smart</name>
+    <category>Lighting</category>
+    <price currency="USD">149.99</price>
+    <description>Smart desk lamp with WiFi control and voice commands</description>
+    <inStock>true</inStock>
+    <rating>4.7</rating>
+  </product>
+</products>

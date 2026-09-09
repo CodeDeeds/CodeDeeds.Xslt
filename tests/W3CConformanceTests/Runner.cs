@@ -1,0 +1,479 @@
+using System.Globalization;
+using System.Xml.Linq;
+using CodeDeeds.Xslt;
+using CodeDeeds.Xslt.Model;
+using CodeDeeds.Xslt.Runtime;
+using CodeDeeds.Xslt.XPath;
+
+namespace CodeDeeds.Xslt.Conformance
+{
+    internal enum Outcome
+    {
+        Passed,
+        Failed,
+        Skipped,
+    }
+
+    internal readonly record struct TestResult(Outcome Outcome, string Detail);
+
+    /// <summary>
+    /// Runs one QT3 test case against this engine and decides whether it passed.
+    /// </summary>
+    /// <remarks>
+    /// The suite is written for XQuery and XPath together, and most of it is XQuery. What is applicable here
+    /// is decided by each test's <c>spec</c> dependency; everything else is skipped with a reason rather than
+    /// counted as a failure, so the pass rate means what it says.
+    /// </remarks>
+    internal sealed class Runner
+    {
+        private readonly Catalog m_catalog;
+        private readonly Dictionary<string, XdmTree> m_documents = new(StringComparer.Ordinal);
+        private readonly XsltVersion m_version;
+
+        /// <summary>
+        /// One name table for every document this driver loads.
+        /// </summary>
+        /// <remarks>
+        /// A test comparing two documents — <c>$works/… is $staff/…</c> — walks from one tree into another,
+        /// and a compiled name test holds a slot resolved against a particular table. Sharing the table
+        /// means one mapping serves every tree. A transformation solves this through the runtime, which the
+        /// driver has none of, evaluating expressions directly.
+        /// </remarks>
+        private readonly NameTable m_names = new();
+
+        public Runner(Catalog catalog, XsltVersion version)
+        {
+            m_catalog = catalog;
+            m_version = version;
+        }
+
+        /// <summary>Features a test may declare that this engine cannot offer.</summary>
+        private static readonly HashSet<string> s_unsupportedFeatures = new(StringComparer.Ordinal)
+        {
+            "schemaValidation",
+            "schemaImport",
+            "staticTyping",
+            "moduleImport",
+            "higherOrderFunctions",
+            "namespace-axis",
+            "collection-stability",
+            "directory-as-collation-uri",
+            "fn-transform-XSLT",
+            "fn-transform-XSLT30",
+            "fn-format-integer-CLDR",
+            "non_empty_sequence_collection",
+            "typedData",
+
+            // The simple fallback is what this engine has: it reads the UCA collation URI and honours the
+            // parameters CompareInfo can express, refusing the rest where fallback=no forbids them. The
+            // advanced one asks for parameters ICU is not exposed for here.
+            "advanced-uca-fallback",
+
+            // An expression is compiled against a stated version here and this driver states 2.0 or 3.0, so
+            // there is no mode in which format-number('foo', '#') is NaN rather than a type error. A test
+            // asking for that mode is asking about a language this run is not running.
+            "xpath-1.0-compatibility",
+
+            // The place argument of format-dateTime and its two siblings, which names a civil timezone by
+            // its Olson identifier: the value is shown at that place's offset, and [ZN] writes the name it
+            // goes under there. The offset .NET could answer from TimeZoneInfo; the abbreviation — EST, CET
+            // — it has no API for, and half of this is worse than none of it.
+            "olson-timezone",
+        };
+
+        public TestResult Run(XElement testCase, XElement testSet)
+        {
+            if (!IsApplicable(testCase, testSet, out string? why))
+            {
+                return new TestResult(Outcome.Skipped, why!);
+            }
+
+            string expression = (string?)testCase.Element(Catalog.Ns + "test") ?? string.Empty;
+
+            if (LooksLikeXQuery(expression))
+            {
+                return new TestResult(Outcome.Skipped, "test body is XQuery, not an XPath expression");
+            }
+
+            XElement? result = testCase.Element(Catalog.Ns + "result");
+            if (result is null)
+            {
+                return new TestResult(Outcome.Skipped, "no result assertion");
+            }
+
+            Environment? environment = ResolveEnvironment(testCase, testSet, out string? environmentProblem);
+            if (environmentProblem is not null)
+            {
+                return new TestResult(Outcome.Skipped, environmentProblem);
+            }
+
+            XPathStaticContext staticContext = new XPathStaticContext { Version = m_version };
+            if (environment is not null)
+            {
+                foreach ((string prefix, string uri) in environment.Namespaces)
+                {
+                    staticContext.DeclarePrefix(prefix, uri);
+                }
+
+                foreach (XElement declaration in environment.DecimalFormats)
+                {
+                    DeclareDecimalFormat(staticContext, declaration);
+                }
+            }
+
+            XdmTree tree;
+            XPathValue[] globals;
+
+            try
+            {
+                tree = LoadContext(environment);
+                globals = BindVariables(environment, staticContext);
+            }
+            catch (Exception exception)
+            {
+                return new TestResult(Outcome.Skipped, $"context document would not load: {Short(exception)}");
+            }
+
+            XPathValue value;
+            string? error = null;
+            string? errorCode = null;
+
+            try
+            {
+                Expr compiled = XPathParser.Parse(expression, staticContext);
+                int[] map = staticContext.Names.BuildFingerprintMap(tree);
+
+                // A test whose environment names no context document has no context item, which is not the
+                // same as having an empty one: XPath makes reading an absent context item an error, and a
+                // good many tests are there to check that it is raised. Handing over the root of a stand-in
+                // document would answer those with an empty node-set instead.
+                DynamicContext context = new DynamicContext(
+                    tree,
+                    environment?.ContextFile is null ? DynamicContext.NotANode : XdmTree.RootNode,
+                    map,
+                    staticContext.Names)
+                {
+                    Globals = globals,
+                };
+
+                value = compiled.Evaluate(ref context);
+            }
+            catch (XsltException exception)
+            {
+                value = default;
+                error = exception.Message;
+                errorCode = exception.Code;
+            }
+            catch (Exception exception)
+            {
+                // An exception that is not an XsltException is a defect in the engine rather than a refusal,
+                // so it is reported as a failure with its type visible.
+                return new TestResult(Outcome.Failed, $"unexpected {exception.GetType().Name}: {Short(exception)}");
+            }
+
+            return Assertions.Check(result, value, error, errorCode, staticContext, tree);
+        }
+
+        // ---- Applicability -------------------------------------------------------------------------------
+
+        private bool IsApplicable(XElement testCase, XElement testSet, out string? why)
+        {
+            why = null;
+
+            foreach (XElement dependency in testSet.Elements(Catalog.Ns + "dependency")
+                .Concat(testCase.Elements(Catalog.Ns + "dependency")))
+            {
+                string type = (string?)dependency.Attribute("type") ?? string.Empty;
+                string value = (string?)dependency.Attribute("value") ?? string.Empty;
+                bool satisfied = (string?)dependency.Attribute("satisfied") != "false";
+
+                switch (type)
+                {
+                    case "spec":
+                        if (satisfied && !SpecIncludesVersion(value))
+                        {
+                            why = $"not an XPath {m_version} test";
+                            return false;
+                        }
+
+                        break;
+
+                    case "feature":
+                        if (satisfied && s_unsupportedFeatures.Contains(value))
+                        {
+                            why = $"needs feature '{value}'";
+                            return false;
+                        }
+
+                        break;
+
+                    case "xml-version":
+                        if (satisfied && value.Contains("1.1", StringComparison.Ordinal))
+                        {
+                            why = "needs XML 1.1";
+                            return false;
+                        }
+
+                        break;
+
+                    case "language":
+                    case "default-language":
+                        // English is the one language this engine writes numbers in, so a test wanting it is
+                        // one this engine should be judged on rather than excused from.
+                        if (IsEnglish(value) != satisfied)
+                        {
+                            why = $"needs {type} '{value}'";
+                            return false;
+                        }
+
+                        break;
+
+                    case "format-integer-sequence":
+                        // A numbering sequence is named by a character from it. The decimal families are all
+                        // supported, because one digit pattern serves every one of them; the sequences that
+                        // are a list of symbols — circled digits, Greek letters, Kanji — are not.
+                        if (IsDecimalDigit(value) != satisfied)
+                        {
+                            why = $"needs the numbering sequence '{value}'";
+                            return false;
+                        }
+
+                        break;
+
+                    case "unicode-version":
+                    case "unicode-normalization-form":
+                    case "calendar":
+                        why = $"needs {type} '{value}'";
+                        return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>Whether a language tag names English, which is the only language for numbering here.</summary>
+        private static bool IsEnglish(string language)
+        {
+            return language.Equals("en", StringComparison.OrdinalIgnoreCase)
+                || language.StartsWith("en-", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Whether a numbering sequence named by one of its characters is a family of digits.</summary>
+        private static bool IsDecimalDigit(string sequence)
+        {
+            return sequence.Length > 0 && CharUnicodeInfo.GetDecimalDigitValue(sequence, 0) >= 0;
+        }
+
+        /// <summary>
+        /// Reads a spec dependency, which lists the specifications a test applies to.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A token such as <c>XP20+</c> means XPath 2.0 and later; <c>XP30+</c> excludes 2.0; <c>XQ10+</c> is
+        /// XQuery only. A test with no spec dependency applies everywhere.
+        /// </para>
+        /// <para>
+        /// Which tokens count depends on the version being run. Reading the 3.0 and 3.1 tests only when 3.1
+        /// is what is being asked for is what keeps the 2.0 figure a 2.0 figure: those tests are about
+        /// syntax a 2.0 expression is meant to refuse, so counting them there would measure the wrong thing
+        /// twice over.
+        /// </para>
+        /// </remarks>
+        private bool SpecIncludesVersion(string value)
+        {
+            // The '+' is not decoration. 'XP20' is a test about XPath 2.0 and no later version, which is
+            // where the suite puts the things a later version changed its mind about: tokenize with one
+            // argument is an arity error there and a function here, and string-join of integers is a type
+            // error there and a string here. Reading those in the 3.1 run would measure the wrong language.
+            bool thirty = m_version.CompareTo(XsltVersion.V30) >= 0;
+
+            foreach (string token in value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            {
+                bool applies = token switch
+                {
+                    "XP10+" or "XP20+" => true,
+                    "XP20" => !thirty,
+                    "XP30+" or "XP31+" or "XP31" => thirty,
+
+                    // Exactly 3.0, which this engine is not: what it implements from that family is 3.1.
+                    "XP30" => false,
+                    _ => false,
+                };
+
+                if (applies)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Recognises an XQuery body that no XPath parser could accept, for tests that declare no spec.
+        /// </summary>
+        private static bool LooksLikeXQuery(string expression)
+        {
+            ReadOnlySpan<char> text = expression.AsSpan().TrimStart();
+
+            return text.StartsWith("declare ") || text.StartsWith("import ") || text.StartsWith("module ")
+                || text.StartsWith("xquery ") || text.StartsWith("<");
+        }
+
+        // ---- Environment ---------------------------------------------------------------------------------
+
+        private Environment? ResolveEnvironment(XElement testCase, XElement testSet, out string? problem)
+        {
+            problem = null;
+
+            XElement? declared = testCase.Element(Catalog.Ns + "environment");
+            if (declared is null)
+            {
+                return null;
+            }
+
+            string? reference = (string?)declared.Attribute("ref");
+
+            if (reference is not null)
+            {
+                if (reference == "empty")
+                {
+                    return null;
+                }
+
+                if (testSet.Elements(Catalog.Ns + "environment")
+                        .FirstOrDefault(e => (string?)e.Attribute("name") == reference) is XElement local)
+                {
+                    Environment parsed = Environment.Parse(local);
+                    problem = parsed.Unsupported;
+                    return parsed;
+                }
+
+                if (m_catalog.Environments.TryGetValue(reference, out Environment? shared))
+                {
+                    problem = shared.Unsupported;
+                    return shared;
+                }
+
+                problem = $"unknown environment '{reference}'";
+                return null;
+            }
+
+            Environment inline = Environment.Parse(declared);
+            problem = inline.Unsupported;
+            return inline;
+        }
+
+        /// <summary>
+        /// Declares and loads the documents an environment binds to variables.
+        /// </summary>
+        /// <remarks>
+        /// A source with <c>role="$works"</c> is that document under that name, and a good many tests do
+        /// nothing but compare two of them — <c>$works/works[1]/employee[1] is $staff/…</c>. Left unbound,
+        /// they failed on the variable and said nothing about the engine.
+        /// </remarks>
+        /// <summary>
+        /// Declares one of the environment's <c>decimal-format</c> elements against the static context.
+        /// </summary>
+        /// <remarks>
+        /// XPath 3.0 made the decimal formats part of the static context, so these are declared the way an
+        /// XSLT stylesheet declares its own and the engine reads both through one path. The prefix in a
+        /// <c>name</c> is bound on the element that carries it rather than by the environment's
+        /// <c>namespace</c> declarations, which is why the name is resolved against the element.
+        /// </remarks>
+        private static void DeclareDecimalFormat(XPathStaticContext staticContext, XElement declaration)
+        {
+            DecimalFormat format = new DecimalFormat();
+
+            void Symbol(string attribute, Action<int> set)
+            {
+                if ((string?)declaration.Attribute(attribute) is { Length: > 0 } value)
+                {
+                    set(char.ConvertToUtf32(value, 0));
+                }
+            }
+
+            Symbol("decimal-separator", c => format.DecimalSeparator = c);
+            Symbol("grouping-separator", c => format.GroupingSeparator = c);
+            Symbol("exponent-separator", c => format.ExponentSeparator = c);
+            Symbol("minus-sign", c => format.MinusSign = c);
+            Symbol("percent", c => format.Percent = c);
+            Symbol("per-mille", c => format.PerMille = c);
+            Symbol("zero-digit", c => format.ZeroDigit = c);
+            Symbol("digit", c => format.Digit = c);
+            Symbol("pattern-separator", c => format.PatternSeparator = c);
+
+            if ((string?)declaration.Attribute("infinity") is string infinity)
+            {
+                format.Infinity = infinity;
+            }
+
+            if ((string?)declaration.Attribute("NaN") is string notANumber)
+            {
+                format.NaN = notANumber;
+            }
+
+            string written = (string?)declaration.Attribute("name") ?? string.Empty;
+
+            if (DecimalFormat.TryReadName(
+                written,
+                prefix => declaration.GetNamespaceOfPrefix(prefix)?.NamespaceName,
+                out ExpandedName name))
+            {
+                staticContext.DeclareDecimalFormat(name, format);
+            }
+        }
+
+        private XPathValue[] BindVariables(Environment? environment, XPathStaticContext staticContext)
+        {
+            if (environment is null || environment.Variables.Count == 0)
+            {
+                return Array.Empty<XPathValue>();
+            }
+
+            XPathValue[] globals = new XPathValue[environment.Variables.Count];
+
+            for (int slot = 0; slot < globals.Length; slot++)
+            {
+                (string name, string file) = environment.Variables[slot];
+
+                staticContext.DeclareGlobalVariable(name, slot);
+                globals[slot] = XPathValue.FromNodeSet(
+                    NodeSet.Singleton(LoadDocument(file), XdmTree.RootNode));
+            }
+
+            return globals;
+        }
+
+        private XdmTree LoadContext(Environment? environment)
+        {
+            if (environment?.ContextFile is null)
+            {
+                // No context document: an empty one, so that a path expression simply selects nothing.
+                return XdmTreeBuilder.FromXml(new StringReader("<empty/>"), m_names);
+            }
+
+            return LoadDocument(environment.ContextFile);
+        }
+
+        /// <summary>Loads a document named by the catalog, once per run.</summary>
+        private XdmTree LoadDocument(string file)
+        {
+            if (m_documents.TryGetValue(file, out XdmTree? cached))
+            {
+                return cached;
+            }
+
+            using FileStream stream = File.OpenRead(Path.Combine(m_catalog.Root, file));
+            XdmTree tree = XdmTreeBuilder.FromXml(stream, m_names);
+            m_documents.Add(file, tree);
+            return tree;
+        }
+
+        private static string Short(Exception exception)
+        {
+            string message = exception.Message.Replace('\n', ' ').Replace('\r', ' ');
+            return message.Length > 120 ? message[..120] : message;
+        }
+    }
+}

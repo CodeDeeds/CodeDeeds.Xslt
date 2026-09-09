@@ -1,0 +1,22 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+# Editor backups taken before a bulk edit. Never worth committing: the same
+# history is in git, and a stale copy alongside the real file only misleads.
+*.bak
+
+**/.vs
+**/bin
+**/obj
+
+# The W3C QT3 test suite, if it is cloned inside the working copy rather than
+# beside it. It is 77 MB of somebody else's repository; see the conformance
+# project's README for where it comes from.
+/tests/W3CConformanceTests/qt3tests/
+/tests/W3CConformanceTests/xslt30-test/
+
+/tests/Benchmarks/BenchmarkDotNet.Artifacts
+ 
+# Worktrees created for background tasks are checkouts of this repository, not part of it.
+**/.claude/worktrees/

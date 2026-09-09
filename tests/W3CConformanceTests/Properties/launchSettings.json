@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "CodeDeeds.Xslt.Conformance": {
+      "commandName": "Project",
+      //"commandLineArgs": "E:\\Temp\\QT3Tests\\qt3tests",
+      "commandLineArgs": "-- --xslt E:\\Temp\\XsltTests\\xslt30-test"
+    }
+  }
+}

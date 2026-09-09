@@ -1,0 +1,6 @@
+﻿<Solution>
+  <Project Path="tests/Benchmarks/Benchmarks.csproj" />
+  <Project Path="tests/W3CConformanceTests/W3CConformanceTests.csproj" />
+  <Project Path="tests/UnitTests/UnitTests.csproj" />
+  <Project Path="source/CodeDeeds.Xslt/CodeDeeds.Xslt.csproj" />
+</Solution>
