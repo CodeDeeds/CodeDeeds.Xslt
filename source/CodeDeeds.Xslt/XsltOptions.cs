@@ -226,8 +226,8 @@ namespace CodeDeeds.Xslt
         /// </summary>
         /// <remarks>
         /// Only meaningful alongside a <see cref="StylesheetResolver"/>. When it is <see langword="null"/> the
-        /// resolver is asked to resolve against no base, which for
-        /// <see cref="FileResolver"/> means its root directory.
+        /// resolver is asked to resolve against no base, which for <see cref="FileResolver"/> and
+        /// <see cref="UriResolver"/> means the root directory.
         /// </remarks>
         public string? BaseUri { get; init; }
 

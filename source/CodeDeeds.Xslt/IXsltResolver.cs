@@ -103,7 +103,8 @@ namespace CodeDeeds.Xslt
     /// supplies a resolver and thereby chooses what it is willing to expose.
     /// </para>
     /// <para>
-    /// <see cref="FileResolver"/> covers the usual case of stylesheets in a directory. An
+    /// <see cref="FileResolver"/> covers the usual case of stylesheets in a directory, and
+    /// <see cref="UriResolver"/> the case of ones reached by URL, from the web as well as from a directory. An
     /// implementation that serves them from embedded resources, a database, or a fixed dictionary is often a
     /// better fit, and gives up nothing.
     /// </para>

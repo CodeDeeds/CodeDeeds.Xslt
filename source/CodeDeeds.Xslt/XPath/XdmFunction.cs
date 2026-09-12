@@ -458,6 +458,43 @@ namespace CodeDeeds.Xslt.XPath
         }
     }
 
+    /// <summary>
+    /// A function item the engine makes rather than the stylesheet: a library function's result, over a
+    /// delegate.
+    /// </summary>
+    /// <remarks>
+    /// What <c>fn:random-number-generator()</c> hands back under <c>next</c> and <c>permute</c>. Anonymous,
+    /// as the specification has them, and with no declared types, so it is judged by its arity alone. The
+    /// delegate is given the arguments and nothing else: a function made this way closes over values the
+    /// engine already holds, and has no focus to read.
+    /// </remarks>
+    internal sealed class XdmNativeFunction : XdmFunction
+    {
+        private readonly int m_arity;
+        private readonly Func<XPathValue[], XPathValue> m_body;
+
+        /// <summary>Initializes a function item over a delegate.</summary>
+        /// <param name="arity">How many arguments it takes.</param>
+        /// <param name="body">What it does with them.</param>
+        public XdmNativeFunction(int arity, Func<XPathValue[], XPathValue> body)
+        {
+            m_arity = arity;
+            m_body = body;
+        }
+
+        /// <inheritdoc/>
+        public override XdmQName? FunctionName => null;
+
+        /// <inheritdoc/>
+        public override int Arity => m_arity;
+
+        /// <inheritdoc/>
+        internal override XPathValue Invoke(XPathValue[] arguments, ref DynamicContext context)
+        {
+            return m_body(arguments);
+        }
+    }
+
     /// <summary>An array seen as the function from position to member, so that <c>$a(2)</c> is written.</summary>
     internal sealed class XdmArrayFunction : XdmFunction
     {

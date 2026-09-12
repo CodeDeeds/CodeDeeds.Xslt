@@ -26,7 +26,7 @@ Everything not listed below is implemented and verified against `System.Xml.Xsl.
 | Area | Behaviour |
 | --- | --- |
 | DTD processing | The declaration is read for what it holds — entities expanded, default attributes supplied, ID and IDREF attributes typed, unparsed entities declared, element content whitespace excluded — and nothing outside the document is fetched unless `XsltOptions.EntityResolver` is set: with none, an external entity reference expands to nothing and an external subset goes unread, so a document cannot be used to read local files or reach the network. Entity expansion is capped at ten million characters. |
-| `xsl:include` / `xsl:import` | An `href` is only followed when `XsltOptions.StylesheetResolver` is set. With no resolver, a stylesheet cannot reach the file system at all. |
+| `xsl:include` / `xsl:import` | An `href` is only followed when `XsltOptions.StylesheetResolver` is set. With no resolver, a stylesheet cannot reach the file system at all. `FileResolver` serves a directory; `UriResolver` serves the web over HTTP and HTTPS as well as a directory, each gated on its own. |
 | `document()` | Requires `XsltOptions.DocumentResolver`, which is separate from the stylesheet resolver: loading a module is loading code, loading a document is loading data, and a caller may permit one without the other. |
 | `xsl:result-document` | Requires a result resolver — `XsltOptions.ResultStreamResolver` for bytes, or `XsltOptions.ResultResolver` for text — the only resolvers that write. It is the one instruction by which a stylesheet can create something outside the transformation, and a stylesheet is data as often as it is code, so with neither it cannot reach the file system however it is written. The caller decides what a destination means: a file, or an entry in a dictionary held in memory. Prefer the stream one, which is what lets a result document's own `encoding` reach its bytes. |
 | Tunnel parameters and `xsl:function` | A stylesheet function starts with an empty tunnel set, so templates it invokes do not see what the caller was tunnelling. The specification never settled this corner — the working group's own record notes it does not say whether `xsl:function/xsl:param/@tunnel` is even disallowed. The reasoning here: a function is meant to be a function of its arguments, which is what permits a call to be hoisted out of a loop, evaluated once or skipped altogether, and a value arriving through the side would make two identical calls return different answers. Declaring `tunnel="yes"` on a function's parameter is refused rather than ignored. |
@@ -1988,7 +1988,16 @@ method, where it is needed.
 Nothing F+O 3.0 defines is absent now. The suite's `function-1901` generates its questions from that
 specification and finds none missing (see *Which functions this engine says it has*); `fn:path`,
 `fn:element-with-id` and `fn:uri-collection`, which this line used to name, are all here.
-`fn:load-xquery-module` and `fn:random-number-generator` are not, both being 3.1's.
+`fn:load-xquery-module` is not, being 3.1's and needing an XQuery processor this engine is not.
+
+`fn:random-number-generator`, also 3.1's, is here. The map it returns is built over SplitMix64: a 64-bit state
+stepped by the golden-ratio increment and mixed on the way out, which is what `number` reads, what `next`
+steps, and what `permute` shuffles from with Fisher–Yates. The seed settles everything — the same seed gives
+the same numbers and the same permutation, which is what the specification requires and what lets a
+transformation be repeated — and a seed of any atomic type is hashed together with its type, so `'1'` and `1`
+are different seeds as they are different values. Called without one, the generator is seeded from the same
+reading of the clock that `current-dateTime()` reports, so that every seedless call in one transformation is
+one generator, as the specification asks, and two transformations get different ones.
 
 `fn:generate-id` is in the core library from 3.0, having been XSLT's own since 1.0. The two readings differ in
 what they take: 1.0 takes a node-set and identifies the first node of it, where 3.0 declares `node()?` and so
@@ -5845,8 +5854,8 @@ dotnet run --project CodeDeeds.Xslt.Conformance -- --31 <path-to-qt3tests>
 ```
 
 That reads 17,573 tests where the 2.0 run reads 14,175, and stands at **98.9%** against 99.0% for 2.0. The
-gap is mostly the 3.1 functions listed as absent above — `fn:load-xquery-module`,
-`fn:random-number-generator` — the unbounded `xs:integer` and the negative years neither `System.DateTime`
+gap is mostly the one 3.1 function listed as absent above — `fn:load-xquery-module` — the unbounded
+`xs:integer` and the negative years neither `System.DateTime`
 nor a 64-bit integer reaches, and the schema-aware forms, which this engine will never have. What is left
 that is neither is the maps and JSON: `map` is the lowest area at 89.0%, and `fn:parse-json` accounts for 14
 on its own — seven pieces of malformed JSON accepted where `FOJS0001` was wanted, and five that reach for

@@ -258,6 +258,13 @@ namespace CodeDeeds.Xslt.XPath
                 return new Compiler.GenerateIdExpr(node.Length == 0 ? null : node[0]);
             }
 
+            if (name == "random-number-generator")
+            {
+                // Its own class: what it hands back is a map holding two function items, and the generator
+                // behind them is nothing the rest of this table has a shape for.
+                return RandomNumberGeneratorExpr.Create(arguments, version);
+            }
+
             if (name == "unparsed-text-lines")
             {
                 Expr text = Xpath2FunctionExpr.TryCreate("unparsed-text", arguments, version)
@@ -337,6 +344,11 @@ namespace CodeDeeds.Xslt.XPath
             if (name == "trace")
             {
                 return arity == 1;
+            }
+
+            if (name == "random-number-generator")
+            {
+                return arity is 0 or 1;
             }
 
             if (name == "generate-id")

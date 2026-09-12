@@ -63,7 +63,7 @@ namespace CodeDeeds.Xslt
                 throw new XsltException($"'{href}' is not a usable stylesheet reference.", exception);
             }
 
-            if (!IsInsideRoot(candidate))
+            if (!IsInside(candidate, m_root))
             {
                 throw new XsltException(
                     $"The stylesheet reference '{href}' resolves outside '{m_root}' and was refused.");
@@ -81,18 +81,24 @@ namespace CodeDeeds.Xslt
             return new ResolvedResource(reader, candidate);
         }
 
-        private bool IsInsideRoot(string fullPath)
+        /// <summary>
+        /// Whether a canonical path lies inside a canonical root directory, or is the root itself.
+        /// </summary>
+        /// <remarks>
+        /// Shared with <see cref="UriResolver"/>, which contains its file half the same way.
+        /// </remarks>
+        internal static bool IsInside(string fullPath, string root)
         {
-            if (!fullPath.StartsWith(m_root, StringComparison.OrdinalIgnoreCase))
+            if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
 
             // A prefix match alone would let "C:\rootevil" pass for root "C:\root", so the next character
             // must actually be a separator — or the path must be the root itself.
-            return fullPath.Length == m_root.Length
-                || fullPath[m_root.Length] == Path.DirectorySeparatorChar
-                || fullPath[m_root.Length] == Path.AltDirectorySeparatorChar;
+            return fullPath.Length == root.Length
+                || fullPath[root.Length] == Path.DirectorySeparatorChar
+                || fullPath[root.Length] == Path.AltDirectorySeparatorChar;
         }
     }
 }
