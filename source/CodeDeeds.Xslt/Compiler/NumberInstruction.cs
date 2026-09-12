@@ -103,31 +103,18 @@ namespace CodeDeeds.Xslt.Compiler
             List<string> separators = new List<string>();
             string suffix = string.Empty;
 
-            int index = 0;
-
             // Anything before the first alphanumeric run is a prefix rather than a separator.
-            while (index < format.Length && !char.IsLetterOrDigit(format[index]))
-            {
-                index++;
-            }
-
+            int index = EndOfRun(format, 0, alphanumeric: false);
             string prefix = format[..index];
 
             while (index < format.Length)
             {
                 int tokenStart = index;
-                while (index < format.Length && char.IsLetterOrDigit(format[index]))
-                {
-                    index++;
-                }
-
+                index = EndOfRun(format, index, alphanumeric: true);
                 tokens.Add(format[tokenStart..index]);
 
                 int separatorStart = index;
-                while (index < format.Length && !char.IsLetterOrDigit(format[index]))
-                {
-                    index++;
-                }
+                index = EndOfRun(format, index, alphanumeric: false);
 
                 if (index < format.Length)
                 {
@@ -149,6 +136,46 @@ namespace CodeDeeds.Xslt.Compiler
             }
 
             return new NumberFormat(prefix, tokens.ToArray(), separators.ToArray(), suffix);
+        }
+
+        /// <summary>
+        /// Returns where a run of alphanumeric characters, or of everything else, ends.
+        /// </summary>
+        /// <remarks>
+        /// Alphanumeric as XSLT defines it for a format string: a letter or a number of any Unicode kind,
+        /// which is wider than <see cref="char.IsLetterOrDigit(char)"/>. That test leaves out the numbers
+        /// that are not decimal digits — a circled digit, a Roman numeral letter, a vulgar fraction — and so
+        /// read <c>①</c> as punctuation bracketing the number rather than as a token naming a sequence, which
+        /// wrote <c>①3①</c> where the specification's fallback for an unknown token gives <c>3</c>. Read by
+        /// code point, so that a digit outside the basic plane is one character and not two halves.
+        /// </remarks>
+        private static int EndOfRun(string format, int index, bool alphanumeric)
+        {
+            while (index < format.Length)
+            {
+                int code = char.IsSurrogatePair(format, index) ? char.ConvertToUtf32(format, index) : format[index];
+
+                if (IsAlphanumeric(code) != alphanumeric)
+                {
+                    break;
+                }
+
+                index += code > char.MaxValue ? 2 : 1;
+            }
+
+            return index;
+        }
+
+        private static bool IsAlphanumeric(int code)
+        {
+            return CharUnicodeInfo.GetUnicodeCategory(code) is UnicodeCategory.UppercaseLetter
+                or UnicodeCategory.LowercaseLetter
+                or UnicodeCategory.TitlecaseLetter
+                or UnicodeCategory.ModifierLetter
+                or UnicodeCategory.OtherLetter
+                or UnicodeCategory.DecimalDigitNumber
+                or UnicodeCategory.LetterNumber
+                or UnicodeCategory.OtherNumber;
         }
     }
 

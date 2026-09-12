@@ -258,6 +258,24 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
+        public void AFormatTokenIsARunOfLettersOrNumbersOfAnyKind()
+        {
+            // A format token is a maximal run of alphanumeric characters, which XSLT defines by Unicode
+            // category: every kind of number, not only the decimal digits. So a circled digit, a Roman numeral
+            // letter or a Greek letter is a token naming a sequence, and a sequence this engine has not got
+            // falls back to 1 as the specification says. They used to be read as punctuation around the
+            // number, which wrote the token out on both sides of it.
+            Assert.AreEqual("3", NumberFormat(3, "①"), "circled digit one");
+            Assert.AreEqual("3", NumberFormat(3, "Ⅰ"), "Roman numeral one, the letter");
+            Assert.AreEqual("3", NumberFormat(3, "α"), "Greek alpha");
+            Assert.AreEqual("(3)", NumberFormat(3, "(①)"), "the punctuation around a token is kept");
+
+            // A digit family other than the Latin one is a token that is rendered, on either plane.
+            Assert.AreEqual("٣", NumberFormat(3, "١"), "Arabic-Indic digit one");
+            Assert.AreEqual("\U0001D7D1", NumberFormat(3, "\U0001D7CF"), "mathematical bold digit one");
+        }
+
+        [TestMethod]
         public void APaddedTokenPadsToItsOwnWidth()
         {
             Assert.AreEqual("007", NumberFormat(7, "001"));
