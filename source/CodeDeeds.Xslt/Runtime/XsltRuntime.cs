@@ -966,6 +966,23 @@ namespace CodeDeeds.Xslt.Runtime
             return result;
         }
 
+        /// <summary>Whether the caller has let the stylesheet read the process's environment.</summary>
+        internal bool EnvironmentVariablesEnabled => m_options.EnvironmentVariablesEnabled;
+
+        private IReadOnlyDictionary<string, string>? m_environment;
+
+        /// <summary>
+        /// The process's environment as it stood when this transformation first asked, which is the
+        /// environment for the whole of it.
+        /// </summary>
+        /// <remarks>
+        /// Read once and kept, because the specification asks that the two environment functions answer the
+        /// same way throughout an execution scope, and nothing else stops a variable set by another thread
+        /// from being seen by the second call and not the first.
+        /// </remarks>
+        internal IReadOnlyDictionary<string, string> EnvironmentVariables =>
+            m_environment ??= EnvironmentVariableExpr.Snapshot();
+
         /// <summary>
         /// The error for a collection that is not there, whichever function asked and for whatever reason.
         /// </summary>

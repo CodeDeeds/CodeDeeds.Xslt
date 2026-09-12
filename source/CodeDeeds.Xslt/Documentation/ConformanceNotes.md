@@ -1861,10 +1861,11 @@ to write, so the path begins `Q{http://www.w3.org/2005/xpath-functions}root()` i
 is written `namespace::p` by its prefix, and the default namespace's node, which has no name, as
 `namespace::*[fn:local-name()=""]`, both as F&O §14.5.1 has them.
 
-`fn:environment-variable` and `fn:available-environment-variables` answer **nothing**, always. The
-specification lets a processor decide whether environment variables are visible, and this one says they are
-not: the same posture as the opt-in resolvers, which is that a stylesheet cannot reach outside its input
-without being handed a way.
+`fn:environment-variable` and `fn:available-environment-variables` answer **nothing**, always. *Since
+superseded: `XsltOptions.EnvironmentVariablesEnabled`, off by default, lets a caller open the environment to
+a stylesheet; what follows describes the engine before it.* The specification lets a processor decide
+whether environment variables are visible, and this one says they are not: the same posture as the opt-in
+resolvers, which is that a stylesheet cannot reach outside its input without being handed a way.
 
 **The prefixes `map`, `array` and `math` are declared by the stylesheet like any others**, as are `xs` and
 `fn`. XPath's static context predeclares all five and XSLT's does not, replacing that component with what is

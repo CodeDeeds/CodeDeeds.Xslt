@@ -97,7 +97,7 @@ unrelated-looking reasons, while a reason shared across twenty files is nobody's
 ## The XPath run
 
 The 2.0 run stands at **14,039 of 14,175, 99.0%**, and the 3.1 run — `--31`, which takes in the tests marked
-`XP30+` and `XP31+` — at **17,374 of 17,573, 98.9%**. The second reads 3,398 more tests than the first and is
+`XP30+` and `XP31+` — at **17,380 of 17,577, 98.9%**. The second reads 3,402 more tests than the first and is
 a tenth of a point behind it, which is the shape to expect: what it takes in is the newer half, and the
 newer half is where the work is.
 
@@ -107,7 +107,7 @@ newer half is where the work is.
 | `misc` | 31 / 31, 100% | 33 / 33, 100% |
 | `app` | 330 / 330, 100% | 770 / 775, 99.4% |
 | `prod` | 5,472 / 5,521, 99.1% | 5,889 / 5,952, 98.9% |
-| `fn` | 4,988 / 5,021, 99.3% | 6,936 / 7,003, 99.0% |
+| `fn` | 4,988 / 5,021, 99.3% | 6,942 / 7,007, 99.1% |
 | `op` | 3,147 / 3,195, 98.5% | 3,360 / 3,413, 98.4% |
 | `xs` | 71 / 77, 92.2% | 115 / 121, 95.0% |
 | `map` | *3.1* | 110 / 112, 98.2% |
@@ -867,3 +867,12 @@ tests had never been seen and found **three gaps in `xsl:merge`**, none of them 
 `merge-097`, which asks for a collection by a directory-and-query URI the suite's own note calls
 non-interoperable; the driver declares no such collection. On the 2.0 run four of the six collection tests
 pass, the other two being 3.0 stylesheets marked as applying to a 2.0 processor.
+
+Then the environment. `fn:environment-variable()` and `fn:available-environment-variables()` read the
+process's environment where the caller has said they may, through `XsltOptions.EnvironmentVariablesEnabled`,
+off by default; neither driver turns it on, and neither suite needs it to, every test being written to pass
+whether the environment is visible or not. What the change did move was three QT3 tests: the argument is now
+evaluated before the question of visibility arises, so `environment-variable(1)`, `environment-variable(())`
+and `environment-variable(true())` are `XPTY0004` as the suite asks, where the old answer of nothing was
+given before the argument was looked at. The one test left in that set builds a name a million characters
+long with `1 to 1048576`, which is more items than this engine lets a range produce.

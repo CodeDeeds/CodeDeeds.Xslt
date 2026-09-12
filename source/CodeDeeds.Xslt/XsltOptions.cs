@@ -332,6 +332,30 @@ namespace CodeDeeds.Xslt
         public bool DynamicEvaluation { get; init; } = true;
 
         /// <summary>
+        /// Gets whether <c>fn:environment-variable()</c> and <c>fn:available-environment-variables()</c>
+        /// may read the process's environment. Defaults to <see langword="false"/>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Off by default, unlike <see cref="DynamicEvaluation"/>, because it opens something the
+        /// stylesheet could not otherwise reach: an environment carries tokens and connection strings as
+        /// often as it carries locale settings, and a stylesheet is data as often as it is code. The
+        /// specification lets a processor decide whether environment variables are visible at all, and
+        /// this one leaves the decision to the caller. Off, both functions answer nothing, which is the
+        /// answer the specification gives a processor that provides no access; their arguments are still
+        /// checked.
+        /// </para>
+        /// <para>
+        /// On, a stylesheet reads the environment as it stood when the transformation first asked, so that
+        /// it is the same environment for the whole transformation, and a <c>use-when</c> reads it when the
+        /// stylesheet is compiled. Names are compared as the platform compares them: without regard to
+        /// case on Windows, exactly elsewhere. A transformation started by <c>fn:transform()</c> inherits
+        /// the setting, as it inherits the resolvers.
+        /// </para>
+        /// </remarks>
+        public bool EnvironmentVariablesEnabled { get; init; }
+
+        /// <summary>
         /// Gets the name of the template the transformation starts at, or <see langword="null"/> to start by
         /// matching the source document.
         /// </summary>
@@ -392,6 +416,7 @@ namespace CodeDeeds.Xslt
                 CollectionResolver = CollectionResolver,
                 PackageResolver = PackageResolver,
                 EntityResolver = EntityResolver,
+                EnvironmentVariablesEnabled = EnvironmentVariablesEnabled,
                 ResultResolver = ResultResolver,
                 ResultStreamResolver = ResultStreamResolver,
                 BaseUri = BaseUri,

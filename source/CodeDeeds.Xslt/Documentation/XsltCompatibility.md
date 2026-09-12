@@ -19,7 +19,7 @@ Conformance as last measured, on 12 September 2026, against the W3C suites (see 
 | --- | --- |
 | XSLT 3.0 test suite, 3.0 processor | 7,541 of 7,579, 99.5% |
 | XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,292 of 5,326, 99.4% |
-| QT3 (XPath), 3.1 | 98.9% of 17,573 |
+| QT3 (XPath), 3.1 | 98.9% of 17,577 |
 | QT3 (XPath), 2.0 | 99.0% of 14,175 |
 
 The 2,900 streaming tests and 672 schema-aware tests are skipped by design.
@@ -32,7 +32,6 @@ The 2,900 streaming tests and 672 schema-aware tests are skipped by design.
 | Streaming | `streamable="yes"` and `xsl:source-document` are accepted and processed over a tree held in memory; accumulators work the same way. `system-property('xsl:supports-streaming')` is `no`. |
 | Extension elements and functions | There is no way to register one. A call to an unknown function is `XPST0017` when the stylesheet is compiled; an extension instruction takes its `xsl:fallback` when reached, and is `XTDE1450` without one. `element-available()` and `function-available()` answer for them. |
 | `fn:load-xquery-module` | `XPST0017`. It needs an XQuery processor. |
-| Environment variables | `fn:environment-variable()` and `fn:available-environment-variables()` answer nothing, so a stylesheet cannot read the process's environment. |
 | Collations of the caller's own | A collation URI the engine does not provide is `FOCH0002`. Provided: the Unicode codepoint collation, `html-ascii-case-insensitive`, and the UCA collation with its `lang`, `strength` and related parameters, but not `alternate`. |
 | XInclude | Not applied to any document read. |
 
@@ -64,7 +63,7 @@ The 2,900 streaming tests and 672 schema-aware tests are skipped by design.
 
 | Area | Behaviour |
 | --- | --- |
-| Nothing is reachable by default | `xsl:include` and `xsl:import` need `XsltOptions.StylesheetResolver`; `document()`, `doc()`, `unparsed-text()` and `json-doc()` need `DocumentResolver`; `collection()` and `uri-collection()` need `CollectionResolver`, which names what a collection holds, and `DocumentResolver`, which reads it; `xsl:use-package` needs `PackageResolver`; external entities need `EntityResolver`; `xsl:result-document` needs `ResultStreamResolver` or `ResultResolver`. Without one, the reference is an error and a stylesheet cannot reach the file system or the network. `FileResolver` serves a directory; `UriResolver` serves HTTP and HTTPS as well as a directory. Both serve a directory as a collection, its files in name order, narrowed by `?select=*.xml;recurse=yes`. |
+| Nothing is reachable by default | `xsl:include` and `xsl:import` need `XsltOptions.StylesheetResolver`; `document()`, `doc()`, `unparsed-text()` and `json-doc()` need `DocumentResolver`; `collection()` and `uri-collection()` need `CollectionResolver`, which names what a collection holds, and `DocumentResolver`, which reads it; `xsl:use-package` needs `PackageResolver`; external entities need `EntityResolver`; `xsl:result-document` needs `ResultStreamResolver` or `ResultResolver`; `environment-variable()` needs `EnvironmentVariablesEnabled`. Without one, the reference is an error and a stylesheet cannot reach the file system, the network or the process's environment. `FileResolver` serves a directory; `UriResolver` serves HTTP and HTTPS as well as a directory. Both serve a directory as a collection, its files in name order, narrowed by `?select=*.xml;recurse=yes`. |
 | Tunnel parameters and `xsl:function` | A function starts with an empty tunnel set, so templates it invokes do not see what its caller was tunnelling. `tunnel="yes"` on a function parameter is refused. The specification never settled this corner. |
 | Character maps | A map's own `xsl:output-character` children override the maps it draws in with `use-character-maps`. The map also applies to text written with `disable-output-escaping` and inside CDATA sections. |
 | Result tree fragments (1.0) | Represented as trees, so they can be navigated. This accepts more than XSLT 1.0 allows and rejects nothing it permits. |
@@ -84,3 +83,4 @@ The 2,900 streaming tests and 672 schema-aware tests are skipped by design.
 | `Xslt.OutputMethod`, `OutputEncoding`, `OutputMediaType` | What the stylesheet's `xsl:output` settled, for a caller setting a `Content-Type` header. |
 | `XsltOptions.BaseUri`, `InputUri`, `BaseOutputUri` | Where the stylesheet, the input and the principal result are, which relative references resolve against. |
 | `XsltOptions.DynamicEvaluation` | `xsl:evaluate` is on by default and can be switched off, which makes `element-available('xsl:evaluate')` false. |
+| `XsltOptions.EnvironmentVariablesEnabled` | Off by default, so `environment-variable()` and `available-environment-variables()` answer nothing. On, they read the process's environment as it stood when the transformation first asked. |

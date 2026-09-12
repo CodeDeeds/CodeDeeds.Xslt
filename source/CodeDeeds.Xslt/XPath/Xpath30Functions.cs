@@ -124,12 +124,6 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary><c>fn:unparsed-text-lines</c>.</summary>
         UnparsedTextLines,
 
-        /// <summary><c>fn:environment-variable</c>.</summary>
-        EnvironmentVariable,
-
-        /// <summary><c>fn:available-environment-variables</c>.</summary>
-        AvailableEnvironmentVariables,
-
         /// <summary><c>fn:default-language</c>.</summary>
         DefaultLanguage,
 
@@ -279,6 +273,13 @@ namespace CodeDeeds.Xslt.XPath
                 return CollectionFunctionExpr.Create(arguments, version, urisOnly: true);
             }
 
+            if (name is "environment-variable" or "available-environment-variables")
+            {
+                // Their own class, because what they read is outside the transformation and whether they
+                // may is the caller's decision, carried in the options rather than in this table.
+                return EnvironmentVariableExpr.Create(name, arguments, version);
+            }
+
             return Find(name, arguments.Length) is (Xpath30Function function, int least, int most, string signature)
                 ? Build(function, name, arguments, least, most, signature, version)
                 : null;
@@ -314,9 +315,6 @@ namespace CodeDeeds.Xslt.XPath
                 "outermost" => (Xpath30Function.Outermost, 1, 1, "node()*"),
                 "round" when arity == 2 =>
                     (Xpath30Function.RoundToPrecision, 2, 2, "numeric?, xs:integer"),
-                "environment-variable" => (Xpath30Function.EnvironmentVariable, 1, 1, "xs:string"),
-                "available-environment-variables" =>
-                    (Xpath30Function.AvailableEnvironmentVariables, 0, 0, ""),
                 "default-language" => (Xpath30Function.DefaultLanguage, 0, 0, ""),
                 _ => null,
             };
@@ -352,6 +350,16 @@ namespace CodeDeeds.Xslt.XPath
             if (name is "random-number-generator" or "uri-collection")
             {
                 return arity is 0 or 1;
+            }
+
+            if (name == "environment-variable")
+            {
+                return arity == 1;
+            }
+
+            if (name == "available-environment-variables")
+            {
+                return arity == 0;
             }
 
             if (name == "generate-id")
@@ -560,13 +568,6 @@ namespace CodeDeeds.Xslt.XPath
 
                     return Lines(text.ToStringValue());
                 }
-
-                case Xpath30Function.EnvironmentVariable:
-                case Xpath30Function.AvailableEnvironmentVariables:
-                    // The specification lets a processor decide whether environment variables are visible at
-                    // all, and this one says no. It is the same posture as the DTD prohibition and the opt-in
-                    // resolvers: without being handed a way in, a stylesheet cannot reach outside its input.
-                    return XPathValue.FromSequence(XdmSequence.Empty);
 
                 case Xpath30Function.DefaultLanguage:
                 {

@@ -911,6 +911,17 @@ namespace CodeDeeds.Xslt.Compiler
                 }
             }
 
+            if (name is "environment-variable" or "available-environment-variables"
+                && (Version.CompareTo(XsltVersion.V30) >= 0 || SyntaxVersion.CompareTo(XsltVersion.V30) >= 0)
+                && Xpath30FunctionExpr.TryCreate(name, arguments, Version) is EnvironmentVariableExpr environment)
+            {
+                // Whether the environment is visible is the caller's decision, made in the options. A
+                // running transformation reads it from its own options; a static expression, a use-when,
+                // runs before any transformation does, so the decision is handed over here.
+                environment.EnabledStatically = m_options.EnvironmentVariablesEnabled;
+                return environment;
+            }
+
             if (name == "copy-of" && arguments.Length <= 1 && Implements30)
             {
                 return new CopyOfFunctionExpr(arguments.Length == 0 ? null : arguments[0]);

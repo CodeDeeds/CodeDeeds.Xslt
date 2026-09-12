@@ -597,6 +597,7 @@ namespace CodeDeeds.Xslt.Compiler
                 EntityResolver = m_host.EntityResolver,
                 Version = m_host.Version,
                 DynamicEvaluation = m_host.DynamicEvaluation,
+                EnvironmentVariablesEnabled = m_host.EnvironmentVariablesEnabled,
                 MessageWriter = messages ? m_host.MessageWriter : TextWriter.Null,
                 BaseUri = BaseUriOption() ?? uri,
                 Parameters = Parameters(),
