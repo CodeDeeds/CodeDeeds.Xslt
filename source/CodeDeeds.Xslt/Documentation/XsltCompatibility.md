@@ -6,8 +6,10 @@ implemented. The reasoning behind each decision, and the history of the conforma
 
 ## What it is
 
+| Area| Notes |
+| --- | --- |
 | XSLT | XSLT Version 3.0, claimed by default. `XsltOptions.Version = XsltVersion.V20` gives a 2.0 processor: `system-property('xsl:version')` answers `2.0`, the vocabulary is 2.0's, and a `version="3.0"` stylesheet is read forwards-compatibly. A `version="1.0"` stylesheet runs with 1.0's semantics on either. |
-| XPath | 3.1, including maps, arrays, function items, higher-order functions and the JSON functions. |
+| XPath | XPath version 3.1, including maps, arrays, function items, higher-order functions and the JSON functions. |
 | Conformance level | Basic: not schema-aware, not streaming. |
 | Backends | Interpreted (default) and compiled to IL (`XsltOptions.Backend`), which produce the same results. |
 
