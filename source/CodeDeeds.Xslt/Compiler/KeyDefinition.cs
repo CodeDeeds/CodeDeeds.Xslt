@@ -86,6 +86,12 @@ namespace CodeDeeds.Xslt.Compiler
         public bool Composite { get; set; }
 
         /// <summary>
+        /// The collation string values are filed and found under, as a URI, or <see langword="null"/> for
+        /// the code point one. Every declaration of a name has to agree (<c>XTSE1220</c>).
+        /// </summary>
+        public string? CollationUri { get; set; }
+
+        /// <summary>
         /// The identity a key value is filed and found under: what two values that are equal under
         /// <c>eq</c> share, and two that are not do not.
         /// </summary>
@@ -99,12 +105,14 @@ namespace CodeDeeds.Xslt.Compiler
         /// </remarks>
         /// <param name="item">One key value.</param>
         /// <param name="asString">Whether the value is a string first, as under backwards-compatible behaviour.</param>
+        /// <param name="collation">The collation strings are filed under, or null for the code point one.</param>
         /// <returns>The identity, or <see langword="null"/> for a value nothing can be found under.</returns>
-        public static string? Identity(XPathValue item, bool asString = false)
+        public static string? Identity(XPathValue item, bool asString = false, Collation? collation = null)
         {
             if (asString)
             {
-                return "s:" + XdmSequence.StringValueOf(item);
+                string text = XdmSequence.StringValueOf(item);
+                return "s:" + (collation is null ? text : collation.Key(text));
             }
 
             if (item.Kind == XPathValueKind.Number && double.IsNaN(item.ToNumber()))
@@ -112,7 +120,7 @@ namespace CodeDeeds.Xslt.Compiler
                 return null;
             }
 
-            return ForEachGroupInstruction.KeyIdentity(item);
+            return ForEachGroupInstruction.KeyIdentity(item, collation);
         }
 
         /// <summary>The identity of a composite key's whole sequence of values.</summary>
@@ -140,13 +148,19 @@ namespace CodeDeeds.Xslt.Compiler
         /// Whether every value is a string first, which is what XSLT 1.0 keys were and what backwards-
         /// compatible behaviour keeps: <c>key('k', 1.0)</c> then finds a node filed under '1'.
         /// </param>
-        public static void Identities(XPathValue value, bool composite, List<string> output, bool asStrings = false)
+        /// <param name="collation">The collation strings are filed under, or null for the code point one.</param>
+        public static void Identities(
+            XPathValue value,
+            bool composite,
+            List<string> output,
+            bool asStrings = false,
+            Collation? collation = null)
         {
             if (!composite)
             {
                 foreach (XPathValue item in XdmSequence.Items(value))
                 {
-                    if (Identity(item, asStrings) is string identity)
+                    if (Identity(item, asStrings, collation) is string identity)
                     {
                         output.Add(identity);
                     }
@@ -159,7 +173,7 @@ namespace CodeDeeds.Xslt.Compiler
 
             foreach (XPathValue item in XdmSequence.Items(value))
             {
-                if (Identity(item, asStrings) is not string identity)
+                if (Identity(item, asStrings, collation) is not string identity)
                 {
                     return;
                 }
@@ -311,7 +325,8 @@ namespace CodeDeeds.Xslt.Compiler
             }
 
             List<string> identities = new();
-            KeyDefinition.Identities(value, runtime.KeyIsComposite(keyIndex), identities, BackwardsCompatible);
+            KeyDefinition.Identities(
+                value, runtime.KeyIsComposite(keyIndex), identities, BackwardsCompatible, runtime.KeyCollation(keyIndex));
 
             foreach (string identity in identities)
             {

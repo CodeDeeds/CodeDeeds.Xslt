@@ -355,6 +355,9 @@ namespace CodeDeeds.Xslt.Conformance
                     CollectionResolver = environment is { Collections.Count: > 0 }
                         ? new CatalogCollections(environment.Collections, directory)
                         : null,
+                    // The suite's own case-blind collation, which a test names by URI and expects the
+                    // driver to supply; everything else an environment declares the engine provides.
+                    CollationResolver = SuiteCollations.Instance,
                     // A source given inline has no URI of its own, so what its declaration names resolves
                     // against the test set's directory, as the catalog means it to.
                     EntityResolver = new EntityResolverWithin(resolver, directory),

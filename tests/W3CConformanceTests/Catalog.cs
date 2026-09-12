@@ -81,6 +81,15 @@ namespace CodeDeeds.Xslt.Conformance
         /// </remarks>
         public List<XElement> DecimalFormats { get; } = new();
 
+        /// <summary>
+        /// The collations the environment declares, by URI, and whether each is the default collation.
+        /// </summary>
+        /// <remarks>
+        /// A declaration is a promise that the URI names a collation: the engine's own for the UCA and
+        /// HTML ASCII ones, and the driver's <see cref="SuiteCollations"/> for the suite's case-blind one.
+        /// </remarks>
+        public List<(string Uri, bool Default)> Collations { get; } = new();
+
         /// <summary>Why this environment is beyond the driver, or null if it is usable.</summary>
         public string? Unsupported { get; private init; }
 
@@ -91,10 +100,6 @@ namespace CodeDeeds.Xslt.Conformance
             if (element.Element(Ns_(element, "schema")) is not null)
             {
                 unsupported = "environment declares a schema";
-            }
-            else if (element.Element(Ns_(element, "collation")) is not null)
-            {
-                unsupported = "environment declares a collation";
             }
             else if (element.Element(Ns_(element, "param")) is not null)
             {
@@ -144,6 +149,15 @@ namespace CodeDeeds.Xslt.Conformance
             }
 
             environment.DecimalFormats.AddRange(element.Elements(Ns_(element, "decimal-format")));
+
+            foreach (XElement collation in element.Elements(Ns_(element, "collation")))
+            {
+                if ((string?)collation.Attribute("uri") is string uri)
+                {
+                    environment.Collations.Add((uri, (string?)collation.Attribute("default") == "true"));
+                }
+            }
+
             return environment;
         }
 

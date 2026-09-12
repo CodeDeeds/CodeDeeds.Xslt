@@ -295,7 +295,7 @@ namespace CodeDeeds.Xslt.XPath
         private Collation Collation(ref DynamicContext context)
         {
             return m_arguments.Length > 2
-                ? XPath.Collation.Resolve(m_arguments[2].Evaluate(ref context).ToStringValue())
+                ? XPath.Collation.Resolve(m_arguments[2].Evaluate(ref context).ToStringValue(), ref context)
                 : DefaultCollation ?? XPath.Collation.Codepoint;
         }
 

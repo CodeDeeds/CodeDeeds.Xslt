@@ -258,7 +258,7 @@ namespace CodeDeeds.Xslt.XPath
                     List<XPathValue> items = Items(0, ref context);
 
                     Collation collation = m_arguments.Length >= 2
-                        ? Collation.Resolve(m_arguments[1].Evaluate(ref context).ToStringValue())
+                        ? Collation.Resolve(m_arguments[1].Evaluate(ref context).ToStringValue(), ref context)
                         : Collation.Codepoint;
 
                     XdmFunction? key = m_arguments.Length >= 3 ? Function(2, ref context) : null;

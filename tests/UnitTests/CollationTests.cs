@@ -254,12 +254,11 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
-        public void SortingTakesAnyCollationWhereGroupingStillRefusesOneItCannotUse()
+        public void SortingGroupingAndKeysTakeAnyCollationTheProcessorHas()
         {
             // xsl:sort compares by whatever collation the processor has, the UCA one included: at primary
             // strength case does not tell a from A, so the two pairs keep the order they came in. It had
-            // been refusing everything but the code point collation. xsl:for-each-group and xsl:key still
-            // run through tables that carry none, and say so rather than order by code point regardless.
+            // been refusing everything but the code point collation.
             string sorting =
                 $"<xsl:stylesheet version=\"2.0\" {Xsl}>"
                 + "<xsl:template match=\"/\"><out><xsl:for-each select=\"/r/i\">"
@@ -271,16 +270,41 @@ namespace CodeDeeds.Xslt.UnitTests
                 new Xslt(sorting, new XsltOptions { OmitXmlDeclaration = true })
                     .TransformXml("<r><i>b</i><i>A</i><i>a</i><i>B</i></r>"));
 
-            string grouping =
+            // xsl:for-each-group groups under the collation's key, so under one that ignores case the four
+            // items are two groups, each keyed by its first item; and as an attribute value template too.
+            foreach (string written in new[] { Primary, "{'" + Primary + "'}" })
+            {
+                string grouping =
+                    $"<xsl:stylesheet version=\"2.0\" {Xsl}>"
+                    + "<xsl:template match=\"/\"><out><xsl:for-each-group select=\"/r/i\" group-by=\".\" "
+                    + $"collation=\"{written}\"><g k=\"{{current-grouping-key()}}\"><xsl:value-of select=\"current-group()\" separator=\",\"/></g>"
+                    + "</xsl:for-each-group></out></xsl:template></xsl:stylesheet>";
+
+                Assert.AreEqual(
+                    "<out><g k=\"b\">b,B</g><g k=\"A\">A,a</g></out>",
+                    new Xslt(grouping, new XsltOptions { OmitXmlDeclaration = true })
+                        .TransformXml("<r><i>b</i><i>A</i><i>a</i><i>B</i></r>"),
+                    written);
+            }
+
+            // xsl:key files strings under the collation's key, so a lookup in either case finds both.
+            string keyed =
+                $"<xsl:stylesheet version=\"2.0\" {Xsl}>"
+                + $"<xsl:key name=\"k\" match=\"i\" use=\".\" collation=\"{Primary}\"/>"
+                + "<xsl:template match=\"/\"><out><xsl:value-of select=\"key('k', 'a'), '|', key('k', 'B')\" separator=\",\"/></out></xsl:template></xsl:stylesheet>";
+
+            Assert.AreEqual(
+                "<out>A,a,|,b,B</out>",
+                new Xslt(keyed, new XsltOptions { OmitXmlDeclaration = true })
+                    .TransformXml("<r><i>b</i><i>A</i><i>a</i><i>B</i></r>"));
+
+            // A collation nobody has is still refused, with the code the instruction gives it.
+            string unknown =
                 $"<xsl:stylesheet version=\"2.0\" {Xsl}>"
                 + "<xsl:template match=\"/\"><out><xsl:for-each-group select=\"/r/i\" group-by=\".\" "
-                + $"collation=\"{Primary}\"/></out></xsl:template></xsl:stylesheet>";
+                + "collation=\"http://example.com/nobody\"/></out></xsl:template></xsl:stylesheet>";
 
-            XsltException error = Assert.ThrowsExactly<XsltException>(() => new Xslt(grouping));
-            Assert.AreEqual("XTDE1110", error.Code);
-
-            // The code point collation is what they do, so naming it is accepted.
-            _ = new Xslt(grouping.Replace(Primary, Codepoint));
+            Assert.AreEqual("XTDE1110", Assert.ThrowsExactly<XsltException>(() => new Xslt(unknown)).Code);
         }
 
         // ---- What a default-collation reaches ---------------------------------------------------------------
@@ -304,6 +328,30 @@ namespace CodeDeeds.Xslt.UnitTests
                 "<xsl:template match=\"/\"><out><xsl:value-of select=\"" + expression + "\"/></out>"
                 + "</xsl:template>",
                 collation);
+        }
+
+        [TestMethod]
+        public void TheDefaultCollationReachesGroupingAndKeys()
+        {
+            // Grouping and keys use the default collation in scope where they name none (§14.4, §20.2.1):
+            // case-blind, four words are two groups, and a lookup in either case finds both. A key declared
+            // twice, once with the collation written and once with it in scope, is one key.
+            string stylesheet =
+                $"<xsl:stylesheet version=\"3.0\" {Xsl} default-collation=\"{AsciiCaseBlind}\">"
+                + "<xsl:key name=\"k\" match=\"i\" use=\".\"/>"
+                + $"<xsl:key name=\"j\" match=\"i[1]\" use=\".\" collation=\"{AsciiCaseBlind}\"/>"
+                + "<xsl:key name=\"j\" match=\"i[position() gt 1]\" use=\".\"/>"
+                + "<xsl:template match=\"/\"><out>"
+                + "<xsl:for-each-group select=\"/r/i\" group-by=\".\">"
+                + "<xsl:value-of select=\"current-group()\" separator=\",\"/><xsl:text>;</xsl:text></xsl:for-each-group>"
+                + "<xsl:text>|</xsl:text><xsl:value-of select=\"key('k', 'a')\" separator=\",\"/>"
+                + "<xsl:text>|</xsl:text><xsl:value-of select=\"key('j', 'a')\" separator=\",\"/>"
+                + "</out></xsl:template></xsl:stylesheet>";
+
+            Assert.AreEqual(
+                "<out>b,B;A,a;|A,a|A,a</out>",
+                new Xslt(stylesheet, new XsltOptions { OmitXmlDeclaration = true, Version = XsltVersion.V30 })
+                    .TransformXml("<r><i>b</i><i>A</i><i>a</i><i>B</i></r>"));
         }
 
         [TestMethod]

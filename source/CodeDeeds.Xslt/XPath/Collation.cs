@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text;
+using CodeDeeds.Xslt.Runtime;
 
 namespace CodeDeeds.Xslt.XPath
 {
@@ -20,44 +22,17 @@ namespace CodeDeeds.Xslt.XPath
     /// it does not implement; with <c>fallback=no</c> it must raise <c>FOCH0002</c> instead, which is what
     /// makes the distinction observable.
     /// </para>
+    /// <para>
+    /// A fourth kind is the caller's: an <see cref="XsltCollation"/> handed in under a URI of the caller's
+    /// choosing through <see cref="IXsltCollationResolver"/>, which is asked for whatever the three above
+    /// do not answer. It is wrapped here so that everything downstream sees one shape, and what it cannot
+    /// do — make a key, match a substring — is refused with <c>FOCH0004</c> where it is asked for.
+    /// </para>
     /// </remarks>
     internal sealed class Collation
     {
         /// <summary>The collation URI that compares by code point, which every processor must provide.</summary>
         public const string CodepointUri = "http://www.w3.org/2005/xpath-functions/collation/codepoint";
-
-        /// <summary>
-        /// Refuses a collation that sorting, grouping and keys cannot order by.
-        /// </summary>
-        /// <remarks>
-        /// Reported rather than ignored, for the same reason as the validation attributes: a stylesheet
-        /// asking for Danish ordering and silently getting code point ordering has been answered with
-        /// something it did not ask about, and nothing in the result would say so.
-        /// <para>
-        /// The XPath functions reach further than this — they take the UCA collation URI and honour it — but
-        /// sorting, grouping and keys run through comparators and tables that do not carry a collation yet.
-        /// So these three refuse what they cannot do rather than accept it and do something else.
-        /// </para>
-        /// </remarks>
-        /// <param name="collation">The URI as it was written, or as a value template came to.</param>
-        /// <param name="code">
-        /// The code XSLT gives this complaint on the element asking. One refusal, a code apiece: an unusable
-        /// collation is <c>XTDE1035</c> on <c>xsl:sort</c>, <c>XTDE1110</c> on <c>xsl:for-each-group</c> and
-        /// <c>XTSE1210</c> on <c>xsl:key</c>, so the caller names it rather than every one of them hearing
-        /// the function library's <c>FOCH0002</c>.
-        /// </param>
-        public static void RequireOrderable(string collation, XsltErrorCode code)
-        {
-            if (collation.Trim() is not ("" or CodepointUri))
-            {
-                throw XsltErrors.Error(
-                    code,
-                    $"'{collation}' is not a collation this instruction can use. Sorting, grouping and keys "
-                    + $"here order by code point, which is '{CodepointUri}'; xsl:sort takes a lang "
-                    + "attribute for language ordering, and the XPath string functions take any collation "
-                    + "this engine has.");
-            }
-        }
 
         /// <summary>The collation URI that folds ASCII letters, which XPath 3.1 added.</summary>
         public const string HtmlAsciiCaseInsensitiveUri =
@@ -67,6 +42,13 @@ namespace CodeDeeds.Xslt.XPath
         public const string UcaUri = "http://www.w3.org/2013/collation/UCA";
 
         private static readonly Dictionary<string, Collation> s_cache = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// What each caller's resolver has answered, kept as long as the resolver is: a URI is resolved on
+        /// every function call that names one, and a resolver building a collation each time would pay for
+        /// that on every item of a sort.
+        /// </summary>
+        private static readonly ConditionalWeakTable<IXsltCollationResolver, Dictionary<string, Collation>> s_callers = new();
 
         /// <summary>How the algorithm gets at the strings, which is the one thing the three do differently.</summary>
         private readonly CompareInfo? m_compare;
@@ -85,6 +67,10 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         private readonly bool m_identical;
 
+        /// <summary>The caller's collation, where this wraps one, and the URI it was supplied under.</summary>
+        private readonly XsltCollation? m_custom;
+        private readonly string? m_uri;
+
         private Collation(CompareInfo? compare, CompareOptions options, bool foldAscii, bool identical)
         {
             m_compare = compare;
@@ -93,43 +79,137 @@ namespace CodeDeeds.Xslt.XPath
             m_identical = identical;
         }
 
+        private Collation(string uri, XsltCollation custom)
+        {
+            m_uri = uri;
+            m_custom = custom;
+        }
+
         /// <summary>The code point collation, which is also the default where none is named.</summary>
         public static Collation Codepoint { get; } = new Collation(null, CompareOptions.None, false, false);
 
         /// <summary>
-        /// Finds the collation a URI names.
+        /// Finds the collation a URI names among the ones this engine provides.
         /// </summary>
         /// <param name="uri">The URI as written. An empty one names the default, which is the code point one.</param>
         /// <returns>The collation.</returns>
         /// <exception cref="XsltException">The URI names no collation this engine has — <c>FOCH0002</c>.</exception>
         public static Collation Resolve(string uri)
         {
+            return Resolve(uri, (IXsltCollationResolver?)null);
+        }
+
+        /// <summary>
+        /// Finds the collation a URI names: one this engine provides, or failing that one the caller does.
+        /// </summary>
+        /// <param name="uri">The URI as written. An empty one names the default, which is the code point one.</param>
+        /// <param name="caller">The caller's resolver, or null where there is none.</param>
+        /// <returns>The collation.</returns>
+        /// <exception cref="XsltException">The URI names no collation either has — <c>FOCH0002</c>.</exception>
+        public static Collation Resolve(string uri, IXsltCollationResolver? caller)
+        {
             if (uri.Length == 0 || uri == CodepointUri)
             {
                 return Codepoint;
             }
 
-            lock (s_cache)
+            if (IsProvided(uri))
             {
-                if (s_cache.TryGetValue(uri, out Collation? cached))
+                lock (s_cache)
+                {
+                    if (s_cache.TryGetValue(uri, out Collation? cached))
+                    {
+                        return cached;
+                    }
+                }
+
+                Collation resolved = Build(uri);
+
+                lock (s_cache)
+                {
+                    s_cache[uri] = resolved;
+                }
+
+                return resolved;
+            }
+
+            if (caller is not null && FromCaller(caller, uri) is Collation supplied)
+            {
+                return supplied;
+            }
+
+            throw Unknown(
+                uri,
+                caller is null
+                    ? "no collation of that name is provided here, and no collation resolver is configured "
+                        + "(XsltOptions.CollationResolver) to supply one"
+                    : "no collation of that name is provided here, and the collation resolver has none by it");
+        }
+
+        /// <summary>
+        /// Finds the collation a URI names where an expression is being evaluated: the caller's resolver
+        /// is the running transformation's, or the context's own where nothing is running.
+        /// </summary>
+        /// <param name="uri">The URI as written.</param>
+        /// <param name="context">The evaluation context.</param>
+        public static Collation Resolve(string uri, ref DynamicContext context)
+        {
+            return Resolve(uri, ResolverOf(ref context));
+        }
+
+        /// <summary>The caller's resolver in force where an expression is being evaluated, if any.</summary>
+        public static IXsltCollationResolver? ResolverOf(ref DynamicContext context)
+        {
+            return context.Runtime?.CollationResolver ?? context.Collations;
+        }
+
+        /// <summary>Whether a URI names one of the collations this engine provides itself.</summary>
+        private static bool IsProvided(string uri)
+        {
+            return uri == HtmlAsciiCaseInsensitiveUri
+                || uri == UcaUri
+                || uri.StartsWith(UcaUri + "?", StringComparison.Ordinal);
+        }
+
+        private static Collation? FromCaller(IXsltCollationResolver caller, string uri)
+        {
+            Dictionary<string, Collation> known = s_callers.GetValue(
+                caller, _ => new Dictionary<string, Collation>(StringComparer.Ordinal));
+
+            lock (known)
+            {
+                if (known.TryGetValue(uri, out Collation? cached))
                 {
                     return cached;
                 }
             }
 
-            Collation resolved = Build(uri);
+            XsltCollation? supplied = caller.Resolve(uri);
 
-            lock (s_cache)
+            if (supplied is null)
             {
-                s_cache[uri] = resolved;
+                return null;
             }
 
-            return resolved;
+            Collation wrapped = new Collation(uri, supplied);
+
+            lock (known)
+            {
+                known[uri] = wrapped;
+            }
+
+            return wrapped;
         }
 
         /// <summary>Compares two strings, answering -1, 0 or 1.</summary>
         public int Compare(string first, string second)
         {
+            if (m_custom is not null)
+            {
+                int answer = m_custom.Compare(first, second);
+                return answer < 0 ? -1 : answer > 0 ? 1 : 0;
+            }
+
             if (m_compare is null)
             {
                 return CompareByCodePoint(Fold(first), Fold(second));
@@ -148,6 +228,11 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>Whether two strings are the same string under this collation.</summary>
         public bool AreEqual(string first, string second)
         {
+            if (m_custom is not null)
+            {
+                return m_custom.AreEqual(first, second);
+            }
+
             return m_compare is null
                 ? string.Equals(Fold(first), Fold(second), StringComparison.Ordinal)
                 : Compare(first, second) == 0;
@@ -163,6 +248,17 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         public string Key(string value)
         {
+            if (m_custom is not null)
+            {
+                return m_custom.Key(value)
+                    ?? throw XsltErrors.Error(
+                        XsltErrorCode.FOCH0004,
+                        $"The collation '{m_uri}' makes no collation key, and one is needed here: grouping, "
+                        + "keys, distinct-values() and fn:collation-key() file strings under a key the "
+                        + "collation supplies. A collation of the caller's own supplies one by overriding "
+                        + "XsltCollation.Key.");
+            }
+
             return m_compare is null
                 ? Fold(value)
                 : Convert.ToBase64String(m_compare.GetSortKey(value, m_options).KeyData);
@@ -179,6 +275,13 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         public byte[] KeyBytes(string value)
         {
+            if (m_custom is not null)
+            {
+                // The caller's key, as UTF-8: it orders as the strings do where the caller kept to what
+                // XsltCollation.Key asks, which is all that can be done from here.
+                return Encoding.UTF8.GetBytes(Key(value));
+            }
+
             if (m_compare is null)
             {
                 return Encoding.UTF8.GetBytes(Fold(value));
@@ -211,6 +314,11 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         public bool StartsWith(string subject, string prefix)
         {
+            if (m_custom is not null)
+            {
+                return RequireSubstrings().StartsWith(subject, prefix);
+            }
+
             if (m_compare is null)
             {
                 return Fold(subject).StartsWith(Fold(prefix), StringComparison.Ordinal);
@@ -228,6 +336,11 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>Whether one string ends with another, read the same way round.</summary>
         public bool EndsWith(string subject, string suffix)
         {
+            if (m_custom is not null)
+            {
+                return RequireSubstrings().EndsWith(subject, suffix);
+            }
+
             if (m_compare is null)
             {
                 return Fold(subject).EndsWith(Fold(suffix), StringComparison.Ordinal);
@@ -265,6 +378,11 @@ namespace CodeDeeds.Xslt.XPath
         /// <returns>The index of the match, or -1.</returns>
         public int IndexOf(string subject, string sought, out int length)
         {
+            if (m_custom is not null)
+            {
+                return RequireSubstrings().IndexOf(subject, sought, out length);
+            }
+
             if (m_compare is null)
             {
                 length = sought.Length;
@@ -272,6 +390,25 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             return m_compare.IndexOf(subject, sought, m_options, out length);
+        }
+
+        /// <summary>
+        /// The caller's collation, where it matches substrings; the specification's <c>FOCH0004</c> where
+        /// it does not, that being the code for a collation the substring functions cannot use.
+        /// </summary>
+        private XsltCollation RequireSubstrings()
+        {
+            if (!m_custom!.SupportsSubstringMatching)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.FOCH0004,
+                    $"The collation '{m_uri}' does not match substrings, which contains(), starts-with(), "
+                    + "ends-with(), substring-before() and substring-after() need. A collation of the "
+                    + "caller's own supports them by overriding XsltCollation.SupportsSubstringMatching and "
+                    + "the three matching methods.");
+            }
+
+            return m_custom;
         }
 
         /// <summary>Folds ASCII letters where the collation asks for it, and otherwise does nothing.</summary>
@@ -489,7 +626,8 @@ namespace CodeDeeds.Xslt.XPath
                 XsltErrorCode.FOCH0002,
                 $"'{uri}' is not a collation this engine has, because {why}. It provides the code point "
                 + $"collation '{CodepointUri}', the HTML ASCII case-insensitive one, and the Unicode "
-                + $"Collation Algorithm at '{UcaUri}' with its lang and strength parameters.");
+                + $"Collation Algorithm at '{UcaUri}' with its lang and strength parameters; a caller "
+                + "supplies others through XsltOptions.CollationResolver.");
         }
     }
 }

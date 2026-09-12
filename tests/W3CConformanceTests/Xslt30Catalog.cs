@@ -106,9 +106,10 @@ namespace CodeDeeds.Xslt.Conformance
         {
             XNamespace ns = element.Name.Namespace;
 
+            // A collation an environment declares is one the engine provides or the driver does, through
+            // SuiteCollations, which every transformation is given; nothing to arrange per environment.
             string? unsupported =
                 element.Element(ns + "schema") is not null ? "environment declares a schema"
-                : element.Element(ns + "collation") is not null ? "environment declares a collation"
                 : element.Element(ns + "resource") is not null ? "environment declares a resource"
                 : null;
 

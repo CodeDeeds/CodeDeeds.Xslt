@@ -96,8 +96,8 @@ unrelated-looking reasons, while a reason shared across twenty files is nobody's
 
 ## The XPath run
 
-The 2.0 run stands at **14,039 of 14,175, 99.0%**, and the 3.1 run — `--31`, which takes in the tests marked
-`XP30+` and `XP31+` — at **17,380 of 17,577, 98.9%**. The second reads 3,402 more tests than the first and is
+The 2.0 run stands at **14,044 of 14,180, 99.0%**, and the 3.1 run — `--31`, which takes in the tests marked
+`XP30+` and `XP31+` — at **17,409 of 17,606, 98.9%**. The second reads 3,426 more tests than the first and is
 a tenth of a point behind it, which is the shape to expect: what it takes in is the newer half, and the
 newer half is where the work is.
 
@@ -105,9 +105,9 @@ newer half is where the work is.
 |---|---|---|
 | `math` | *3.0 and later* | 130 / 130, 100% |
 | `misc` | 31 / 31, 100% | 33 / 33, 100% |
-| `app` | 330 / 330, 100% | 770 / 775, 99.4% |
+| `app` | 330 / 330, 100% | 772 / 777, 99.4% |
 | `prod` | 5,472 / 5,521, 99.1% | 5,889 / 5,952, 98.9% |
-| `fn` | 4,988 / 5,021, 99.3% | 6,942 / 7,007, 99.1% |
+| `fn` | 4,993 / 5,026, 99.3% | 6,969 / 7,034, 99.1% |
 | `op` | 3,147 / 3,195, 98.5% | 3,360 / 3,413, 98.4% |
 | `xs` | 71 / 77, 92.2% | 115 / 121, 95.0% |
 | `map` | *3.1* | 110 / 112, 98.2% |
@@ -327,7 +327,7 @@ tree** for the substring a branch processes, there being no atomic context item 
 written; there is one now, and a path written in a branch no longer walks a tree that was never in the
 stylesheet.
 
-The largest clusters behind the current **99.4% of 5,326**, and no one cause dominates:
+The largest clusters behind the current **99.3% of 5,364**, and no one cause dominates:
 
 | | |
 |---|---|
@@ -338,13 +338,14 @@ The largest clusters behind the current **99.4% of 5,326**, and no one cause dom
 
 The two in `fn/collection` are the suite's: `collection-005` is a `version="2.0"` stylesheet that writes
 `xsl:mode`, and `collection-006` is a package test, both marked as applying to a 2.0 processor, which
-cannot run either.
+cannot run either. `misc/collations` 0128 is the same kind of thing, a `version="2.0"` stylesheet that
+writes `xsl:evaluate`.
 
 The largest skip left is not a failure either: **6,518 are XSLT 3.0 tests**, read only under `--xslt --30`.
 
 ## What the 3.0 run says
 
-That opt-in run measures the XSLT 3.0 half at **7,541 of 7,579, 99.5%**, from 4,994 of 6,427 when it was first
+That opt-in run measures the XSLT 3.0 half at **7,580 of 7,618, 99.5%**, from 4,994 of 6,427 when it was first
 taken. It reads more tests than it did as well as passing more of them, which is the part worth reading twice:
 opening a feature the suite writes *around* stops whole files being skipped, so the denominator moves too — and
 the percentage can fall while the work goes forward, which is why the two numbers are always given together.
@@ -834,8 +835,8 @@ document.
 | `type` | 744 / 746 | 99.7% |
 | `fn` | 1,108 / 1,111 | 99.7% |
 | `expr` | 649 / 651 | 99.7% |
-| `misc` | 1,760 / 1,767 | 99.6% |
-| `insn` | 1,337 / 1,345 | 99.4% |
+| `misc` | 1,797 / 1,804 | 99.6% |
+| `insn` | 1,339 / 1,347 | 99.4% |
 | `decl` | 955 / 969 | 98.6% |
 
 Every instruction and declaration XSLT 3.0 adds is implemented, and so is **every attribute it hung on an
@@ -876,3 +877,17 @@ evaluated before the question of visibility arises, so `environment-variable(1)`
 and `environment-variable(true())` are `XPTY0004` as the suite asks, where the old answer of nothing was
 given before the argument was looked at. The one test left in that set builds a name a million characters
 long with `1 to 1048576`, which is more items than this engine lets a range produce.
+
+Then collations, in two steps. First, `xsl:for-each-group`, `xsl:key` and `xsl:merge-key` take any
+collation the engine has, where they had refused everything but the code point one; grouping and keys
+file a string under the collation's key, and a `default-collation` in scope reaches them where they name
+none, as the specification has it. Second, **collations of the caller's own**: an `XsltCollation` supplied
+under a URI through `XsltOptions.CollationResolver`, consulted for whatever the engine does not provide
+itself, and reaching everything that names a collation. Both drivers now supply the case-blind collation
+each suite declares under a URI of its own, and no environment is skipped for declaring a collation. That
+brought 39 tests into the XSLT 3.0 run, 42 of the 43 in `misc/collations` among them, and 29 into the QT3
+3.1 run, and all of them pass; on the 2.0 run 38 came in, with one left, a `version="2.0"` stylesheet that
+writes `xsl:evaluate`. Two things were found on the way: a merge key's collation was being dropped when
+the key's computed attributes were settled, so every merge key ordered by code point whatever it said; and
+grouping and keys were ignoring a `default-collation` in scope, which three of the collation tests are
+there to check.

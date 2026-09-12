@@ -206,6 +206,13 @@ namespace CodeDeeds.Xslt.Runtime
         public Func<string, string?, Model.XdmTree>? DocumentLoader;
 
         /// <summary>
+        /// The caller's collations where no transformation is running to carry them — a static expression
+        /// at compile time, or an expression evaluated on its own — or <see langword="null"/> where there
+        /// are none. A running transformation answers from its own options instead.
+        /// </summary>
+        public IXsltCollationResolver? Collations;
+
+        /// <summary>
         /// The slots the expression's name tests were assigned, or <see langword="null"/> where they were not
         /// supplied. Outside a transformation this is what lets a path into a document built while the
         /// expression ran — by <c>fn:parse-xml</c> or <c>fn:json-to-xml</c> — resolve its names at all.

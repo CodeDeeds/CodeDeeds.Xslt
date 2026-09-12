@@ -664,6 +664,9 @@ namespace CodeDeeds.Xslt
         /// <summary>An <c>xsl:key</c> whose <c>collation</c> names a collation this engine does not have.</summary>
         XTSE1210,
 
+        /// <summary>Two <c>xsl:key</c> declarations of one name naming different collations.</summary>
+        XTSE1220,
+
         /// <summary>A <c>regex</c> on <c>xsl:analyze-string</c> that is not a regular expression.</summary>
         XTDE1140,
 
@@ -788,6 +791,11 @@ namespace CodeDeeds.Xslt
 
         /// <summary>A Unicode normalization form the processor does not support.</summary>
         FOCH0003,
+
+        /// <summary>
+        /// A collation that cannot do what was asked of it: match a substring, or make a collation key.
+        /// </summary>
+        FOCH0004,
 
         /// <summary>A prefix with no binding to resolve it against.</summary>
         FONS0004,

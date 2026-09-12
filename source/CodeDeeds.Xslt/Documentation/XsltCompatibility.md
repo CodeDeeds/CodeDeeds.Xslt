@@ -17,10 +17,10 @@ Conformance as last measured, on 12 September 2026, against the W3C suites (see 
 
 | Suite | Result |
 | --- | --- |
-| XSLT 3.0 test suite, 3.0 processor | 7,541 of 7,579, 99.5% |
-| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,292 of 5,326, 99.4% |
-| QT3 (XPath), 3.1 | 98.9% of 17,577 |
-| QT3 (XPath), 2.0 | 99.0% of 14,175 |
+| XSLT 3.0 test suite, 3.0 processor | 7,580 of 7,618, 99.5% |
+| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,329 of 5,364, 99.3% |
+| QT3 (XPath), 3.1 | 98.9% of 17,606 |
+| QT3 (XPath), 2.0 | 99.0% of 14,180 |
 
 The 2,900 streaming tests and 672 schema-aware tests are skipped by design.
 
@@ -32,7 +32,6 @@ The 2,900 streaming tests and 672 schema-aware tests are skipped by design.
 | Streaming | `streamable="yes"` and `xsl:source-document` are accepted and processed over a tree held in memory; accumulators work the same way. `system-property('xsl:supports-streaming')` is `no`. |
 | Extension elements and functions | There is no way to register one. A call to an unknown function is `XPST0017` when the stylesheet is compiled; an extension instruction takes its `xsl:fallback` when reached, and is `XTDE1450` without one. `element-available()` and `function-available()` answer for them. |
 | `fn:load-xquery-module` | `XPST0017`. It needs an XQuery processor. |
-| Collations of the caller's own | A collation URI the engine does not provide is `FOCH0002`. Provided: the Unicode codepoint collation, `html-ascii-case-insensitive`, and the UCA collation with its `lang`, `strength` and related parameters, but not `alternate`. |
 | XInclude | Not applied to any document read. |
 
 ## Limits
@@ -69,7 +68,7 @@ The 2,900 streaming tests and 672 schema-aware tests are skipped by design.
 | Result tree fragments (1.0) | Represented as trees, so they can be navigated. This accepts more than XSLT 1.0 allows and rejects nothing it permits. |
 | Error timing | Errors are reported at compile time wherever possible. What the fallback mechanism covers, and a call to an extension function, is left to run time, since a stylesheet may hold those legitimately and never reach them. |
 | `element-available()` | Answers for the instructions on a 2.0 processor, and for every element the specification defines on a 3.0 one. `xsl:result-document` is reported available even when no result resolver is configured, and `function-available('id')` is `true`. |
-| `xsl:sort` without `lang` | Text is compared by code point rather than by the machine's culture, so one stylesheet orders the same everywhere. `lang` or `collation` asks for a named collation and gets it. |
+| `xsl:sort` without `lang` | Text is compared by code point rather than by the machine's culture, so one stylesheet orders the same everywhere. `lang` or `collation` asks for a named collation and gets it, on `xsl:sort`, `xsl:merge-key`, `xsl:for-each-group` and `xsl:key` alike. |
 | Document order across documents | Nodes of several documents are ordered by the sequence the documents were loaded in. Stable within a transformation, which is all the specification asks. |
 | Binary ordering | `xs:hexBinary` and `xs:base64Binary` are ordered octet by octet at every version, which XPath 3.1 defines and 2.0 left undefined. |
 | Output details | Indentation uses `\n` and indents uniformly; where exactly lines break is the processor's choice. `xsl:vendor` is `CodeDeeds` and `xsl:vendor-url` is empty. |
@@ -84,3 +83,4 @@ The 2,900 streaming tests and 672 schema-aware tests are skipped by design.
 | `XsltOptions.BaseUri`, `InputUri`, `BaseOutputUri` | Where the stylesheet, the input and the principal result are, which relative references resolve against. |
 | `XsltOptions.DynamicEvaluation` | `xsl:evaluate` is on by default and can be switched off, which makes `element-available('xsl:evaluate')` false. |
 | `XsltOptions.EnvironmentVariablesEnabled` | Off by default, so `environment-variable()` and `available-environment-variables()` answer nothing. On, they read the process's environment as it stood when the transformation first asked. |
+| `XsltOptions.CollationResolver` | Collations of the caller's own, as `XsltCollation` subclasses under URIs of the caller's choosing, for `xsl:sort`, `xsl:for-each-group`, `xsl:key`, `default-collation` and every function that takes a collation. Provided without one: the Unicode codepoint collation, `html-ascii-case-insensitive`, and the UCA collation with its `lang`, `strength` and related parameters, but not `alternate=shifted`. Any other URI is `FOCH0002`. A caller's collation that makes no key cannot group, key or `distinct-values()`, and one that does not match substrings cannot `contains()`; both are `FOCH0004`. |

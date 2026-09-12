@@ -67,6 +67,12 @@ namespace CodeDeeds.Xslt.XPath
         string DefaultCollation => "http://www.w3.org/2005/xpath-functions/collation/codepoint";
 
         /// <summary>
+        /// Gets the collations of the caller's own, which a collation URI the engine does not provide is
+        /// looked up in, or <see langword="null"/> where there are none.
+        /// </summary>
+        IXsltCollationResolver? CollationResolver => null;
+
+        /// <summary>
         /// Gets the namespace bindings in scope where the expression is written, by prefix.
         /// </summary>
         /// <remarks>
@@ -182,6 +188,15 @@ namespace CodeDeeds.Xslt.XPath
         /// semantics can be exercised on their own while the XSLT layer still reports itself as 1.0.
         /// </remarks>
         public XsltVersion Version { get; set; } = XsltVersion.V10;
+
+        /// <summary>
+        /// Gets or sets the collation strings are compared by where an expression names none. Defaults to
+        /// the code point collation.
+        /// </summary>
+        public string DefaultCollation { get; set; } = "http://www.w3.org/2005/xpath-functions/collation/codepoint";
+
+        /// <summary>Gets or sets the collations of the caller's own, or <see langword="null"/> for none.</summary>
+        public IXsltCollationResolver? CollationResolver { get; set; }
 
         /// <summary>Binds a prefix to a namespace URI for the expressions compiled against this context.</summary>
         /// <param name="prefix">The prefix to bind.</param>

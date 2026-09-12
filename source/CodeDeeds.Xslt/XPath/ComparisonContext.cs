@@ -43,7 +43,9 @@ namespace CodeDeeds.Xslt.XPath
             string uri = context.DefaultCollation;
 
             return new ComparisonContext(
-                uri.Length == 0 || uri == XPath.Collation.CodepointUri ? null : XPath.Collation.Resolve(uri),
+                uri.Length == 0 || uri == XPath.Collation.CodepointUri
+                    ? null
+                    : XPath.Collation.Resolve(uri, context.CollationResolver),
                 context.InScopeNamespaces);
         }
     }

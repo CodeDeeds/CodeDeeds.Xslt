@@ -969,6 +969,27 @@ namespace CodeDeeds.Xslt.Runtime
         /// <summary>Whether the caller has let the stylesheet read the process's environment.</summary>
         internal bool EnvironmentVariablesEnabled => m_options.EnvironmentVariablesEnabled;
 
+        /// <summary>The caller's collations, if any were supplied.</summary>
+        internal IXsltCollationResolver? CollationResolver => m_options.CollationResolver;
+
+        /// <summary>
+        /// The collation a key files its values under, or <see langword="null"/> for the code point one,
+        /// under which a string is its own key.
+        /// </summary>
+        /// <param name="keyIndex">The key's index.</param>
+        internal Collation? KeyCollation(int keyIndex)
+        {
+            if (m_stylesheet.Keys[keyIndex].CollationUri is not string uri)
+            {
+                return null;
+            }
+
+            // Checked when the key was declared, so this does not fail; the caller's collation is found
+            // through the resolver in force now, which is the one the declaration was checked against.
+            Collation collation = Collation.Resolve(uri, CollationResolver);
+            return ReferenceEquals(collation, Collation.Codepoint) ? null : collation;
+        }
+
         private IReadOnlyDictionary<string, string>? m_environment;
 
         /// <summary>
@@ -1524,7 +1545,8 @@ namespace CodeDeeds.Xslt.Runtime
                 // which is why a composite key indexes a node under one entry however many values it read.
                 // The identity is typed, so that a lookup finds a value by eq and not by spelling.
                 List<string> identities = new();
-                KeyDefinition.Identities(value, key.Composite, identities, rule.BackwardsCompatible);
+                KeyDefinition.Identities(
+                    value, key.Composite, identities, rule.BackwardsCompatible, KeyCollation(key.Index));
 
                 foreach (string identity in identities)
                 {
@@ -3313,8 +3335,10 @@ namespace CodeDeeds.Xslt.Runtime
 
                 // The code point collation, and not whatever the stylesheet put in scope: this expression
                 // was written by the caller rather than in the stylesheet, so there is no point in it for a
-                // default-collation to have been declared at.
-                Collation.CodepointUri);
+                // default-collation to have been declared at. The caller's own collations, though, since
+                // the caller wrote it.
+                Collation.CodepointUri,
+                m_options.CollationResolver);
 
             Expr compiled;
 

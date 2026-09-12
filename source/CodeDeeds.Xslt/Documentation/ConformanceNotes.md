@@ -671,10 +671,13 @@ under 1.0, where three arguments to `contains()` is still a stylesheet's mistake
 from the end of what actually matched rather than from the length of what was sought, which is the only place
 a collation matching four characters against five can be seen.
 
-**`xsl:sort`, `xsl:key` and `xsl:for-each-group` refuse anything but the code point collation.** They run
-through comparators and tables that do not carry one, and accepting the name to then order by code point
-anyway would answer a question about Danish ordering with an answer about Unicode, with nothing in the result
-to say so. `xsl:sort` still takes `lang` for language ordering, which is what it is for.
+**`xsl:sort`, `xsl:key` and `xsl:for-each-group` refuse anything but the code point collation.** *Since
+superseded: all three take any collation the engine or the caller has, `xsl:merge-key` with them, and a
+caller supplies its own through `XsltOptions.CollationResolver`; what follows describes the engine before
+that.* They run through comparators and tables that do not carry one, and accepting the name to then order
+by code point anyway would answer a question about Danish ordering with an answer about Unicode, with
+nothing in the result to say so. `xsl:sort` still takes `lang` for language ordering, which is what it is
+for.
 
 `key()` takes a third argument naming the document to search, which is what makes a key usable against a
 document loaded by `document()` — under 1.0 a key could only ever look in the document the instruction was
@@ -4949,7 +4952,8 @@ most preferred first, of which the first this engine has is the one taken.
 
 Not `xsl:for-each-group`, `xsl:key` or `xsl:merge-key`, which group and order by code point and refuse a
 `collation` attribute that says otherwise. A default collation reaches the comparisons written inside them
-and not the grouping or the ordering itself.
+and not the grouping or the ordering itself. *Since superseded: the three honour a `collation` attribute,
+and a merge key without one is ordered by the default collation in scope as a sort key is.*
 
 **And the namespaces in scope are what an untyped operand is read as a name against.** A general comparison
 reads an untyped operand as the other operand's type, and where that type is `xs:QName` the cast has to

@@ -364,6 +364,10 @@ namespace CodeDeeds.Xslt.Compiler
             }
         }
 
+        /// <inheritdoc/>
+        /// <remarks>The caller's, from the options the stylesheet is compiled with.</remarks>
+        public IXsltCollationResolver? CollationResolver => m_options.CollationResolver;
+
         /// <summary>The element <see cref="m_collationChosen"/> was worked out for.</summary>
         private int m_collationElement = -1;
 
@@ -410,7 +414,7 @@ namespace CodeDeeds.Xslt.Compiler
 
                     try
                     {
-                        Collation.Resolve(uri);
+                        Collation.Resolve(uri, m_options.CollationResolver);
                         return uri;
                     }
                     catch (XsltException)
@@ -3388,6 +3392,7 @@ namespace CodeDeeds.Xslt.Compiler
                 DynamicContext context = new DynamicContext(
                     m_tree, DynamicContext.NotANode, m_names.BuildFingerprintMap(m_tree), m_names);
                 context.DocumentLoader = LoadStaticDocument;
+                context.Collations = m_options.CollationResolver;
 
                 return expression.Evaluate(ref context);
             }
@@ -4194,7 +4199,21 @@ namespace CodeDeeds.Xslt.Compiler
             string name = GetAttribute(element, "name")
                 ?? throw new XsltException("An xsl:key must have a name.");
 
-            RequireKnownCollation(element, XsltErrorCode.XTSE1210);
+            // The collation the key files strings under: the attribute, or failing that the default
+            // collation in scope at the declaration (§20.2.1), which a default-collation on the xsl:key
+            // itself or on the stylesheet puts there. Checked to exist now (XTSE1210) and kept as its URI;
+            // the code point one, written or not, is no collation at all as far as the index cares.
+            m_scopeElement = element;
+
+            string? collation = (GetAttribute(element, "collation")?.Trim() ?? DefaultCollation) is string effective
+                && effective is not ("" or Collation.CodepointUri)
+                ? effective
+                : null;
+
+            if (collation is not null)
+            {
+                ResolveKnownCollation(collation, XsltErrorCode.XTSE1210);
+            }
 
             ExpandedName expanded = ResolveQualifiedName(element, name);
 
@@ -4204,8 +4223,17 @@ namespace CodeDeeds.Xslt.Compiler
 
             if (key is null)
             {
-                key = new KeyDefinition(expanded, m_keys.Count, CurrentPackage);
+                key = new KeyDefinition(expanded, m_keys.Count, CurrentPackage) { CollationUri = collation };
                 m_keys.Add(key);
+            }
+            else if (!string.Equals(key.CollationUri, collation, StringComparison.Ordinal))
+            {
+                // One index, one way of filing: two declarations of a name filing strings under different
+                // collations would be two keys answering to one name (XTSE1220).
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTSE1220,
+                    $"The xsl:key declarations named '{name}' name different collations, and the "
+                    + "declarations of one key file its values under one collation.");
             }
 
             key.Rules.Add(new KeyRule(source.Tree, source.Element));
@@ -9553,7 +9581,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// is the case where the stylesheet would silently be comparing strings some other way than it asked
         /// to.
         /// </remarks>
-        private static void RequireOneKnownCollation(string text)
+        private void RequireOneKnownCollation(string text)
         {
             foreach (Range candidate in text.AsSpan().Trim().Split(' '))
             {
@@ -9566,7 +9594,7 @@ namespace CodeDeeds.Xslt.Compiler
 
                 try
                 {
-                    Collation.Resolve(uri);
+                    Collation.Resolve(uri, m_options.CollationResolver);
                     return;
                 }
                 catch (XsltException)
@@ -10266,10 +10294,18 @@ namespace CodeDeeds.Xslt.Compiler
 
             if (collation?.ConstantValue is string named)
             {
-                Collation.RequireOrderable(named, XsltErrorCode.XTDE1110);
+                ResolveKnownCollation(named.Trim(), XsltErrorCode.XTDE1110);
             }
 
             m_scopeElement = element;
+
+            // No collation written, and the instruction groups under the default collation in scope
+            // (§14.4): a default-collation on the template or the stylesheet reaches the grouping itself,
+            // not only the comparisons written inside it.
+            string? defaultCollation = collation is null && DefaultCollation != Collation.CodepointUri
+                ? DefaultCollation
+                : null;
+
             Expr select = RequireExpression(element, "select");
 
             (string Attribute, GroupingKind Kind)[] forms =
@@ -10332,7 +10368,8 @@ namespace CodeDeeds.Xslt.Compiler
                 CompileSortKeys(element),
                 CompileSequenceSkippingSorts(element),
                 Implements30,
-                collation?.ConstantValue is null ? collation : null);
+                collation,
+                defaultCollation);
         }
 
         /// <summary>Compiles one branch of <c>xsl:analyze-string</c>, which may be absent.</summary>
@@ -10743,21 +10780,19 @@ namespace CodeDeeds.Xslt.Compiler
                     string other => throw SortAttribute(child, "case-order", other),
                 };
 
-                Collation? collation = collationTemplate?.ConstantValue is string uri && wanted == "sort"
-                    ? SortKey.ResolveCollation(uri.Trim())
+                Collation? collation = collationTemplate?.ConstantValue is string uri
+                    ? SortKey.ResolveCollation(uri.Trim(), m_options.CollationResolver)
                     : null;
 
                 // The attribute names a collation, a lang names one, and where neither does the default
                 // collation in scope decides (§13.1.3). Only where it is not the code point collation: that
                 // is what the ordinary comparison does anyway, and setting it would take an xsl:sort with a
-                // case-order but no lang off the path that reads one. A merge key is left as it was, which
-                // is where the collation attribute is refused rather than honoured.
+                // case-order but no lang off the path that reads one. A merge key is ordered the same way.
                 if (collation is null
                     && langWritten is null
-                    && wanted == "sort"
                     && DefaultCollation != Collation.CodepointUri)
                 {
-                    collation = SortKey.ResolveCollation(DefaultCollation);
+                    collation = SortKey.ResolveCollation(DefaultCollation, m_options.CollationResolver);
                 }
 
                 bool computed = wanted == "sort"
@@ -11712,6 +11747,7 @@ namespace CodeDeeds.Xslt.Compiler
                 DynamicContext context = new DynamicContext(
                     m_tree, DynamicContext.NotANode, m_names.BuildFingerprintMap(m_tree));
                 context.DocumentLoader = LoadStaticDocument;
+                context.Collations = m_options.CollationResolver;
 
                 return expression.EvaluateAsBoolean(ref context);
             }
@@ -11912,6 +11948,7 @@ namespace CodeDeeds.Xslt.Compiler
                 DynamicContext context = new DynamicContext(
                     m_tree, DynamicContext.NotANode, m_names.BuildFingerprintMap(m_tree));
                 context.DocumentLoader = LoadStaticDocument;
+                context.Collations = m_options.CollationResolver;
 
                 return template.Evaluate(ref context);
             }
@@ -12123,11 +12160,10 @@ namespace CodeDeeds.Xslt.Compiler
             return ParseExpression(element, select);
         }
 
-        /// <summary>Refuses a written <c>collation</c> naming a collation this engine cannot order by.</summary>
+        /// <summary>Refuses a written <c>collation</c> naming a collation nobody has.</summary>
         /// <remarks>
         /// What the attribute says, where it says it outright. An attribute value template says nothing
-        /// until it is evaluated, so an instruction that allows one asks
-        /// <see cref="Collation.RequireOrderable"/> for itself when it runs.
+        /// until it is evaluated, so an instruction that allows one resolves it for itself when it runs.
         /// </remarks>
         /// <param name="element">The element carrying the <c>collation</c>.</param>
         /// <param name="code">The code XSLT gives this complaint on that element.</param>
@@ -12135,7 +12171,31 @@ namespace CodeDeeds.Xslt.Compiler
         {
             if (GetAttribute(element, "collation") is string collation)
             {
-                Collation.RequireOrderable(collation, code);
+                ResolveKnownCollation(collation.Trim(), code);
+            }
+        }
+
+        /// <summary>
+        /// The collation a URI names, among the engine's and the caller's, or the code an element gives
+        /// for naming one nobody has.
+        /// </summary>
+        /// <remarks>
+        /// One refusal, a code apiece: an unusable collation is <c>XTDE1035</c> on <c>xsl:sort</c>,
+        /// <c>XTDE1110</c> on <c>xsl:for-each-group</c> and <c>XTSE1210</c> on <c>xsl:key</c>, so the
+        /// element names it rather than every one of them hearing the function library's <c>FOCH0002</c>.
+        /// </remarks>
+        /// <param name="uri">The collation URI, trimmed.</param>
+        /// <param name="code">The code XSLT gives this complaint on the element asking.</param>
+        private Collation ResolveKnownCollation(string uri, XsltErrorCode code)
+        {
+            try
+            {
+                return Collation.Resolve(uri, m_options.CollationResolver);
+            }
+            catch (XsltException failed)
+            {
+                throw XsltErrors.Error(
+                    code, $"'{uri}' is not a collation this processor has: {failed.Message}", failed);
             }
         }
 

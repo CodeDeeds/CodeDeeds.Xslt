@@ -511,7 +511,7 @@ namespace CodeDeeds.Xslt.XPath
                 case Xpath30Function.CollationKey:
                 {
                     Collation collation = m_arguments.Length > 1
-                        ? Collation.Resolve(m_arguments[1].Evaluate(ref context).ToStringValue())
+                        ? Collation.Resolve(m_arguments[1].Evaluate(ref context).ToStringValue(), ref context)
                         : Collation.Codepoint;
 
                     string key = m_arguments[0].Evaluate(ref context).ToStringValue();
@@ -648,7 +648,7 @@ namespace CodeDeeds.Xslt.XPath
             string token = m_arguments[1].Evaluate(ref context).ToStringValue().Trim(Whitespace);
 
             Collation collation = m_arguments.Length > 2
-                ? Collation.Resolve(m_arguments[2].Evaluate(ref context).ToStringValue())
+                ? Collation.Resolve(m_arguments[2].Evaluate(ref context).ToStringValue(), ref context)
                 : Collation.Codepoint;
 
             if (token.Length == 0)

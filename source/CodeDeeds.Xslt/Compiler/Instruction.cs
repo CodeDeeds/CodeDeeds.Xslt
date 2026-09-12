@@ -637,6 +637,9 @@ namespace CodeDeeds.Xslt.Compiler
         /// <summary>Gets whether the ordering is reversed.</summary>
         public bool Descending { get; }
 
+        /// <summary>The collation text is compared by, or null where it is compared by code point or culture.</summary>
+        public Collation? KeyCollation => m_collation;
+
         /// <summary>
         /// Finds the culture a <c>lang</c> attribute names, or <see langword="null"/> where there is none or
         /// the platform does not know it — in which case text is ordered by code point, which is an answer
@@ -693,11 +696,12 @@ namespace CodeDeeds.Xslt.Compiler
 
         /// <summary>The collation a URI names, or <c>XTDE1035</c> where this processor has none by it.</summary>
         /// <param name="uri">The collation URI.</param>
-        public static Collation ResolveCollation(string uri)
+        /// <param name="caller">The caller's collations, where there are any.</param>
+        public static Collation ResolveCollation(string uri, IXsltCollationResolver? caller)
         {
             try
             {
-                return Collation.Resolve(uri);
+                return Collation.Resolve(uri, caller);
             }
             catch (XsltException failed)
             {
@@ -794,7 +798,7 @@ namespace CodeDeeds.Xslt.Compiler
 
             if (m_ordering.Collation?.Evaluate(ref context) is string uri)
             {
-                collation = ResolveCollation(uri.Trim());
+                collation = ResolveCollation(uri.Trim(), Collation.ResolverOf(ref context));
             }
 
             return new SortKey(

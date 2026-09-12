@@ -205,6 +205,19 @@ namespace CodeDeeds.Xslt
         public IXsltCollectionResolver? CollectionResolver { get; init; }
 
         /// <summary>
+        /// Gets the resolver that supplies collations of the caller's own, by URI.
+        /// </summary>
+        /// <remarks>
+        /// The engine provides the code point collation, the HTML ASCII case-insensitive one and the
+        /// Unicode Collation Algorithm with its parameters, and answers those before asking. This is for a
+        /// collation the caller already has, under a URI of its choosing: what <c>xsl:sort</c>,
+        /// <c>xsl:for-each-group</c>, <c>xsl:key</c>, <c>default-collation</c> and the collation arguments
+        /// of the functions then reach. <see langword="null"/>, the default, means a URI the engine does not
+        /// provide is an error. A transformation started by <c>fn:transform()</c> inherits the resolver.
+        /// </remarks>
+        public IXsltCollationResolver? CollationResolver { get; init; }
+
+        /// <summary>
         /// Gets the resolver that finds the library packages named by <c>xsl:use-package</c>.
         /// </summary>
         /// <remarks>
@@ -414,6 +427,7 @@ namespace CodeDeeds.Xslt
                 StylesheetResolver = StylesheetResolver,
                 DocumentResolver = DocumentResolver,
                 CollectionResolver = CollectionResolver,
+                CollationResolver = CollationResolver,
                 PackageResolver = PackageResolver,
                 EntityResolver = EntityResolver,
                 EnvironmentVariablesEnabled = EnvironmentVariablesEnabled,

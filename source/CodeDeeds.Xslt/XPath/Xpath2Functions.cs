@@ -222,15 +222,18 @@ namespace CodeDeeds.Xslt.XPath
         /// optional collation use where the caller supplies none, and what <c>fn:default-collation()</c>
         /// answers with.
         /// </remarks>
-        internal string? DefaultCollation
-        {
-            get => m_defaultCollation;
+        internal string? DefaultCollation => m_defaultCollation;
 
-            set
-            {
-                m_defaultCollation = value;
-                m_default = value is null ? null : XPath.Collation.Resolve(value);
-            }
+        /// <summary>
+        /// Puts a default collation in force for the call, resolved now against the caller's collations
+        /// so that a URI nobody has is refused where the call is written.
+        /// </summary>
+        /// <param name="uri">The collation URI.</param>
+        /// <param name="resolver">The caller's collations, where there are any.</param>
+        internal void UseDefaultCollation(string uri, IXsltCollationResolver? resolver)
+        {
+            m_defaultCollation = uri;
+            m_default = XPath.Collation.Resolve(uri, resolver);
         }
 
         private string? m_defaultCollation;
@@ -955,15 +958,8 @@ namespace CodeDeeds.Xslt.XPath
         private Collation Collation(int index, ref DynamicContext context)
         {
             return m_arguments.Length > index
-                ? XPath.Collation.Resolve(Text(index, ref context))
+                ? XPath.Collation.Resolve(Text(index, ref context), ref context)
                 : m_default ?? XPath.Collation.Codepoint;
-        }
-
-        /// <summary>Refuses a collation URI this engine does not have.</summary>
-        /// <param name="collation">The URI as written.</param>
-        internal static void RequireKnownCollation(string collation)
-        {
-            XPath.Collation.Resolve(collation);
         }
 
         /// <summary>

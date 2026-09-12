@@ -107,7 +107,14 @@ namespace CodeDeeds.Xslt.Conformance
                 return new TestResult(Outcome.Skipped, environmentProblem);
             }
 
-            XPathStaticContext staticContext = new XPathStaticContext { Version = m_version };
+            // The suite's own collations are always on offer, since a test may name one without its
+            // environment declaring it; a declaration marked default puts that collation in force.
+            XPathStaticContext staticContext = new XPathStaticContext
+            {
+                Version = m_version,
+                CollationResolver = SuiteCollations.Instance,
+            };
+
             if (environment is not null)
             {
                 foreach ((string prefix, string uri) in environment.Namespaces)
@@ -118,6 +125,14 @@ namespace CodeDeeds.Xslt.Conformance
                 foreach (XElement declaration in environment.DecimalFormats)
                 {
                     DeclareDecimalFormat(staticContext, declaration);
+                }
+
+                foreach ((string uri, bool isDefault) in environment.Collations)
+                {
+                    if (isDefault)
+                    {
+                        staticContext.DefaultCollation = uri;
+                    }
                 }
             }
 
@@ -154,6 +169,7 @@ namespace CodeDeeds.Xslt.Conformance
                     staticContext.Names)
                 {
                     Globals = globals,
+                    Collations = SuiteCollations.Instance,
                 };
 
                 value = compiled.Evaluate(ref context);

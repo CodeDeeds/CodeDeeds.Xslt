@@ -249,6 +249,9 @@ namespace CodeDeeds.Xslt.Compiler
                 {
                     said[k] = source.Ordering[k].Effective(ref context);
 
+                    // The collation the key was compiled with, or the one its attribute computes: a merge
+                    // key takes a collation as a sort key does, and dropping it here had every merge key
+                    // ordering by code point whatever it said.
                     keys[i][k] = source.Keys[k].Ordered(
                         said[k][1] == "number",
                         said[k][0] == "descending",
@@ -258,7 +261,10 @@ namespace CodeDeeds.Xslt.Compiler
                             "upper-first" => SortCaseOrder.UpperFirst,
                             "lower-first" => SortCaseOrder.LowerFirst,
                             _ => SortCaseOrder.Unspecified,
-                        });
+                        },
+                        said[k][4] is string uri
+                            ? SortKey.ResolveCollation(uri.Trim(), Collation.ResolverOf(ref context))
+                            : source.Keys[k].KeyCollation);
                 }
 
                 if (first is null)

@@ -49,13 +49,19 @@ namespace CodeDeeds.Xslt.Compiler
         private readonly Instruction[] m_body;
         private readonly bool m_implements30;
 
-        /// <summary>The collation, where it was written as an attribute value template.</summary>
+        /// <summary>The collation string keys are grouped under, or null for the code point one.</summary>
         /// <remarks>
-        /// Null for one written outright, which the compiler has already refused or accepted. Only a
-        /// computed collation reaches here, and only to be refused: this engine groups by code point, and a
-        /// stylesheet asking for another ordering must not be quietly given that one instead.
+        /// Resolved when the instruction runs, whether it was written outright or as an attribute value
+        /// template: a collation of the caller's own is found through the resolver in force then, and a
+        /// written one the compiler has already checked is there to be found.
         /// </remarks>
         private readonly AttributeValueTemplate? m_collation;
+
+        /// <summary>
+        /// The default collation in scope where the instruction stands, as a URI, where no collation was
+        /// written and the default is not the code point one; the specification has grouping use it.
+        /// </summary>
+        private readonly string? m_defaultCollation;
 
         public ForEachGroupInstruction(
             Expr select,
@@ -66,7 +72,8 @@ namespace CodeDeeds.Xslt.Compiler
             SortKey[] sortKeys,
             Instruction[] body,
             bool implements30,
-            AttributeValueTemplate? collation = null)
+            AttributeValueTemplate? collation = null,
+            string? defaultCollation = null)
         {
             m_select = select;
             m_key = key;
@@ -77,6 +84,7 @@ namespace CodeDeeds.Xslt.Compiler
             m_body = body;
             m_implements30 = implements30;
             m_collation = collation;
+            m_defaultCollation = defaultCollation;
         }
 
         public override void Execute(ref DynamicContext context, XsltRuntime runtime)
@@ -85,9 +93,28 @@ namespace CodeDeeds.Xslt.Compiler
             // group is the items of the population with one grouping key, in population order, and a
             // group's first item is what the body sees as the context item. XSLT 2.0 let a pattern match
             // nodes only, and named a population of anything else XTTE1120; 3.0 patterns match any item.
-            if (m_collation is not null)
+            Collation? collation = null;
+            string? uri = m_collation is not null ? m_collation.Evaluate(ref context).Trim() : m_defaultCollation;
+
+            if (uri is not null)
             {
-                Collation.RequireOrderable(m_collation.Evaluate(ref context), XsltErrorCode.XTDE1110);
+                try
+                {
+                    collation = Collation.Resolve(uri, ref context);
+                }
+                catch (XsltException failed)
+                {
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XTDE1110,
+                        $"'{uri}' is not a collation this xsl:for-each-group can group by: {failed.Message}",
+                        failed);
+                }
+
+                // Under the code point collation a string is its own key, and nothing need be done to it.
+                if (ReferenceEquals(collation, Collation.Codepoint))
+                {
+                    collation = null;
+                }
             }
 
             List<XPathValue> population = XdmSequence.Items(m_select.Evaluate(ref context));
@@ -106,7 +133,7 @@ namespace CodeDeeds.Xslt.Compiler
                 }
             }
 
-            List<Group> groups = BuildGroups(population, ref context, runtime);
+            List<Group> groups = BuildGroups(population, ref context, runtime, collation);
 
             (XPathValue Group, XPathValue Key)? saved = runtime.CurrentGroup;
 
@@ -183,12 +210,13 @@ namespace CodeDeeds.Xslt.Compiler
             }
         }
 
-        private List<Group> BuildGroups(List<XPathValue> population, ref DynamicContext context, XsltRuntime runtime)
+        private List<Group> BuildGroups(
+            List<XPathValue> population, ref DynamicContext context, XsltRuntime runtime, Collation? collation)
         {
             List<Group> groups = m_kind switch
             {
-                GroupingKind.ByKey => GroupByKey(population, ref context),
-                GroupingKind.ByAdjacentKey => GroupByAdjacentKey(population, ref context),
+                GroupingKind.ByKey => GroupByKey(population, ref context, collation),
+                GroupingKind.ByAdjacentKey => GroupByAdjacentKey(population, ref context, collation),
                 _ => GroupByPattern(population, ref context),
             };
 
@@ -200,7 +228,7 @@ namespace CodeDeeds.Xslt.Compiler
             return groups;
         }
 
-        private List<Group> GroupByKey(List<XPathValue> population, ref DynamicContext context)
+        private List<Group> GroupByKey(List<XPathValue> population, ref DynamicContext context, Collation? collation)
         {
             List<Group> groups = new();
             Dictionary<string, Group> byKey = new(StringComparer.Ordinal);
@@ -221,7 +249,7 @@ namespace CodeDeeds.Xslt.Compiler
 
                     if (group is null)
                     {
-                        string identity = KeyIdentity(key);
+                        string identity = KeyIdentity(key, collation);
 
                         if (!byKey.TryGetValue(identity, out group))
                         {
@@ -267,7 +295,8 @@ namespace CodeDeeds.Xslt.Compiler
             return left.ToDecimal() == right.ToDecimal();
         }
 
-        private List<Group> GroupByAdjacentKey(List<XPathValue> population, ref DynamicContext context)
+        private List<Group> GroupByAdjacentKey(
+            List<XPathValue> population, ref DynamicContext context, Collation? collation)
         {
             List<Group> groups = new();
             string? previous = null;
@@ -289,7 +318,7 @@ namespace CodeDeeds.Xslt.Compiler
                 }
 
                 XPathValue key = keys[0];
-                string identity = KeyIdentity(key);
+                string identity = KeyIdentity(key, collation);
 
                 // A run ends the moment the key changes, so the same value returning later starts afresh.
                 if (groups.Count == 0 || identity != previous)
@@ -360,6 +389,12 @@ namespace CodeDeeds.Xslt.Compiler
             return false;
         }
 
+        /// <summary>A string as a collation keys it, or as it is under the code point collation.</summary>
+        private static string Keyed(string text, Collation? collation)
+        {
+            return collation is null ? text : collation.Key(text);
+        }
+
         private List<XPathValue> KeysOf(List<XPathValue> population, int index, ref DynamicContext context)
         {
             DynamicContext inner = Focus(ref context, population[index], index + 1, population.Count);
@@ -378,9 +413,13 @@ namespace CodeDeeds.Xslt.Compiler
         /// Typed, not spelled: 1 and 1.0 are one key and so are two dateTimes naming one instant in two
         /// time zones, while a date and the string that spells it are two keys and no error — a population
         /// mixing types is grouped, not refused. NaN is its own key, as deep-equal has it. A QName is its
-        /// namespace and local name, whatever the prefix.
+        /// namespace and local name, whatever the prefix. A string's identity is the collation's key for
+        /// it, where a collation other than the code point one is in force: under one that ignores case,
+        /// 'DATA' and 'data' are one key.
         /// </remarks>
-        internal static string KeyIdentity(XPathValue key)
+        /// <param name="key">The key value.</param>
+        /// <param name="collation">The collation strings are keyed under, or null for the code point one.</param>
+        internal static string KeyIdentity(XPathValue key, Collation? collation = null)
         {
             // A composite key is several values standing for one, so its identity is the identities of its
             // parts — each written with its length in front, because a delimiter alone would let ("a", "bc")
@@ -392,7 +431,7 @@ namespace CodeDeeds.Xslt.Compiler
 
                 foreach (XPathValue part in XdmSequence.Items(key))
                 {
-                    string identity = KeyIdentity(part);
+                    string identity = KeyIdentity(part, collation);
                     joined.Append(':').Append(identity.Length).Append(':').Append(identity);
                 }
 
@@ -408,13 +447,13 @@ namespace CodeDeeds.Xslt.Compiler
                     return key.ToBoolean() ? "b:1" : "b:0";
 
                 case XPathValueKind.Node:
-                    return "s:" + XdmSequence.StringValueOf(key);
+                    return "s:" + Keyed(XdmSequence.StringValueOf(key), collation);
             }
 
             switch (key.TypeCode)
             {
                 case XdmTypeCode.String or XdmTypeCode.UntypedAtomic or XdmTypeCode.AnyUri or XdmTypeCode.None:
-                    return "s:" + key.ToStringValue();
+                    return "s:" + Keyed(key.ToStringValue(), collation);
 
                 case XdmTypeCode.QName:
                 {

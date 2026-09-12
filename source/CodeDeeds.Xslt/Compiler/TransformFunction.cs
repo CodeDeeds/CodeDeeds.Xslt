@@ -593,6 +593,7 @@ namespace CodeDeeds.Xslt.Compiler
                 StylesheetResolver = m_host.StylesheetResolver,
                 DocumentResolver = m_host.DocumentResolver,
                 CollectionResolver = m_host.CollectionResolver,
+                CollationResolver = m_host.CollationResolver,
                 PackageResolver = m_host.PackageResolver,
                 EntityResolver = m_host.EntityResolver,
                 Version = m_host.Version,

@@ -2176,11 +2176,11 @@ namespace CodeDeeds.Xslt.XPath
             switch (built)
             {
                 case Xpath2FunctionExpr library:
-                    library.DefaultCollation = collation;
+                    library.UseDefaultCollation(collation, m_context.CollationResolver);
                     break;
 
                 case FunctionCallExpr core:
-                    core.DefaultCollation = Collation.Resolve(collation);
+                    core.DefaultCollation = Collation.Resolve(collation, m_context.CollationResolver);
                     break;
             }
 

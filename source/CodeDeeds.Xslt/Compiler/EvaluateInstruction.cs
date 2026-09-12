@@ -216,7 +216,7 @@ namespace CodeDeeds.Xslt.Compiler
                 }
             }
 
-            Expr compiled = Compile(target, baseUri, namespaces, defaultNamespace, names);
+            Expr compiled = Compile(target, baseUri, namespaces, defaultNamespace, names, runtime.CollationResolver);
 
             // The target's own dynamic context: the focus context-item says, or none; the parameters and no
             // other variable; and none of what XSLT adds — no current node, no current group, nothing a
@@ -327,7 +327,8 @@ namespace CodeDeeds.Xslt.Compiler
             string? baseUri,
             Dictionary<string, string> namespaces,
             string defaultNamespace,
-            List<ExpandedName> parameters)
+            List<ExpandedName> parameters,
+            IXsltCollationResolver? collations)
         {
             StringBuilder key = new StringBuilder(target).Append('\n').Append(baseUri).Append('\n').Append(defaultNamespace);
 
@@ -360,7 +361,8 @@ namespace CodeDeeds.Xslt.Compiler
                 parameters,
                 m_functions,
                 m_decimalFormats,
-                m_defaultCollation);
+                m_defaultCollation,
+                collations);
 
             Expr compiled;
 
@@ -434,9 +436,11 @@ namespace CodeDeeds.Xslt.Compiler
             List<ExpandedName> parameters,
             IReadOnlyDictionary<(ExpandedName Name, int Arity), UserFunction> functions,
             IReadOnlyDictionary<ExpandedName, DecimalFormat> decimalFormats,
-            string defaultCollation)
+            string defaultCollation,
+            IXsltCollationResolver? collations)
         {
             DefaultCollation = defaultCollation;
+            CollationResolver = collations;
             Names = names;
             m_version = version;
             m_namespaces = namespaces;
@@ -462,6 +466,10 @@ namespace CodeDeeds.Xslt.Compiler
         /// element namespace -- so the collation is too, and the specification says so in as many words.
         /// </remarks>
         public string DefaultCollation { get; }
+
+        /// <inheritdoc/>
+        /// <remarks>The caller's, as everywhere: the transformation running the instruction has them.</remarks>
+        public IXsltCollationResolver? CollationResolver { get; }
 
         /// <inheritdoc/>
         public XsltVersion Version => m_version;
