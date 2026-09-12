@@ -890,6 +890,27 @@ namespace CodeDeeds.Xslt.Compiler
                 return reading;
             }
 
+            if (name is "collection" or "uri-collection")
+            {
+                // The same base and the same package as doc(), for the same reason: a relative collection
+                // URI resolves against where the call is written, and what the collection's documents are
+                // stripped of is the calling package's business. uri-collection() is 3.0's, so it is built
+                // only where the library would build it.
+                bool thirty = Version.CompareTo(XsltVersion.V30) >= 0
+                    || SyntaxVersion.CompareTo(XsltVersion.V30) >= 0;
+
+                Expr? asking = name == "collection"
+                    ? Xpath2FunctionExpr.TryCreate(name, arguments, Version, SyntaxVersion)
+                    : thirty ? Xpath30FunctionExpr.TryCreate(name, arguments, Version) : null;
+
+                if (asking is CollectionFunctionExpr call)
+                {
+                    call.StaticBaseUri = StaticBaseUri(m_scopeElement);
+                    call.Package = CurrentPackage;
+                    return call;
+                }
+            }
+
             if (name == "copy-of" && arguments.Length <= 1 && Implements30)
             {
                 return new CopyOfFunctionExpr(arguments.Length == 0 ? null : arguments[0]);
@@ -7176,13 +7197,35 @@ namespace CodeDeeds.Xslt.Compiler
 
                 if (localName == "merge-action")
                 {
+                    if (action is not null)
+                    {
+                        // One action for every group the merge forms; a second would be a second answer
+                        // to what is done with a group, and nothing decides between them (XTSE0010).
+                        throw XsltErrors.Error(
+                            XsltErrorCode.XTSE0010,
+                            "xsl:merge has two xsl:merge-action children, and takes exactly one: it is what "
+                            + "is done with each group the merge forms.");
+                    }
+
                     action = CompileSequence(child);
                     continue;
                 }
 
                 if (localName != "merge-source")
                 {
+                    // xsl:fallback, which the content model admits after the action and which a processor
+                    // that understands xsl:merge has no use for.
                     continue;
+                }
+
+                if (action is not null)
+                {
+                    // The sources come first and the action last, the content model being ordered: a
+                    // source after the action is out of place (XTSE0010).
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XTSE0010,
+                        "An xsl:merge-source comes after the xsl:merge-action. The sources are written "
+                        + "first, and the action, which is what is done with each group they form, last.");
                 }
 
                 if (GetAttribute(child, "for-each-stream") is not null)
@@ -9218,10 +9261,20 @@ namespace CodeDeeds.Xslt.Compiler
 
                 if (trailing >= 0)
                 {
-                    throw XsltErrors.Error(
-                        XsltErrorCode.XTSE0010,
-                        $"'{QualifiedNameOf(child)}' comes after '{QualifiedNameOf(trailing)}' in "
-                        + $"'{QualifiedNameOf(element)}'. Nothing may follow it.");
+                    // What may follow a trailing element is another trailing one, where the model has
+                    // several: xsl:fallback* after an xsl:merge-action. One the model has only one of,
+                    // xsl:otherwise, is followed by nothing.
+                    bool another = isXslt
+                        && Array.IndexOf(shape.Trailing, childName) >= 0
+                        && XsltElements.Find(childName) is not { Once: true };
+
+                    if (!another)
+                    {
+                        throw XsltErrors.Error(
+                            XsltErrorCode.XTSE0010,
+                            $"'{QualifiedNameOf(child)}' comes after '{QualifiedNameOf(trailing)}' in "
+                            + $"'{QualifiedNameOf(element)}'. Nothing may follow it.");
+                    }
                 }
 
                 if (shape.Children is not null

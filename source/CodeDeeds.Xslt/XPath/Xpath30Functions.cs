@@ -130,9 +130,6 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary><c>fn:available-environment-variables</c>.</summary>
         AvailableEnvironmentVariables,
 
-        /// <summary><c>fn:uri-collection</c>.</summary>
-        UriCollection,
-
         /// <summary><c>fn:default-language</c>.</summary>
         DefaultLanguage,
 
@@ -275,6 +272,13 @@ namespace CodeDeeds.Xslt.XPath
                     Xpath30Function.UnparsedTextLines, new[] { text }, name);
             }
 
+            if (name == "uri-collection")
+            {
+                // Beside fn:collection() in a class of its own, since the two ask the collection resolver
+                // the same question and differ only in whether the documents are then read.
+                return CollectionFunctionExpr.Create(arguments, version, urisOnly: true);
+            }
+
             return Find(name, arguments.Length) is (Xpath30Function function, int least, int most, string signature)
                 ? Build(function, name, arguments, least, most, signature, version)
                 : null;
@@ -313,7 +317,6 @@ namespace CodeDeeds.Xslt.XPath
                 "environment-variable" => (Xpath30Function.EnvironmentVariable, 1, 1, "xs:string"),
                 "available-environment-variables" =>
                     (Xpath30Function.AvailableEnvironmentVariables, 0, 0, ""),
-                "uri-collection" => (Xpath30Function.UriCollection, 0, 1, "xs:string?"),
                 "default-language" => (Xpath30Function.DefaultLanguage, 0, 0, ""),
                 _ => null,
             };
@@ -346,7 +349,7 @@ namespace CodeDeeds.Xslt.XPath
                 return arity == 1;
             }
 
-            if (name == "random-number-generator")
+            if (name is "random-number-generator" or "uri-collection")
             {
                 return arity is 0 or 1;
             }
@@ -564,36 +567,6 @@ namespace CodeDeeds.Xslt.XPath
                     // all, and this one says no. It is the same posture as the DTD prohibition and the opt-in
                     // resolvers: without being handed a way in, a stylesheet cannot reach outside its input.
                     return XPathValue.FromSequence(XdmSequence.Empty);
-
-                case Xpath30Function.UriCollection:
-                {
-                    // The URIs of what a collection holds, and there is no collection here to hold
-                    // anything: the same posture fn:collection() takes, for the same reason, and with the
-                    // same two codes so that a stylesheet asking either way hears the same answer. The
-                    // function exists so that calling it says what happened rather than that the name is
-                    // unknown, which sends whoever reads it looking for a typo.
-                    // No argument and an empty one ask the same question, both meaning the default
-                    // collection, so uri-collection(()) is not a collection named by the empty URI. The
-                    // argument is evaluated before any complaint: an error in it is the caller's, and it
-                    // happened first.
-                    XPathValue named = m_arguments.Length == 0
-                        ? XPathValue.FromSequence(XdmSequence.Empty)
-                        : m_arguments[0].Evaluate(ref context);
-
-                    if (Xpath2FunctionExpr.IsEmptySequence(named))
-                    {
-                        throw XsltErrors.Error(
-                            XsltErrorCode.FODC0002,
-                            "fn:uri-collection() was asked for the default collection, and this engine has "
-                            + "none: no resolver for one is configured, and there is no default to fall "
-                            + "back to.");
-                    }
-
-                    throw XsltErrors.Error(
-                        XsltErrorCode.FODC0002,
-                        $"The collection '{named.ToStringValue()}' could not be retrieved: this engine has "
-                        + "no way to resolve one, so fn:uri-collection() never finds anything.");
-                }
 
                 case Xpath30Function.DefaultLanguage:
                 {

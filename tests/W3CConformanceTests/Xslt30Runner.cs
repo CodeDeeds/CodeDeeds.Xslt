@@ -349,6 +349,12 @@ namespace CodeDeeds.Xslt.Conformance
                     // root rather than the exact depth of it.
                     StylesheetResolver = resolver,
                     DocumentResolver = resolver,
+                    // The collections the environment declares, as lists of files the suite resolver then
+                    // reads; with none declared there is no collection, which is what the tests asking
+                    // for one anyway expect to hear.
+                    CollectionResolver = environment is { Collections.Count: > 0 }
+                        ? new CatalogCollections(environment.Collections, directory)
+                        : null,
                     // A source given inline has no URI of its own, so what its declaration names resolves
                     // against the test set's directory, as the catalog means it to.
                     EntityResolver = new EntityResolverWithin(resolver, directory),
@@ -714,6 +720,70 @@ namespace CodeDeeds.Xslt.Conformance
             public ResolvedResource? Resolve(string href, string? baseUri)
             {
                 return m_inner.Resolve(href, baseUri ?? m_directory);
+            }
+        }
+
+        /// <summary>
+        /// Serves the collections a catalog environment declares: each a list of files under a name, which a
+        /// stylesheet asks for relative to the test set's directory.
+        /// </summary>
+        private sealed class CatalogCollections : IXsltCollectionResolver
+        {
+            private readonly Uri m_directory;
+            private readonly Dictionary<string, IReadOnlyList<string>> m_named = new(StringComparer.Ordinal);
+            private IReadOnlyList<string>? m_default;
+
+            public CatalogCollections(List<(string? Uri, List<string> Files)> collections, string directory)
+            {
+                m_directory = new Uri(
+                    Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory)) + Path.DirectorySeparatorChar);
+
+                foreach ((string? uri, List<string> files) in collections)
+                {
+                    // Identified as the suite resolver identifies a file, so that what is handed back is
+                    // what it then reads.
+                    string[] members = files.Select(FileUri).ToArray();
+
+                    if (uri is null)
+                    {
+                        m_default = members;
+                    }
+                    else
+                    {
+                        m_named[new Uri(m_directory, uri).AbsoluteUri] = members;
+                    }
+                }
+            }
+
+            /// <summary>
+            /// A file's URI under the test set's directory, with a fragment identifier kept as one.
+            /// </summary>
+            /// <remarks>
+            /// <see cref="Uri"/> takes a <c>#</c> in a file reference as part of the file's name and escapes
+            /// it, since a file may be called that; the catalog means the element the fragment names, as
+            /// <c>collection-004</c>'s <c>doc15.xml#frag2</c> does, so the fragment is set aside and put back.
+            /// </remarks>
+            private string FileUri(string file)
+            {
+                int hash = file.IndexOf('#');
+                string uri = new Uri(m_directory, hash < 0 ? file : file[..hash]).AbsoluteUri;
+
+                return hash < 0 ? uri : uri + file[hash..];
+            }
+
+            public IReadOnlyList<string>? ResolveCollection(string? uri, string? baseUri)
+            {
+                if (uri is null)
+                {
+                    return m_default;
+                }
+
+                Uri against = baseUri is null ? m_directory : new Uri(baseUri);
+
+                return Uri.TryCreate(against, uri, out Uri? asked)
+                    && m_named.TryGetValue(asked.AbsoluteUri, out IReadOnlyList<string>? members)
+                    ? members
+                    : null;
             }
         }
 

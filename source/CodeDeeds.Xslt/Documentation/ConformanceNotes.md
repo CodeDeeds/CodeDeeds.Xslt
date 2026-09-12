@@ -5506,10 +5506,12 @@ constructor function is that cast under its other spelling. `xs:NMTOKENS('a b c'
 than `XPST0051`. `xs:anyType` keeps the code: it is not one of the four the specification withholds a
 constructor from, and there are no values of it for one to build.
 
-**`fn:uri-collection()` is there to be called.** It finds nothing, raising `FODC0003` where the default
-collection was meant and `FODC0002` where one was named — exactly what `fn:collection()` does, and for the
-same reason. The function exists so that a stylesheet calling it is told what happened rather than that the
-name is unknown, which is a different thing and sends whoever reads it looking for a typo.
+**`fn:uri-collection()` is there to be called.** *Since implemented: both functions now read
+`XsltOptions.CollectionResolver`, and what follows describes the engine before it had one.* It finds
+nothing, raising `FODC0003` where the default collection was meant and `FODC0002` where one was named —
+exactly what `fn:collection()` does, and for the same reason. The function exists so that a stylesheet
+calling it is told what happened rather than that the name is unknown, which is a different thing and sends
+whoever reads it looking for a typo.
 
 `decl/function` is empty on the 3.0 run.
 
@@ -5630,7 +5632,9 @@ line this engine cannot stand on either side of by turns: `FODC0002` where no de
 at all, which `collection-901` and `-903` assert outright, and `FODC0003` where one is declared and the
 processor will not serve it, which `collection-001` to `-003` allow as the alternative to returning the
 documents. With no resolver for a collection there is never one declared here, so the first is what is true
-of this engine and the second would be claiming a collection exists that it then withholds.
+of this engine and the second would be claiming a collection exists that it then withholds. *Since then a
+collection resolver has been added, `XsltOptions.CollectionResolver`, and a declared collection is served;
+`FODC0002` remains the code where none is declared, or none is configured.*
 
 It is worth writing down that this costs as much as it gains: one test on the 2.0 run, one on the 3.1 one,
 in opposite directions. The count was not the reason.

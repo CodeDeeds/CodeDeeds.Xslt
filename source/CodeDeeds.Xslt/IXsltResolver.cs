@@ -150,4 +150,44 @@ namespace CodeDeeds.Xslt
         /// <returns>The versions, or an empty list where none are known.</returns>
         IReadOnlyList<string> VersionsOf(string name);
     }
+
+    /// <summary>
+    /// Says what a collection holds, for <c>fn:collection()</c> and <c>fn:uri-collection()</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The specification leaves what a collection URI means to the processor, and this engine leaves it to
+    /// the caller. A resolver maps a name to the URIs of the resources under it; the engine hands those URIs
+    /// back from <c>uri-collection()</c>, and reads each through <see cref="XsltOptions.DocumentResolver"/>
+    /// for <c>collection()</c>. The URIs are therefore in whatever form that resolver identifies a document
+    /// by: a path for <see cref="FileResolver"/>, a <c>file:</c> or <c>http:</c> URI for
+    /// <see cref="UriResolver"/>. One path for everything a stylesheet reads, so that one cache serves both
+    /// functions and the decision about what may be read is made once.
+    /// </para>
+    /// <para>
+    /// A collection is asked for once per transformation and the answer kept, so that it is the same
+    /// collection every time a stylesheet reaches for it, which the specification requires. Returning
+    /// <see langword="null"/> says there is no such collection, which is <c>FODC0002</c>; an empty list is a
+    /// collection that holds nothing.
+    /// </para>
+    /// </remarks>
+    public interface IXsltCollectionResolver
+    {
+        /// <summary>
+        /// Lists what a collection holds.
+        /// </summary>
+        /// <param name="uri">
+        /// The collection URI exactly as the stylesheet wrote it, or <see langword="null"/> for the default
+        /// collection.
+        /// </param>
+        /// <param name="baseUri">
+        /// The base URI of the expression asking, which a relative collection URI resolves against, or
+        /// <see langword="null"/> where there is none.
+        /// </param>
+        /// <returns>
+        /// The URIs of the collection's resources, absolute and in the order the collection has them, or
+        /// <see langword="null"/> if there is no such collection.
+        /// </returns>
+        IReadOnlyList<string>? ResolveCollection(string? uri, string? baseUri);
+    }
 }

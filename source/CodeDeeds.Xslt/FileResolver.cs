@@ -17,8 +17,16 @@ namespace CodeDeeds.Xslt
     /// The root is the entire trust decision: a stylesheet supplied by an untrusted party can read any
     /// stylesheet beneath it, and nothing else.
     /// </para>
+    /// <para>
+    /// A directory under the root is a collection, for <c>fn:collection()</c> and <c>fn:uri-collection()</c>:
+    /// its files, in name order, are what the collection holds, and the default collection is the root
+    /// itself. A query on the collection URI narrows that, <c>data?select=*.xml;recurse=yes</c> being every
+    /// XML file under <c>data</c>. What is handed back are file paths, which is what this resolver
+    /// identifies a document by, so the same instance serves as <see cref="XsltOptions.DocumentResolver"/>
+    /// to read them.
+    /// </para>
     /// </remarks>
-    public sealed class FileResolver : IXsltResolver
+    public sealed class FileResolver : IXsltResolver, IXsltCollectionResolver
     {
         private readonly string m_root;
         private readonly Encoding? m_encoding;
@@ -49,25 +57,7 @@ namespace CodeDeeds.Xslt
         {
             ArgumentNullException.ThrowIfNull(href);
 
-            // A reference is relative to the stylesheet that made it, so that a subdirectory can refer to its
-            // own neighbours.
-            string directory = baseUri is null ? m_root : Path.GetDirectoryName(baseUri) ?? m_root;
-            string candidate;
-
-            try
-            {
-                candidate = Path.GetFullPath(Path.Combine(directory, href));
-            }
-            catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
-            {
-                throw new XsltException($"'{href}' is not a usable stylesheet reference.", exception);
-            }
-
-            if (!IsInside(candidate, m_root))
-            {
-                throw new XsltException(
-                    $"The stylesheet reference '{href}' resolves outside '{m_root}' and was refused.");
-            }
+            string candidate = Locate(href, baseUri, "stylesheet reference");
 
             if (!File.Exists(candidate))
             {
@@ -79,6 +69,59 @@ namespace CodeDeeds.Xslt
                 : new StreamReader(candidate, m_encoding);
 
             return new ResolvedResource(reader, candidate);
+        }
+
+        /// <inheritdoc/>
+        public IReadOnlyList<string>? ResolveCollection(string? uri, string? baseUri)
+        {
+            if (uri is null)
+            {
+                return DirectoryCollection.List(m_root, DirectoryCollection.Query.Everything, path => path);
+            }
+
+            string reference = DirectoryCollection.Split(uri, out DirectoryCollection.Query query);
+
+            // A query alone names the directory the call was written in, which is what nothing before the
+            // question mark means.
+            string directory = Locate(reference.Length == 0 ? "." : reference, baseUri, "collection reference");
+
+            if (!Directory.Exists(directory))
+            {
+                return null;
+            }
+
+            return DirectoryCollection.List(directory, query, path => path);
+        }
+
+        /// <summary>
+        /// Works out which path a reference names, and refuses one outside the root.
+        /// </summary>
+        /// <param name="reference">The reference as written.</param>
+        /// <param name="baseUri">The path of the resource it was written in, or null for the root.</param>
+        /// <param name="what">What kind of reference it is, for what a refusal says.</param>
+        private string Locate(string reference, string? baseUri, string what)
+        {
+            // A reference is relative to the stylesheet that made it, so that a subdirectory can refer to its
+            // own neighbours.
+            string directory = baseUri is null ? m_root : Path.GetDirectoryName(baseUri) ?? m_root;
+            string candidate;
+
+            try
+            {
+                candidate = Path.GetFullPath(Path.Combine(directory, reference));
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+            {
+                throw new XsltException($"'{reference}' is not a usable {what}.", exception);
+            }
+
+            if (!IsInside(candidate, m_root))
+            {
+                throw new XsltException(
+                    $"The {what} '{reference}' resolves outside '{m_root}' and was refused.");
+            }
+
+            return candidate;
         }
 
         /// <summary>

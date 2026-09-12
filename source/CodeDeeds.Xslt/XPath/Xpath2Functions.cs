@@ -524,6 +524,13 @@ namespace CodeDeeds.Xslt.XPath
                     + "The language, the calendar and the place are supplied together or not at all.");
             }
 
+            if (entry.Function == Xpath2Function.Collection)
+            {
+                // Its own class, shared with fn:uri-collection(): what it reaches is the collection
+                // resolver, and it carries the base URI and the package the compiler hands doc().
+                return CollectionFunctionExpr.Create(arguments, version, urisOnly: false);
+            }
+
             return new Xpath2FunctionExpr(
                 entry.Function,
 
@@ -797,9 +804,6 @@ namespace CodeDeeds.Xslt.XPath
 
                 case Xpath2Function.Root:
                     return Root(ref context);
-
-                case Xpath2Function.Collection:
-                    throw CollectionNotFound(ref context);
 
                 case Xpath2Function.Error:
                     throw RaiseError(ref context);
@@ -1120,45 +1124,6 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             return XPathValue.FromNodeSet(NodeSet.Singleton(tree!, tree!.RootOf(node)));
-        }
-
-        /// <summary>
-        /// Reports that a collection cannot be found, which is the only answer this engine has.
-        /// </summary>
-        /// <remarks>
-        /// <c>fn:collection()</c> reaches outside the transformation for a set of documents, and there is no
-        /// resolver for one — the same posture as <c>doc()</c> without a document resolver, and for the same
-        /// reason. The function exists so that a stylesheet calling it is told what happened rather than that
-        /// the name is unknown, which is a different thing and sends whoever reads it looking for a typo.
-        /// </remarks>
-        private XsltException CollectionNotFound(ref DynamicContext context)
-        {
-            // No argument and an empty one are the same question: both ask for the default collection, and
-            // the specification says so in as many words, so collection(()) is not a collection named by
-            // the empty URI — which is what the message used to call it.
-            //
-            // FODC0002 for both, because both are true of this engine. The suite draws a line the engine
-            // cannot stand on either side of by turns: FODC0002 where no default collection is declared at
-            // all, which collection-901 and -903 assert outright, and FODC0003 where one is declared and
-            // the processor will not serve it, which collection-001 to -003 allow as the alternative to
-            // returning the documents. With no resolver for a collection there is never one declared here,
-            // so the first is what is true and the second would be claiming a collection exists.
-            XPathValue named = m_arguments.Length == 0
-                ? XPathValue.FromSequence(XdmSequence.Empty)
-                : m_arguments[0].Evaluate(ref context);
-
-            if (IsEmptySequence(named))
-            {
-                return XsltErrors.Error(
-                    XsltErrorCode.FODC0002,
-                    "fn:collection() was asked for the default collection, and this engine has none: no "
-                    + "resolver for one is configured, and there is no default to fall back to.");
-            }
-
-            return XsltErrors.Error(
-                XsltErrorCode.FODC0002,
-                $"The collection '{named.ToStringValue()}' could not be retrieved: this engine has no way "
-                + "to resolve one, so fn:collection() never finds anything.");
         }
 
         private XPathValue UriOfNode(ref DynamicContext context)

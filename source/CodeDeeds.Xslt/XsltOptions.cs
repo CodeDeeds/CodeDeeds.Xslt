@@ -183,6 +183,28 @@ namespace CodeDeeds.Xslt
         public IXsltResolver? DocumentResolver { get; init; }
 
         /// <summary>
+        /// Gets the resolver that says what a collection holds, for <c>fn:collection()</c> and
+        /// <c>fn:uri-collection()</c>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A collection is a set of resources under a name, and what the name means is the caller's to
+        /// decide: the specification leaves it to the processor. The resolver turns a collection URI, or the
+        /// absence of one, into the URIs of the collection's members. <c>uri-collection()</c> answers with
+        /// those, and <c>collection()</c> reads each through <see cref="DocumentResolver"/>, which must
+        /// therefore be configured as well: one says what a collection holds, and the other is what reads
+        /// it, so that one cache serves both and a document is the same document however it was reached.
+        /// </para>
+        /// <para>
+        /// <see langword="null"/>, the default, means there is no collection, default or named, and either
+        /// function is <c>FODC0002</c>. <see cref="FileResolver"/> and <see cref="UriResolver"/> serve a
+        /// directory as a collection, so the instance configured as the document resolver can be configured
+        /// here too.
+        /// </para>
+        /// </remarks>
+        public IXsltCollectionResolver? CollectionResolver { get; init; }
+
+        /// <summary>
         /// Gets the resolver that finds the library packages named by <c>xsl:use-package</c>.
         /// </summary>
         /// <remarks>
@@ -367,6 +389,7 @@ namespace CodeDeeds.Xslt
                 MessageWriter = MessageWriter,
                 StylesheetResolver = StylesheetResolver,
                 DocumentResolver = DocumentResolver,
+                CollectionResolver = CollectionResolver,
                 PackageResolver = PackageResolver,
                 EntityResolver = EntityResolver,
                 ResultResolver = ResultResolver,

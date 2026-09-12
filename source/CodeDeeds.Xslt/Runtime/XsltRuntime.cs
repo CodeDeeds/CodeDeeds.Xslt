@@ -73,6 +73,18 @@ namespace CodeDeeds.Xslt.Runtime
         /// with. One file read by two packages that strip differently is two documents.
         /// </summary>
         private readonly Dictionary<(string Reference, int Scope), XdmTree> m_documents = new();
+
+        /// <summary>
+        /// The collections already asked for, by the reference and the base that named them.
+        /// </summary>
+        /// <remarks>
+        /// A collection is the same collection every time it is asked for within one transformation, which
+        /// the specification calls stability and which a directory listing does not offer of its own accord:
+        /// a file written while the transformation runs would be in the second listing and not the first.
+        /// Asking the resolver once per reference is what keeps the answer still. Null until a collection
+        /// is asked for, which is rarely.
+        /// </remarks>
+        private Dictionary<(string? Reference, string? Base), IReadOnlyList<string>>? m_collections;
         private readonly XsltOptions m_options;
         private int m_callDepth;
 
@@ -826,6 +838,155 @@ namespace CodeDeeds.Xslt.Runtime
 
         /// <summary>The base URI the caller supplied, which relative references resolve against.</summary>
         internal string? BaseUri => m_options.BaseUri;
+
+        /// <summary>
+        /// The URIs a collection holds, which is what <c>fn:uri-collection()</c> answers and what
+        /// <c>fn:collection()</c> goes on to read.
+        /// </summary>
+        /// <remarks>
+        /// Through <see cref="XsltOptions.CollectionResolver"/>, and nothing is a collection without one.
+        /// The resolver is asked once per reference and its answer kept, so that a collection is the same
+        /// collection for the whole transformation.
+        /// </remarks>
+        /// <param name="uri">The collection URI as the call wrote it, or null for the default collection.</param>
+        /// <param name="baseUri">What a relative collection URI resolves against: where the call is written.</param>
+        /// <param name="function">The function asking, for what an error says.</param>
+        /// <exception cref="XsltException">
+        /// <c>FODC0002</c> where there is no such collection, or no resolver to hold one; <c>FODC0004</c>
+        /// where the reference is not a URI at all.
+        /// </exception>
+        internal IReadOnlyList<string> UrisOfCollection(string? uri, string? baseUri, string function)
+        {
+            m_collections ??= new Dictionary<(string?, string?), IReadOnlyList<string>>();
+
+            if (m_collections.TryGetValue((uri, baseUri), out IReadOnlyList<string>? known))
+            {
+                return known;
+            }
+
+            if (m_options.CollectionResolver is null)
+            {
+                throw CollectionNotFound(
+                    function,
+                    uri,
+                    "no collection resolver is configured. Set XsltOptions.CollectionResolver to say what a "
+                    + "collection holds");
+            }
+
+            // xs:anyURI takes nearly any string, so what is refused here as not a URI is what cannot be read
+            // as one at all.
+            if (uri is not null && !Uri.TryCreate(uri, UriKind.RelativeOrAbsolute, out _))
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.FODC0004, $"'{uri}' is not a URI, so it names no collection.");
+            }
+
+            IReadOnlyList<string>? uris;
+
+            try
+            {
+                uris = m_options.CollectionResolver.ResolveCollection(uri, baseUri);
+            }
+            catch (UriFormatException exception)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.FODC0004,
+                    $"'{uri}' is not a URI the collection resolver can read: {exception.Message}",
+                    exception);
+            }
+
+            if (uris is null)
+            {
+                throw CollectionNotFound(
+                    function,
+                    uri,
+                    uri is null
+                        ? "the collection resolver has no default collection"
+                        : "the collection resolver has no such collection");
+            }
+
+            m_collections[(uri, baseUri)] = uris;
+            return uris;
+        }
+
+        /// <summary>
+        /// Loads what a collection holds, which is what <c>fn:collection()</c> answers.
+        /// </summary>
+        /// <remarks>
+        /// Each URI the collection resolver names is read through the document resolver as <c>doc()</c>
+        /// would read it, so a document reached both ways is one document, and one already read is not read
+        /// again. The nodes come back in document order, which across documents is the order they were
+        /// first read in: stable within a transformation, which is all the specification asks.
+        /// </remarks>
+        /// <param name="uri">The collection URI as the call wrote it, or null for the default collection.</param>
+        /// <param name="baseUri">What a relative collection URI resolves against: where the call is written.</param>
+        /// <param name="package">The package the call was written in, which decides what whitespace is stripped.</param>
+        /// <returns>The nodes, or <see langword="null"/> for a collection that holds nothing.</returns>
+        internal NodeSet? LoadCollection(string? uri, string? baseUri, int package)
+        {
+            IReadOnlyList<string> uris = UrisOfCollection(uri, baseUri, "collection");
+
+            if (uris.Count > 0 && m_options.DocumentResolver is null)
+            {
+                throw new XsltException(
+                    "This stylesheet calls collection(), and the collection resolver names what the collection "
+                    + "holds, but no document resolver was configured to read it. Set "
+                    + "XsltOptions.DocumentResolver beside CollectionResolver: one says what a collection "
+                    + "holds, and the other is what reads it.");
+            }
+
+            NodeSet? result = null;
+
+            foreach (string member in uris)
+            {
+                // Absolute, as the collection resolver promises, so there is nothing to resolve them
+                // against. A fragment identifier is followed as document() follows one: a collection may
+                // hold the element a reference names rather than the whole of a document.
+                XdmTree document = LoadDocument(member, null, out int selected, package);
+
+                if (selected < 0)
+                {
+                    continue;
+                }
+
+                if (result is null)
+                {
+                    result = new NodeSet(document, uris.Count);
+                    result.Add(selected);
+                }
+                else
+                {
+                    result.Add(document, selected);
+                }
+            }
+
+            // Repeated URIs collapse of their own accord: each is loaded once and returns the same tree, and
+            // the union then drops the duplicate.
+            result?.SortAndDeduplicate();
+            return result;
+        }
+
+        /// <summary>
+        /// The error for a collection that is not there, whichever function asked and for whatever reason.
+        /// </summary>
+        /// <remarks>
+        /// <c>FODC0002</c> both for the default collection and for a named one. The specification has
+        /// <c>FODC0003</c> for a processor that has a default collection and declines to serve it, which is
+        /// never what happened here: where the resolver returns nothing for the default, there is none.
+        /// </remarks>
+        /// <param name="function">The function asking.</param>
+        /// <param name="uri">The collection URI, or null for the default collection.</param>
+        /// <param name="reason">Why there is no such collection, as a clause without a full stop.</param>
+        internal static XsltException CollectionNotFound(string function, string? uri, string reason)
+        {
+            return uri is null
+                ? XsltErrors.Error(
+                    XsltErrorCode.FODC0002,
+                    $"fn:{function}() was asked for the default collection, and there is none: {reason}.")
+                : XsltErrors.Error(
+                    XsltErrorCode.FODC0002,
+                    $"The collection '{uri}' could not be retrieved by fn:{function}(): {reason}.");
+        }
 
         /// <summary>
         /// The one reading of the clock this transformation makes, which every <c>current-*</c> call in it

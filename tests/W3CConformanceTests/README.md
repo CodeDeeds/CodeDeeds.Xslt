@@ -327,19 +327,24 @@ tree** for the substring a branch processes, there being no atomic context item 
 written; there is one now, and a path written in a branch no longer walks a tree that was never in the
 stylesheet.
 
-The largest clusters behind the current **99.4% of 5,319**, and no one cause dominates:
+The largest clusters behind the current **99.4% of 5,326**, and no one cause dominates:
 
 | | |
 |---|---|
 | `decl/output` | 5 |
 | `misc/regex-syntax-xslt20` | 2 |
 | `misc/docbook` | 2 |
+| `fn/collection` | 2 |
+
+The two in `fn/collection` are the suite's: `collection-005` is a `version="2.0"` stylesheet that writes
+`xsl:mode`, and `collection-006` is a package test, both marked as applying to a 2.0 processor, which
+cannot run either.
 
 The largest skip left is not a failure either: **6,518 are XSLT 3.0 tests**, read only under `--xslt --30`.
 
 ## What the 3.0 run says
 
-That opt-in run measures the XSLT 3.0 half at **7,524 of 7,561, 99.5%**, from 4,994 of 6,427 when it was first
+That opt-in run measures the XSLT 3.0 half at **7,541 of 7,579, 99.5%**, from 4,994 of 6,427 when it was first
 taken. It reads more tests than it did as well as passing more of them, which is the part worth reading twice:
 opening a feature the suite writes *around* stops whole files being skipped, so the denominator moves too — and
 the percentage can fall while the work goes forward, which is why the two numbers are always given together.
@@ -785,10 +790,11 @@ Then which functions this engine says it has: `function-available()` was never a
 this engine builds calls from — the node-building functions and the JSON ones — and seven functions XSLT 3.0
 added were missing from the table of the ones the compiler builds by hand. Each library now answers from the
 table its own calls come from, and whether a later language's function is available follows the processor as
-well as the version the stylesheet claims. With that, `fn:uri-collection()`, which finds nothing as
-`fn:collection()` does, and constructor functions for the three list types, `xs:NMTOKENS('a b c')` being the
-cast to one under its other spelling. `decl/function` is empty on the 3.0 run. See *Which functions this
-engine says it has* in the compatibility document.
+well as the version the stylesheet claims. With that, `fn:uri-collection()`, which at the time found nothing
+as `fn:collection()` did (both now read `XsltOptions.CollectionResolver`, and the driver serves the
+collections a catalog environment declares), and constructor functions for the three list types,
+`xs:NMTOKENS('a b c')` being the cast to one under its other spelling. `decl/function` is empty on the 3.0
+run. See *Which functions this engine says it has* in the compatibility document.
 
 Then which collation a target expression compares by: the default collation of an `xsl:evaluate` target is
 the one in scope where the instruction stands, which was the one line of that expression's static context
@@ -826,10 +832,10 @@ document.
 |---|---|---|
 | `attr` | 988 / 990 | 99.8% |
 | `type` | 744 / 746 | 99.7% |
-| `fn` | 1,102 / 1,105 | 99.7% |
+| `fn` | 1,108 / 1,111 | 99.7% |
 | `expr` | 649 / 651 | 99.7% |
-| `misc` | 1,761 / 1,767 | 99.7% |
-| `insn` | 1,325 / 1,333 | 99.4% |
+| `misc` | 1,760 / 1,767 | 99.6% |
+| `insn` | 1,337 / 1,345 | 99.4% |
 | `decl` | 955 / 969 | 98.6% |
 
 Every instruction and declaration XSLT 3.0 adds is implemented, and so is **every attribute it hung on an
@@ -847,3 +853,17 @@ function ignores import precedence**. Two functions of one name and arity are re
 `XTSE0770` applies only at the *same* precedence — so a module that imports another and redefines one of its
 functions is refused, though that is exactly how a template, a variable and an attribute set are already
 allowed to be overridden here.
+
+Then collections. `fn:collection()` and `fn:uri-collection()` read `XsltOptions.CollectionResolver`, which
+names what a collection holds, and the driver serves the collections a catalog environment declares — a
+list of files under a name, the name relative to the test set — so the seventeen tests skipped as
+*environment declares a collection* came into the 3.0 run, six in `fn/collection` and eleven in
+`insn/merge`, and all seventeen pass. One of them wanted a `#` kept as a fragment identifier, which
+`System.Uri` takes for part of a file name; the driver sets it aside and puts it back. Three of the merge
+tests had never been seen and found **three gaps in `xsl:merge`**, none of them about collections: two
+`xsl:merge-action` children were accepted, `stable` was accepted on an `xsl:merge-key` as if it were an
+`xsl:sort`, and `xsl:fallback` was refused inside the instruction, where the content model ends in
+`xsl:fallback*` — after the action, not before, which a fourth test asks. Still failing in that set is
+`merge-097`, which asks for a collection by a directory-and-query URI the suite's own note calls
+non-interoperable; the driver declares no such collection. On the 2.0 run four of the six collection tests
+pass, the other two being 3.0 stylesheets marked as applying to a 2.0 processor.

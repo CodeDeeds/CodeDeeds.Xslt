@@ -4576,8 +4576,8 @@ namespace CodeDeeds.Xslt.UnitTests
             Assert.AreEqual("true", Asked("function-available('parse-json', 1)"));
             Assert.AreEqual("false", Asked("function-available('json-to-xml', 3)"));
 
-            // fn:uri-collection is there to be called and finds nothing, which is what fn:collection()
-            // already does and for the same reason: there is no way to resolve a collection here.
+            // fn:uri-collection is there to be called, and reads the collection resolver as fn:collection()
+            // does; what either finds is CollectionTests' business.
             Assert.AreEqual("true", Asked("function-available('uri-collection', 0)"));
             Assert.AreEqual("true", Asked("function-available('uri-collection', 1)"));
             Assert.AreEqual("false", Asked("function-available('uri-collection', 2)"));
@@ -4966,6 +4966,58 @@ namespace CodeDeeds.Xslt.UnitTests
                 MergeRefusal(
                     "<xsl:merge-source sort-before-merge=\"maybe\" select=\"/doc/a\">"
                     + "<xsl:merge-key select=\"@n\"/></xsl:merge-source>"
+                    + "<xsl:merge-action><x/></xsl:merge-action>"));
+        }
+
+        [TestMethod]
+        public void AMergeHasOneActionAndMayEndWithAFallback()
+        {
+            // The content model is (merge-source+, merge-action, fallback*). A second action is a second
+            // answer to what is done with a group, and nothing decides between them.
+            Assert.AreEqual(
+                "XTSE0010",
+                MergeRefusal(
+                    "<xsl:merge-source select=\"/doc/a\"><xsl:merge-key select=\"@n\"/></xsl:merge-source>"
+                    + "<xsl:merge-action><x/></xsl:merge-action>"
+                    + "<xsl:merge-action><y/></xsl:merge-action>"));
+
+            // An xsl:fallback is for a processor without xsl:merge, which this one is not: it is admitted
+            // after the action, and ignored.
+            Assert.AreEqual(
+                "<out><x/><x/></out>",
+                Merged(
+                    "<xsl:merge-source select=\"/doc/a\"><xsl:merge-key select=\"@n\"/></xsl:merge-source>"
+                    + "<xsl:merge-action><x/></xsl:merge-action>"
+                    + "<xsl:fallback>111</xsl:fallback><xsl:fallback>222</xsl:fallback>"));
+
+            // After, not before: the content model is ordered, so a fallback ahead of the action, or a
+            // source behind it, is out of place.
+            Assert.AreEqual(
+                "XTSE0010",
+                MergeRefusal(
+                    "<xsl:merge-source select=\"/doc/a\"><xsl:merge-key select=\"@n\"/></xsl:merge-source>"
+                    + "<xsl:fallback>22</xsl:fallback>"
+                    + "<xsl:merge-action><x/></xsl:merge-action>"));
+
+            Assert.AreEqual(
+                "XTSE0010",
+                MergeRefusal(
+                    "<xsl:merge-source select=\"/doc/a\"><xsl:merge-key select=\"@n\"/></xsl:merge-source>"
+                    + "<xsl:merge-action><x/></xsl:merge-action>"
+                    + "<xsl:merge-source select=\"/doc/a\"><xsl:merge-key select=\"@n\"/></xsl:merge-source>"));
+        }
+
+        [TestMethod]
+        public void AMergeKeyIsNotASortAndHasNoStableAttribute()
+        {
+            // xsl:merge-key takes the attributes of xsl:sort but 'stable': a merge is not a sort, and there
+            // is nothing for stability to be a property of. An attribute the element does not have is
+            // XTSE0090, as everywhere.
+            Assert.AreEqual(
+                "XTSE0090",
+                MergeRefusal(
+                    "<xsl:merge-source select=\"/doc/a\">"
+                    + "<xsl:merge-key select=\"@n\" stable=\"yes\"/></xsl:merge-source>"
                     + "<xsl:merge-action><x/></xsl:merge-action>"));
         }
 

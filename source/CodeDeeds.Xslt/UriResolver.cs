@@ -36,8 +36,16 @@ namespace CodeDeeds.Xslt
     /// because <see cref="IXsltResolver"/> is synchronous; a handler that supports only the asynchronous path
     /// is waited on instead.
     /// </para>
+    /// <para>
+    /// A directory under the root is a collection, for <c>fn:collection()</c> and
+    /// <c>fn:uri-collection()</c>, as it is for <see cref="FileResolver"/>: its files in name order, narrowed
+    /// by a query such as <c>data?select=*.xml;recurse=yes</c>, with the root as the default collection.
+    /// What is handed back are <c>file:</c> URIs, which is what this resolver identifies a file by, so the
+    /// same instance serves as <see cref="XsltOptions.DocumentResolver"/> to read them. A collection over
+    /// the network is refused: a server does not list what it holds, so a resolver that knows has to say.
+    /// </para>
     /// </remarks>
-    public sealed class UriResolver : IXsltResolver
+    public sealed class UriResolver : IXsltResolver, IXsltCollectionResolver
     {
         private static readonly Lazy<HttpClient> s_sharedClient = new Lazy<HttpClient>(CreateSharedClient);
 
@@ -106,6 +114,51 @@ namespace CodeDeeds.Xslt
                 + $"'{target.Scheme}:' references.");
         }
 
+        /// <inheritdoc/>
+        public IReadOnlyList<string>? ResolveCollection(string? uri, string? baseUri)
+        {
+            if (uri is null)
+            {
+                // The default collection is the root directory, where there is one. The network has no
+                // directory to be one.
+                return m_root is null
+                    ? null
+                    : DirectoryCollection.List(m_root, DirectoryCollection.Query.Everything, FileUri);
+            }
+
+            string reference = DirectoryCollection.Split(uri, out DirectoryCollection.Query query);
+
+            // A query alone names the directory the call was written in, which is what nothing before the
+            // question mark means.
+            Uri target = Locate(reference.Length == 0 ? "." : reference, baseUri);
+
+            if (!target.IsFile)
+            {
+                throw new XsltException(
+                    $"The collection '{uri}' resolves to '{target}', and a '{target.Scheme}:' resource "
+                    + "cannot be listed: a collection reached over the network needs a resolver that knows "
+                    + "what the server holds.");
+            }
+
+            string directory = Contain(target, uri);
+
+            if (!Directory.Exists(directory))
+            {
+                return null;
+            }
+
+            return DirectoryCollection.List(directory, query, FileUri);
+        }
+
+        /// <summary>
+        /// The identity of a file: its canonical path as a URI, so that the same file reached by two spellings
+        /// is one resource, and a reference inside it resolves as a URI reference against it.
+        /// </summary>
+        private static string FileUri(string path)
+        {
+            return new Uri(path).AbsoluteUri;
+        }
+
         /// <summary>Works out which URI a reference names: absolute as written, or resolved against its base.</summary>
         private Uri Locate(string href, string? baseUri)
         {
@@ -153,6 +206,28 @@ namespace CodeDeeds.Xslt
 
         private ResolvedResource? Open(Uri target, string href)
         {
+            string path = Contain(target, href);
+
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            StreamReader reader = m_encoding is null
+                ? new StreamReader(path, detectEncodingFromByteOrderMarks: true)
+                : new StreamReader(path, m_encoding);
+
+            return new ResolvedResource(reader, FileUri(path));
+        }
+
+        /// <summary>
+        /// The canonical path a file URI names, once it is known to lie inside the root.
+        /// </summary>
+        /// <param name="target">The file URI.</param>
+        /// <param name="href">The reference as written, for what a refusal says.</param>
+        /// <exception cref="XsltException">There is no root, or the path lies outside it.</exception>
+        private string Contain(Uri target, string href)
+        {
             if (m_root is null)
             {
                 throw new XsltException(
@@ -177,18 +252,7 @@ namespace CodeDeeds.Xslt
                     $"The reference '{href}' resolves outside '{m_root}' and was refused.");
             }
 
-            if (!File.Exists(path))
-            {
-                return null;
-            }
-
-            StreamReader reader = m_encoding is null
-                ? new StreamReader(path, detectEncodingFromByteOrderMarks: true)
-                : new StreamReader(path, m_encoding);
-
-            // Identified by the canonical path as a URI, so that the same file reached by two spellings is
-            // one resource, and a reference inside it resolves as a URI reference against it.
-            return new ResolvedResource(reader, new Uri(path).AbsoluteUri);
+            return path;
         }
 
         private ResolvedResource? Fetch(Uri target, string href)

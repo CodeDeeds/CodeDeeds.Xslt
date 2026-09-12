@@ -804,6 +804,9 @@ namespace CodeDeeds.Xslt
         /// <summary>A collection was asked for with no argument, and there is no default one.</summary>
         FODC0003,
 
+        /// <summary>A collection was asked for by something that is not a URI at all.</summary>
+        FODC0004,
+
         /// <summary>Text that could not be retrieved, or that is not in the encoding claimed for it.</summary>
         FOUT1170,
 

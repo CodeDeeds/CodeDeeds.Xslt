@@ -86,12 +86,14 @@ namespace CodeDeeds.Xslt.Compiler
         public bool Once { get; init; }
 
         /// <summary>
-        /// Elements that may appear only after all other content, and only once.
+        /// Elements that may appear only after all other content: once where the element is marked
+        /// <see cref="Once"/>, and otherwise as many times as the stylesheet writes them.
         /// </summary>
         /// <remarks>
         /// <c>xsl:otherwise</c>, which is what an <c>xsl:choose</c> does when nothing else has. Written
         /// before an <c>xsl:when</c> it would be tested first and always taken, so the specification puts it
-        /// last rather than leaving a stylesheet to be read two ways.
+        /// last rather than leaving a stylesheet to be read two ways. And the <c>xsl:fallback*</c> that
+        /// closes an <c>xsl:merge</c> or an <c>xsl:analyze-string</c>, of which there may be several.
         /// </remarks>
         public string[] Trailing { get; init; } = Array.Empty<string>();
 
@@ -446,7 +448,12 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 Since = XsltVersion.V30,
                 Placement = XsltPlacement.Instruction,
-                Children = new[] { "merge-source", "merge-action" },
+
+                // The content model is (merge-source+, merge-action, fallback*): a fallback is admitted
+                // after the action, for a processor that does not have xsl:merge, and ignored by one that
+                // does. After, not before: the order is part of the model.
+                Children = new[] { "merge-source", "merge-action", "fallback" },
+                Trailing = new[] { "fallback" },
             },
             ["merge-source"] = new XsltElement
             {
@@ -465,7 +472,10 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 Since = XsltVersion.V30,
                 Placement = XsltPlacement.Subordinate,
-                Optional = new[] { "select", "lang", "order", "collation", "case-order", "data-type", "stable" },
+
+                // The attributes of xsl:sort but for 'stable': a merge is not a sort, and there is nothing
+                // for stability to be a property of.
+                Optional = new[] { "select", "lang", "order", "collation", "case-order", "data-type" },
                 Parents = new[] { "merge-source" },
             },
             ["merge-action"] = new XsltElement
@@ -899,6 +909,10 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 Placement = XsltPlacement.Subordinate,
                 Parents = new[] { "choose" },
+
+                // The one trailing element the model has only one of: a second would be a second answer to
+                // what a choose does when nothing else has.
+                Once = true,
             },
             ["matching-substring"] = new XsltElement
             {

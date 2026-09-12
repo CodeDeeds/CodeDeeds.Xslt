@@ -87,6 +87,18 @@ namespace CodeDeeds.Xslt.Conformance
         /// </remarks>
         public List<(string Uri, string? Version, string File)> Packages { get; } = new();
 
+        /// <summary>
+        /// The collections the environment declares: each as the URI it is asked for by, or null for the
+        /// default collection, and the files it holds, relative to the test-set's directory.
+        /// </summary>
+        /// <remarks>
+        /// A catalog collection is a list of files under a name rather than a directory, and the name is
+        /// relative to the test set: <c>collection-004.xml</c> is what a stylesheet beside it asks for as
+        /// <c>collection('collection-004.xml')</c>. A file may carry a fragment identifier, which names an
+        /// element in it rather than the whole; the engine follows one as <c>document()</c> does.
+        /// </remarks>
+        public List<(string? Uri, List<string> Files)> Collections { get; } = new();
+
         /// <summary>Why this environment is beyond the driver, or null if it is usable.</summary>
         public string? Unsupported { get; private init; }
 
@@ -97,9 +109,33 @@ namespace CodeDeeds.Xslt.Conformance
             string? unsupported =
                 element.Element(ns + "schema") is not null ? "environment declares a schema"
                 : element.Element(ns + "collation") is not null ? "environment declares a collation"
-                : element.Element(ns + "collection") is not null ? "environment declares a collection"
                 : element.Element(ns + "resource") is not null ? "environment declares a resource"
                 : null;
+
+            List<(string?, List<string>)> collections = new();
+
+            foreach (XElement collection in element.Elements(ns + "collection"))
+            {
+                if (collection.Element(ns + "query") is not null)
+                {
+                    // A collection defined by a query is an XQuery to run, which this driver has no way to.
+                    unsupported ??= "environment declares a collection by a query";
+                }
+
+                string? uri = (string?)collection.Attribute("uri");
+                List<string> files = new();
+
+                foreach (XElement source in collection.Elements(ns + "source"))
+                {
+                    if ((string?)source.Attribute("file") is string file)
+                    {
+                        files.Add(file);
+                    }
+                }
+
+                // An empty URI is the default collection, which is what a stylesheet asks for with no name.
+                collections.Add((string.IsNullOrEmpty(uri) ? null : uri, files));
+            }
 
             string? sourceFile = null;
             string? sourceContent = null;
@@ -136,6 +172,7 @@ namespace CodeDeeds.Xslt.Conformance
             };
 
             environment.Parameters.AddRange(element.Elements(ns + "param"));
+            environment.Collections.AddRange(collections);
 
             foreach (XElement package in element.Elements(ns + "package"))
             {
