@@ -1,6 +1,11 @@
-﻿<Solution>
-  <Project Path="tests/Benchmarks/Benchmarks.csproj" />
-  <Project Path="tests/W3CConformanceTests/W3CConformanceTests.csproj" />
-  <Project Path="tests/UnitTests/UnitTests.csproj" />
+<Solution>
+  <Folder Name="/SolutionItems/">
+    <File Path=".gitignore" />
+    <File Path="LICENSE" />
+    <File Path="README.md" />
+  </Folder>
   <Project Path="source/CodeDeeds.Xslt/CodeDeeds.Xslt.csproj" />
+  <Project Path="tests/Benchmarks/Benchmarks.csproj" />
+  <Project Path="tests/UnitTests/UnitTests.csproj" />
+  <Project Path="tests/W3CConformanceTests/W3CConformanceTests.csproj" />
 </Solution>
