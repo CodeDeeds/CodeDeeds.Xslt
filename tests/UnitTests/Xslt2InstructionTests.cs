@@ -30,7 +30,11 @@ namespace CodeDeeds.Xslt.UnitTests
                 Backend = backend,
                 OmitXmlDeclaration = true,
                 StylesheetResolver = resolver,
-                Version = implemented ?? XsltVersion.Implemented,
+
+                // A 2.0 processor unless a test asks for 3.0: this is the 2.0 instruction set, and what a 2.0
+                // processor refuses is as much what these tests pin down as what it does. The engine itself
+                // claims 3.0 for a caller who names none.
+                Version = implemented ?? XsltVersion.V20,
             };
 
             string interpreted = new Xslt(stylesheet, For(XsltBackend.Interpreted)).TransformXml(input);
@@ -4108,7 +4112,8 @@ namespace CodeDeeds.Xslt.UnitTests
                         + " xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
                         + "<xsl:template match=\"/\"><out><xsl:apply-templates/></out></xsl:template>"
                         + $"<xsl:template match=\"r\">{parameter}"
-                        + "<xsl:value-of select=\"$p\"/></xsl:template></xsl:stylesheet>")
+                        + "<xsl:value-of select=\"$p\"/></xsl:template></xsl:stylesheet>",
+                        new XsltOptions { Version = XsltVersion.V20 })
                         .TransformXml("<r/>")).Code);
         }
         /// <summary>Serves imported modules from a dictionary, so these tests need no files.</summary>
@@ -4415,7 +4420,8 @@ namespace CodeDeeds.Xslt.UnitTests
         {
             // Vocabulary belongs to the processor, so a 3.0 processor has fn:path however old the stylesheet
             // says it is. And a stylesheet saying 3.0 gets it too, which is this engine's own offer rather
-            // than the specification's: it is what makes XPath 3.0 usable while Implemented still says 2.0.
+            // than the specification's: it is what made XPath 3.0 usable while Implemented still said 2.0,
+            // and what a caller who asks for 2.0 keeps.
             Assert.AreEqual(
                 "/Q{}doc[1]",
                 Run(

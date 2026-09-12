@@ -25,7 +25,10 @@ namespace CodeDeeds.Xslt.UnitTests
         private const string Xsl = "xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\""
             + " xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" exclude-result-prefixes=\"xs\"";
 
-        /// <summary>Writes an expression through a 2.0 stylesheet, on both backends.</summary>
+        /// <summary>
+        /// Writes an expression through a 2.0 stylesheet on a processor asked to be 2.0, on both backends.
+        /// These are 2.0's rules, and a 3.0 processor relaxes some of them for a 2.0 stylesheet.
+        /// </summary>
         private static string Writes(string expression, string input = "<r/>")
         {
             string stylesheet = $"<xsl:stylesheet version=\"2.0\" {Xsl}>"
@@ -37,6 +40,7 @@ namespace CodeDeeds.Xslt.UnitTests
             {
                 Backend = backend,
                 OmitXmlDeclaration = true,
+                Version = XsltVersion.V20,
             };
 
             string interpreted = new Xslt(stylesheet, For(XsltBackend.Interpreted)).TransformXml(input);

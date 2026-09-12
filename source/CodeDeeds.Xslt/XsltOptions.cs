@@ -270,17 +270,19 @@ namespace CodeDeeds.Xslt
         /// </summary>
         /// <remarks>
         /// <para>
-        /// Defaults to <see cref="XsltVersion.Implemented"/>, and moving it is how the 3.0 work is reached
-        /// while that default still says 2.0. The setting is not cosmetic: a processor claiming 2.0 must
-        /// read a <c>version="3.0"</c> stylesheet <em>forwards-compatibly</em>, which means an instruction
-        /// it does not have is refused only when reached and an <c>xsl:fallback</c> beside it is taken. A
-        /// stylesheet that wrote such a fallback is entitled to it, so implementing 3.0 instructions must
-        /// not quietly change what a 2.0 processor does with them — this is what keeps the two apart.
+        /// Defaults to <see cref="XsltVersion.Implemented"/>, which is 3.0. The setting is not cosmetic: a
+        /// processor claiming 2.0 must read a <c>version="3.0"</c> stylesheet <em>forwards-compatibly</em>,
+        /// which means an instruction it does not have is refused only when reached and an
+        /// <c>xsl:fallback</c> beside it is taken. Set this to <see cref="XsltVersion.V20"/> to be that
+        /// processor: <c>system-property('xsl:version')</c> then answers 2.0, the vocabulary is 2.0's, and a
+        /// stylesheet written to branch on the answer takes the branch it wrote.
         /// </para>
         /// <para>
-        /// Raising it is a claim about the whole language, not a request for one feature: a processor
-        /// claiming 3.0 also stops excusing what it does not implement, and refuses a 3.0 construct it
-        /// lacks rather than falling back from it.
+        /// The claim is about the whole language, not one feature at a time. A processor claiming 3.0 stops
+        /// excusing what it does not implement, and refuses a 3.0 construct it lacks rather than falling
+        /// back from it; and it reads a <c>version="2.0"</c> stylesheet with 3.0's vocabulary and library,
+        /// since what that attribute asks for is backwards-compatible behaviour rather than a smaller
+        /// language.
         /// </para>
         /// </remarks>
         public XsltVersion Version { get; init; } = XsltVersion.Implemented;

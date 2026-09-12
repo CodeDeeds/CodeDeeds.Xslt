@@ -21,8 +21,13 @@ namespace CodeDeeds.Xslt.UnitTests
                 + $"<xsl:value-of select=\"{expression}\"/>"
                 + "</out></xsl:template></xsl:stylesheet>";
 
-            XsltOptions For(XsltBackend backend) =>
-                new XsltOptions { Backend = backend, OmitXmlDeclaration = true };
+            // A 2.0 stylesheet runs on a processor asked to be 2.0, since a 3.0 one gives it the 3.0 library.
+            XsltOptions For(XsltBackend backend) => new XsltOptions
+            {
+                Backend = backend,
+                OmitXmlDeclaration = true,
+                Version = version == "2.0" ? XsltVersion.V20 : XsltVersion.Implemented,
+            };
 
             string interpreted = new Xslt(stylesheet, For(XsltBackend.Interpreted)).TransformXml("<r/>");
             string compiled = new Xslt(stylesheet, For(XsltBackend.Compiled)).TransformXml("<r/>");

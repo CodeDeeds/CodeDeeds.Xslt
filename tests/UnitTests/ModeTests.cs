@@ -31,10 +31,10 @@ namespace CodeDeeds.Xslt.UnitTests
                 Backend = backend,
                 OmitXmlDeclaration = true,
 
-                // A 3.0 stylesheet is read as 3.0 only by a processor claiming 3.0. Claiming less and
-                // acting on the features anyway would take the fallback away from every 2.0 stylesheet that
-                // wrote one, so the claim is something these tests have to ask for.
-                Version = version == "3.0" ? XsltVersion.V30 : XsltVersion.Implemented,
+                // The processor claims what the stylesheet says: a 2.0 stylesheet runs on a processor asked
+                // to be 2.0, so that what 2.0 refuses stays refused, and a 3.0 one on the 3.0 processor the
+                // engine is for a caller who names none.
+                Version = version == "3.0" ? XsltVersion.V30 : XsltVersion.V20,
             };
 
             string interpreted = new Xslt(stylesheet, For(XsltBackend.Interpreted)).TransformXml(input);

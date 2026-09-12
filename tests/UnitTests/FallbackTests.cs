@@ -19,12 +19,13 @@ namespace CodeDeeds.Xslt.UnitTests
         private const string Xsl = "xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\"";
         private const string Input = "<r t=\"T\"><i>a</i><i>b</i></r>";
 
-        private static string Run(string stylesheet, string input = Input)
+        private static string Run(string stylesheet, string input = Input, XsltVersion? version = null)
         {
             XsltOptions For(XsltBackend backend) => new XsltOptions
             {
                 Backend = backend,
                 OmitXmlDeclaration = true,
+                Version = version ?? XsltVersion.Implemented,
             };
 
             string interpreted = new Xslt(stylesheet, For(XsltBackend.Interpreted)).TransformXml(input);
@@ -34,7 +35,8 @@ namespace CodeDeeds.Xslt.UnitTests
             return interpreted;
         }
 
-        private static void AssertMatchesReference(string stylesheet, string input = Input)
+        private static void AssertMatchesReference(
+            string stylesheet, string input = Input, XsltVersion? version = null)
         {
             XslCompiledTransform transform = new XslCompiledTransform();
             using (XmlReader reader = XmlReader.Create(new StringReader(stylesheet)))
@@ -55,7 +57,7 @@ namespace CodeDeeds.Xslt.UnitTests
 
             Assert.AreEqual(
                 XmlComparison.Normalize(output.ToString()),
-                XmlComparison.Normalize(Run(stylesheet, input)),
+                XmlComparison.Normalize(Run(stylesheet, input, version)),
                 "output differed from XslCompiledTransform");
         }
 
@@ -133,7 +135,10 @@ namespace CodeDeeds.Xslt.UnitTests
         [DataRow("unprefixed")]
         public void ElementAvailableAgreesWithTheReference(string name)
         {
-            AssertMatchesReference(Probe($"element-available('{name}')"));
+            // Compared on a processor asked to be 2.0. The reference is a 1.0 processor, and from 3.0 the
+            // function answers for every element the specification defines, declarations included, rather
+            // than for the instructions alone.
+            AssertMatchesReference(Probe($"element-available('{name}')"), version: XsltVersion.V20);
         }
 
         /// <summary>
@@ -170,7 +175,9 @@ namespace CodeDeeds.Xslt.UnitTests
         [DataRow("xsl:matching-substring")]
         public void ElementAvailableIsFalseForWhatIsNotAnAvailableInstruction(string name)
         {
-            Assert.AreEqual(Answer(false), Run(Probe($"element-available('{name}')")));
+            // On a 2.0 processor; from 3.0 the function answers for every element the specification defines.
+            Assert.AreEqual(
+                Answer(false), Run(Probe($"element-available('{name}')"), version: XsltVersion.V20));
         }
 
         [TestMethod]
@@ -280,6 +287,9 @@ namespace CodeDeeds.Xslt.UnitTests
             StringAssert.Contains(error.Message, "xsl:invented");
         }
 
+        // A stylesheet claiming 4.0 is claiming a version later than this engine implements, which is what
+        // forwards-compatible processing is for. It was 3.0 in these tests while the engine claimed 2.0.
+
         [TestMethod]
         public void AnUnknownInstructionFallsBackWhenTheStylesheetClaimsALaterVersion()
         {
@@ -287,7 +297,7 @@ namespace CodeDeeds.Xslt.UnitTests
                 "<xsl:template match=\"/\"><out>"
                 + "<xsl:invented><xsl:fallback>fell back</xsl:fallback></xsl:invented>"
                 + "</out></xsl:template>",
-                version: "3.0"));
+                version: "4.0"));
         }
 
         [TestMethod]
@@ -298,7 +308,7 @@ namespace CodeDeeds.Xslt.UnitTests
                 "<xsl:template match=\"/\"><out><xsl:invented>"
                 + "<xsl:fallback>one</xsl:fallback><ignored/><xsl:fallback>two</xsl:fallback>"
                 + "</xsl:invented></out></xsl:template>",
-                version: "3.0"));
+                version: "4.0"));
         }
 
         [TestMethod]
@@ -308,7 +318,7 @@ namespace CodeDeeds.Xslt.UnitTests
                 "<xsl:template match=\"/r\"><out><xsl:for-each select=\"i\"><xsl:invented>"
                 + "<xsl:fallback><xsl:value-of select=\"concat(../@t,.)\"/></xsl:fallback>"
                 + "</xsl:invented></xsl:for-each></out></xsl:template>",
-                version: "3.0"));
+                version: "4.0"));
         }
 
         [TestMethod]
@@ -322,7 +332,7 @@ namespace CodeDeeds.Xslt.UnitTests
                 + "<xsl:also-invented/>"
                 + "<xsl:fallback>fell back</xsl:fallback>"
                 + "</xsl:invented></out></xsl:template>",
-                version: "3.0"));
+                version: "4.0"));
         }
 
         [TestMethod]
@@ -331,7 +341,7 @@ namespace CodeDeeds.Xslt.UnitTests
             XsltException error = Assert.ThrowsExactly<XsltException>(
                 () => Run(Sheet(
                     "<xsl:template match=\"/\"><out><xsl:invented/></out></xsl:template>",
-                    version: "3.0")));
+                    version: "4.0")));
 
             StringAssert.Contains(error.Message, "xsl:invented");
         }
@@ -344,14 +354,14 @@ namespace CodeDeeds.Xslt.UnitTests
             AssertMatchesReference(Sheet(
                 "<xsl:template match=\"/\"><out>ok</out></xsl:template>"
                 + "<xsl:template match=\"never\"><xsl:invented/></xsl:template>",
-                version: "3.0"));
+                version: "4.0"));
         }
 
         [TestMethod]
         public void AVersionBetweenOneAndTwoIsBehindThisProcessorRatherThanAhead()
         {
             // Forwards-compatible processing is for a version later than the processor implements. When this
-            // engine reported 1.0, that included 1.1; now that it reports 2.0 it does not, so the unknown
+            // engine reported 1.0, that included 1.1; now that it reports 3.0 it does not, so the unknown
             // instruction is a mistake this engine can see at compile time and says so — while the version
             // still selects the 1.0 reading of everything 2.0 redefined.
             //
@@ -372,7 +382,7 @@ namespace CodeDeeds.Xslt.UnitTests
         public void VersionOnALiteralResultElementTurnsOnForwardsCompatibleProcessing()
         {
             AssertMatchesReference(Sheet(
-                "<xsl:template match=\"/\"><out xsl:version=\"3.0\">"
+                "<xsl:template match=\"/\"><out xsl:version=\"4.0\">"
                 + "<xsl:invented><xsl:fallback>fell back</xsl:fallback></xsl:invented>"
                 + "</out></xsl:template>"));
         }
@@ -395,7 +405,7 @@ namespace CodeDeeds.Xslt.UnitTests
         public void ASimplifiedStylesheetCanUseForwardsCompatibleProcessing()
         {
             AssertMatchesReference(
-                $"<out {Xsl} xsl:version=\"3.0\">"
+                $"<out {Xsl} xsl:version=\"4.0\">"
                 + "<xsl:invented><xsl:fallback>fell back</xsl:fallback></xsl:invented></out>");
         }
 

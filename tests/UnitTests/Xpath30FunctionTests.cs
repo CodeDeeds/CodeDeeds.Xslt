@@ -68,6 +68,10 @@ namespace CodeDeeds.Xslt.UnitTests
             return interpreted == "<out/>" ? string.Empty : interpreted["<out>".Length..^"</out>".Length];
         }
 
+        /// <summary>
+        /// Evaluates through a 2.0 stylesheet on a processor asked to be 2.0, where none of this exists. A 3.0
+        /// processor, which this engine is unless told otherwise, gives a 2.0 stylesheet the 3.0 library.
+        /// </summary>
         private static string RefusedByTwoPointZero(string expression)
         {
             string stylesheet = $"<xsl:stylesheet version=\"2.0\" {Xsl}>"
@@ -75,7 +79,8 @@ namespace CodeDeeds.Xslt.UnitTests
                 + "</xsl:template></xsl:stylesheet>";
 
             XsltException error = Assert.ThrowsExactly<XsltException>(
-                () => new Xslt(stylesheet, new XsltOptions { OmitXmlDeclaration = true }).TransformXml("<r/>"));
+                () => new Xslt(stylesheet, new XsltOptions { OmitXmlDeclaration = true, Version = XsltVersion.V20 })
+                    .TransformXml("<r/>"));
 
             return error.Code ?? string.Empty;
         }

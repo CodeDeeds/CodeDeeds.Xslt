@@ -91,9 +91,10 @@ without also suppressing errors. `XslCompiledTransform` still falls back there, 
 this does not; that divergence is the same fact as the different answer to `system-property('xsl:version')`,
 and the differential tests record it rather than paper over it.
 
-What is still not claimed is XSLT 3.0. `system-property('xsl:version')` answering `2` is what a stylesheet
-should branch on, and a `version="3.0"` stylesheet gets forwards-compatible processing here exactly as a
-`version="2.0"` one used to.
+XSLT 3.0 is claimed too, since the work below reached it (see *The claim moves to 3.0*):
+`system-property('xsl:version')` answers `3` for a caller who names no version, and `2` for one who sets
+`XsltOptions.Version` to 2.0 — under which a `version="3.0"` stylesheet gets forwards-compatible processing
+exactly as a `version="2.0"` one used to here.
 
 Instructions implemented: `xsl:for-each-group` in all four forms with `current-group()` and
 `current-grouping-key()`, `xsl:analyze-string` with `regex-group()`, `xsl:sequence`, `xsl:perform-sort` and
@@ -2189,8 +2190,9 @@ and the same two one level up for the source document are `XTTE3086` and `XTDE30
 
 ### The version a processor claims is now a setting
 
-`XsltOptions.Version`, defaulting to `XsltVersion.Implemented`, which is still 2.0. This is the piece that
-makes everything above reachable without changing what an existing caller gets, and it is not cosmetic.
+`XsltOptions.Version`, defaulting to `XsltVersion.Implemented` — 2.0 when this was written, and 3.0 since
+the suite reached 99.5% (see *The claim moves to 3.0*). This was the piece that made everything above
+reachable without changing what an existing caller got, and it is not cosmetic.
 
 A processor claiming 2.0 must read a `version="3.0"` stylesheet **forwards-compatibly**: an instruction it does
 not have is refused only when reached, and an `xsl:fallback` written beside it is taken. A stylesheet that
@@ -3153,9 +3155,9 @@ library — either version saying 3.0 is enough, and the two say it for differen
 implements 3.0 has the 3.0 language whatever the stylesheet claims, which is the rule above and which the
 suite tests directly: the `fn:path` tests are written in a `version="2.0"` stylesheet and expect the function
 to be there. A stylesheet that itself says 3.0 gets it too, and that direction is this engine's own offer
-rather than the specification's — it is what lets XPath 3.0 be used today, while `XsltVersion.Implemented`
-still says 2.0. Reading the gate as the processor's version *alone* took XPath 3.0 away from every stylesheet
-using it, which is how the second reason came to be written down.
+rather than the specification's — it is what let XPath 3.0 be used while `XsltVersion.Implemented` still said
+2.0, and what a caller who asks for 2.0 now keeps. Reading the gate as the processor's version *alone* took
+XPath 3.0 away from every stylesheet using it, which is how the second reason came to be written down.
 
 The **XSLT** vocabulary follows the processor alone, and no longer needs the stylesheet to agree: an element or
 attribute 3.0 added is read wherever the processor claims 3.0, whatever the stylesheet says (see *Which
@@ -5418,13 +5420,32 @@ late the version the stylesheet claims.
 
 `misc/forwards` is empty on the 3.0 run.
 
+### The claim moves to 3.0
+
+`XsltVersion.Implemented` is 3.0, so a caller who names no version gets a 3.0 processor:
+`system-property('xsl:version')` answers `3.0`, the vocabulary and the library are 3.0's whatever a stylesheet
+says of itself, and a `version="3.0"` stylesheet is read as what it is rather than forwards-compatibly. The
+measures that decided it are the ones above — 99.5% of the 3.0 suite, 98.9% of QT3 at 3.1, and a function
+library complete but for `fn:load-xquery-module` — and the cost is the one this document warned of: what 3.0
+lacks here is refused rather than fallen back from, which is the package-model corners, starting at a named
+function, and the override signature check.
+
+A 2.0 processor is still there for the asking, `XsltOptions.Version = XsltVersion.V20`, and is what the 2.0
+half of the conformance run measures; the unit tests that pin down what a 2.0 processor refuses ask for it by
+name. Two things moved with the default. A `version="3.0"` stylesheet no longer stands for "newer than this
+processor" in a test of forwards-compatible processing, so those tests say `version="4.0"`. And a 3.0
+processor follows every import twice — once to settle static variables in tree order, once to load — so the
+compiler now remembers what each reference resolved to and asks the resolver once per reference. Over the
+network the difference is plain: the DocBook xslTNG stylesheets had been fetched twice over, 100 requests for
+50 modules.
+
 ### What a processor asked to be 3.0 says it is
 
 **`system-property('xsl:version')` reports the version the processor implements, and this engine is told
 which to be.** §18.2.2 asks for exactly that — *the version of XSLT implemented by the processor* — and the
-answer had been a constant, `XsltVersion.Implemented`, which is 2.0 and stays 2.0 because it is what a caller
-who asks for nothing gets. A caller who asks for 3.0 gets a processor that reads 3.0's vocabulary, refuses
-what 3.0 refuses and passes 99.5% of the 3.0 suite, and it was still answering `2.0` when asked what it was.
+answer had been a constant, `XsltVersion.Implemented`, which was 2.0 and stayed 2.0 while it was what a caller
+who asked for nothing got. A caller who asked for 3.0 got a processor that read 3.0's vocabulary, refused
+what 3.0 refuses and passed 99.5% of the 3.0 suite, and it was still answering `2.0` when asked what it was.
 
 The version the stylesheet claims of itself is a different question, and the function needs both: what the
 stylesheet says decides *how the answer is read* — 1.0 made the property a number and 2.0 made every property

@@ -37,11 +37,13 @@ namespace CodeDeeds.Xslt.UnitTests
                 + body
                 + "</xsl:stylesheet>";
 
+            // The processor claims what the stylesheet says, so that a 2.0 stylesheet is refused what a 2.0
+            // processor refuses; the engine itself claims 3.0 for a caller who names none.
             XsltOptions For(XsltBackend backend) => new XsltOptions
             {
                 Backend = backend,
                 OmitXmlDeclaration = true,
-                Version = version == "3.0" ? XsltVersion.V30 : XsltVersion.Implemented,
+                Version = version == "3.0" ? XsltVersion.V30 : XsltVersion.V20,
             };
 
             string interpreted = new Xslt(stylesheet, For(XsltBackend.Interpreted)).TransformXml(input);
@@ -765,7 +767,7 @@ namespace CodeDeeds.Xslt.UnitTests
                 new XsltOptions
                 {
                     OmitXmlDeclaration = true,
-                    Version = version == "3.0" ? XsltVersion.V30 : XsltVersion.Implemented,
+                    Version = version == "3.0" ? XsltVersion.V30 : XsltVersion.V20,
                 }).TransformXml("<doc/>");
         }
 
@@ -987,7 +989,7 @@ namespace CodeDeeds.Xslt.UnitTests
             const string Body =
                 "<xsl:template match=\"/\"><xsl:value-of select=\"format-number(1, '#,')\"/></xsl:template>";
 
-            Assert.AreEqual("XTDE1310", CodeFrom(Body, XsltVersion.Implemented));
+            Assert.AreEqual("XTDE1310", CodeFrom(Body, XsltVersion.V20));
             Assert.AreEqual("FODF1310", CodeFrom(Body, XsltVersion.V30));
         }
 
@@ -998,7 +1000,7 @@ namespace CodeDeeds.Xslt.UnitTests
                 "<xsl:template match=\"/\"><xsl:value-of select=\"format-number(1, '#', 'nope')\"/>"
                 + "</xsl:template>";
 
-            Assert.AreEqual("XTDE1280", CodeFrom(Body, XsltVersion.Implemented));
+            Assert.AreEqual("XTDE1280", CodeFrom(Body, XsltVersion.V20));
             Assert.AreEqual("FODF1280", CodeFrom(Body, XsltVersion.V30));
         }
 
@@ -1013,7 +1015,7 @@ namespace CodeDeeds.Xslt.UnitTests
                 + "<xsl:template match=\"doc\"><xsl:param name=\"p\" as=\"xs:integer\"/>"
                 + "<xsl:value-of select=\"$p\"/></xsl:template>";
 
-            Assert.AreEqual("XTDE0610", CodeFrom(Body, XsltVersion.Implemented));
+            Assert.AreEqual("XTDE0610", CodeFrom(Body, XsltVersion.V20));
             Assert.AreEqual("XTDE0700", CodeFrom(Body, XsltVersion.V30));
         }
 

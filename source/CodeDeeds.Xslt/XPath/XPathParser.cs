@@ -1311,9 +1311,10 @@ namespace CodeDeeds.Xslt.XPath
         /// </para>
         /// <para>
         /// The other direction is this engine's own offer rather than the specification's. A stylesheet
-        /// saying 3.0 is read forwards-compatibly here, and where a construct it names is one this engine
-        /// has, refusing it would help nobody: the stylesheet asked for 3.0 and 3.0 is what it gets. That is
-        /// what lets XPath 3.0 be used today, while <c>XsltVersion.Implemented</c> still says 2.0.
+        /// saying 3.0 on a processor asked to be 2.0 is read forwards-compatibly here, and where a construct
+        /// it names is one this engine has, refusing it would help nobody: the stylesheet asked for 3.0 and
+        /// 3.0 is what it gets. That is what let XPath 3.0 be used while <c>XsltVersion.Implemented</c>
+        /// still said 2.0, and what keeps it usable for a caller who asks for 2.0 now that it says 3.0.
         /// </para>
         /// </remarks>
         private bool IsXPath30 =>

@@ -97,13 +97,16 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
-        public void TheEngineReportsItselfAsTwoPointZero()
+        public void TheEngineReportsItselfAsThreePointZero()
         {
             // Claiming a version is a statement about the whole language, so this waited on the instruction
             // set and the XPath half both being there rather than on any one feature. What it changes for a
-            // stylesheet: version="2.0" is now taken at its word instead of being read forwards-compatibly,
-            // so a construct this engine does not implement is an error rather than a silent fallback.
-            Assert.AreEqual(XsltVersion.V20, XsltVersion.Implemented);
+            // stylesheet: version="3.0" is now taken at its word instead of being read forwards-compatibly,
+            // so a construct this engine does not implement is an error rather than a silent fallback. A
+            // caller who names no version gets this one, and one who asks for 2.0 still gets a 2.0 processor.
+            Assert.AreEqual(XsltVersion.V30, XsltVersion.Implemented);
+            Assert.AreEqual(XsltVersion.Implemented, new XsltOptions().Version);
+            Assert.AreEqual(XsltVersion.V20, new XsltOptions { Version = XsltVersion.V20 }.Version);
         }
 
         // ---- Atomic types --------------------------------------------------------------------------------

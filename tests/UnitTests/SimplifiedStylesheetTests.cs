@@ -119,8 +119,10 @@ namespace CodeDeeds.Xslt.UnitTests
         [TestMethod]
         public void SystemPropertyReportsTheVersion()
         {
+            // The processor's version, which is 3.0 for a caller who names none, read as a number because a
+            // 1.0 stylesheet is asking.
             Assert.AreEqual(
-                "<out>2</out>",
+                "<out>3</out>",
                 Run($"<xsl:stylesheet version=\"1.0\" {Xsl}>"
                     + "<xsl:template match=\"/\"><out>"
                     + "<xsl:value-of select=\"system-property('xsl:version')\"/>"
@@ -200,7 +202,7 @@ namespace CodeDeeds.Xslt.UnitTests
         public void SystemPropertyWorksInsideASimplifiedStylesheet()
         {
             Assert.AreEqual(
-                "<out>2</out>",
+                "<out>3</out>",
                 Run($"<out {Xsl} xsl:version=\"1.0\">"
                     + "<xsl:value-of select=\"system-property('xsl:version')\"/></out>",
                     "<r/>"));
@@ -222,12 +224,18 @@ namespace CodeDeeds.Xslt.UnitTests
 
             Assert.AreEqual(
                 "<out>2.0</out>",
-                new Xslt(sheet, new XsltOptions { OmitXmlDeclaration = true }).TransformXml("<r/>"));
+                new Xslt(sheet, new XsltOptions { OmitXmlDeclaration = true, Version = XsltVersion.V20 })
+                    .TransformXml("<r/>"));
 
             Assert.AreEqual(
                 "<out>3.0</out>",
                 new Xslt(sheet, new XsltOptions { OmitXmlDeclaration = true, Version = XsltVersion.V30 })
                     .TransformXml("<r/>"));
+
+            // And 3.0 is what a caller who names no version gets.
+            Assert.AreEqual(
+                "<out>3.0</out>",
+                new Xslt(sheet, new XsltOptions { OmitXmlDeclaration = true }).TransformXml("<r/>"));
 
             // What the stylesheet says of itself decides how the answer is read rather than what it is: a
             // version="1.0" stylesheet gets the same version as a number, that being 1.0's type for it.

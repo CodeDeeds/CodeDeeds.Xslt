@@ -47,7 +47,9 @@ dotnet run --project CodeDeeds.Xslt.Conformance -- ../../qt3tests "Expected"
 
 ## Which version each runs
 
-The version the engine claims, which is 2.0 for a caller who names none. `--31` opts the QT3 run into the
+The version the driver asks the engine to be, which is 2.0 unless opted in below. It is asked for by name
+because the engine claims 3.0 for a caller who names none, and the 2.0 half of a run is only meaningful
+against a 2.0 processor. `--31` opts the QT3 run into the
 tests marked `XP30+` and `XP31+`, and `--30` opts the XSLT run into those marked `XSLT30+` — and into a
 processor that claims 3.0, `system-property('xsl:version')` included; that is how the work towards 3.0
 and 3.1 — maps, arrays, function items — is measured.
@@ -702,7 +704,7 @@ compatibility document.
 Then which validation a processor without a schema refuses: `XTSE1660` names a set and the two languages
 name different sets — 2.0 refuses everything but `strip`, 3.0 refuses only `strict`, having noticed that
 `preserve` and `lax` ask for nothing a processor without a schema cannot give. The line now moves with the
-version this engine says it implements, which is 2.0 unless a caller asks for 3.0. `attr/validation` went
+version this engine says it implements, which is the one the driver asks for. `attr/validation` went
 from 1 failure to none on the 3.0 run and from 3 to none on the 2.0 one. See *Which validation a processor
 without a schema refuses* in the compatibility document.
 

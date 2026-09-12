@@ -41,10 +41,17 @@ namespace CodeDeeds.Xslt
         public static XsltVersion V30 => new XsltVersion(300);
 
         /// <summary>
-        /// The most recent version this engine implements. A stylesheet naming a later version is processed
-        /// forwards-compatibly rather than rejected.
+        /// The most recent version this engine implements, which is what a caller naming none gets. A
+        /// stylesheet naming a later version is processed forwards-compatibly rather than rejected.
         /// </summary>
-        public static XsltVersion Implemented => V20;
+        /// <remarks>
+        /// 3.0 since the XSLT 3.0 suite passed at 99.5% and the 3.1 function library was complete but for
+        /// <c>fn:load-xquery-module</c>. It had been 2.0 while the 3.0 work was reached by asking for it,
+        /// so that a <c>version="3.0"</c> stylesheet with an <c>xsl:fallback</c> beside an instruction this
+        /// engine lacked kept the fallback. A caller who wants a 2.0 processor still has one, by setting
+        /// <see cref="XsltOptions.Version"/> to <see cref="V20"/>.
+        /// </remarks>
+        public static XsltVersion Implemented => V30;
 
         /// <summary>Gets the version as it is reported by <c>system-property('xsl:version')</c>.</summary>
         public double Number => m_hundredths / 100.0;

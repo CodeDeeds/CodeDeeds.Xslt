@@ -38,9 +38,15 @@ namespace CodeDeeds.Xslt.UnitTests
 
         private static string Fails(string expression, string version = "3.0")
         {
+            // A 2.0 stylesheet is run on a processor asked to be 2.0, since a 3.0 one gives it the 3.0 library.
+            XsltOptions options = new XsltOptions
+            {
+                OmitXmlDeclaration = true,
+                Version = version == "2.0" ? XsltVersion.V20 : XsltVersion.Implemented,
+            };
+
             XsltException error = Assert.ThrowsExactly<XsltException>(
-                () => new Xslt(Stylesheet(expression, version), new XsltOptions { OmitXmlDeclaration = true })
-                    .TransformXml("<r/>"));
+                () => new Xslt(Stylesheet(expression, version), options).TransformXml("<r/>"));
 
             return error.Code ?? string.Empty;
         }

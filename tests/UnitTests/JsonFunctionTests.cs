@@ -257,8 +257,9 @@ namespace CodeDeeds.Xslt.UnitTests
                 + "<xsl:template match=\"/\"><out><xsl:value-of select=\"parse-json('1')\"/></out>"
                 + "</xsl:template></xsl:stylesheet>";
 
+            // On a processor asked to be 2.0: a 3.0 one gives a 2.0 stylesheet the 3.0 library.
             XsltException error = Assert.ThrowsExactly<XsltException>(
-                () => new Xslt(stylesheet, new XsltOptions()).TransformXml("<r/>"));
+                () => new Xslt(stylesheet, new XsltOptions { Version = XsltVersion.V20 }).TransformXml("<r/>"));
 
             Assert.AreEqual("XPST0017", error.Code);
         }

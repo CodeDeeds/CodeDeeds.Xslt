@@ -25,7 +25,7 @@ namespace CodeDeeds.Xslt.UnitTests
             XsltOptions options = new XsltOptions
             {
                 OmitXmlDeclaration = true,
-                Version = version == "3.0" ? XsltVersion.V30 : XsltVersion.Implemented,
+                Version = version == "3.0" ? XsltVersion.V30 : XsltVersion.V20,
             };
 
             string result = new Xslt(stylesheet, options).TransformXml("<r/>");
@@ -190,7 +190,7 @@ namespace CodeDeeds.Xslt.UnitTests
             XsltException error = Assert.ThrowsExactly<XsltException>(
                 () => new Xslt(
                     asking30,
-                    new XsltOptions { OmitXmlDeclaration = true, Version = XsltVersion.Implemented })
+                    new XsltOptions { OmitXmlDeclaration = true, Version = XsltVersion.V20 })
                     .TransformXml("<r/>"));
 
             Assert.AreEqual("FORX0002", error.Code);

@@ -45,7 +45,6 @@ namespace CodeDeeds.Xslt.Benchmarks
             XsltOptions options = new XsltOptions
             {
                 StylesheetResolver = m_docbookResolver,
-                Version = XsltVersion.V30,
             };
             return new Xslt(m_docbookStylesheet, options);
         }
@@ -77,7 +76,6 @@ namespace CodeDeeds.Xslt.Benchmarks
             {
                 Backend = XsltBackend.Compiled,
                 StylesheetResolver = m_docbookResolver,
-                Version = XsltVersion.V30,
             };
             return new Xslt(m_docbookStylesheet, options);
         }

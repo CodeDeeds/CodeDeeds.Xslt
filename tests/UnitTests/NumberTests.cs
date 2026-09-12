@@ -24,10 +24,16 @@ namespace CodeDeeds.Xslt.UnitTests
                 + "</xsl:stylesheet>";
         }
 
-        /// <summary>Compiles a stylesheet with the XML declaration suppressed, since these tests compare fragments.</summary>
+        /// <summary>
+        /// Compiles a stylesheet with the XML declaration suppressed, since these tests compare fragments, on
+        /// a processor asked to be 2.0: these are 2.0's numbering and formatting rules and codes, compared
+        /// against a 1.0 reference, and the engine itself claims 3.0 for a caller who names none.
+        /// </summary>
         private static Xslt Compile(string stylesheet, XsltBackend backend = XsltBackend.Interpreted)
         {
-            return new Xslt(stylesheet, new XsltOptions { Backend = backend, OmitXmlDeclaration = true });
+            return new Xslt(
+                stylesheet,
+                new XsltOptions { Backend = backend, OmitXmlDeclaration = true, Version = XsltVersion.V20 });
         }
 
         private static string Run(string stylesheet, string input)
@@ -592,7 +598,7 @@ namespace CodeDeeds.Xslt.UnitTests
             Assert.AreEqual(
                 "XTSE0090",
                 Assert.ThrowsExactly<XsltException>(
-                    () => new Xslt(stylesheet, new XsltOptions { OmitXmlDeclaration = true })
+                    () => new Xslt(stylesheet, new XsltOptions { OmitXmlDeclaration = true, Version = XsltVersion.V20 })
                         .TransformXml("<r/>")).Code);
         }
 
@@ -711,7 +717,7 @@ namespace CodeDeeds.Xslt.UnitTests
             {
                 Backend = backend,
                 OmitXmlDeclaration = true,
-                Version = version == "3.0" ? XsltVersion.V30 : XsltVersion.Implemented,
+                Version = version == "3.0" ? XsltVersion.V30 : XsltVersion.V20,
             };
 
             string interpreted = new Xslt(stylesheet, For(XsltBackend.Interpreted)).TransformXml("<r/>");

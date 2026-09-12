@@ -56,7 +56,9 @@ namespace CodeDeeds.Xslt.UnitTests
             return error.Code ?? string.Empty;
         }
 
-        /// <summary>Evaluates through a 2.0 stylesheet, where none of this syntax exists.</summary>
+        /// <summary>
+        /// Evaluates through a 2.0 stylesheet on a processor asked to be 2.0, where none of this syntax exists.
+        /// </summary>
         private static string RefusedByTwoPointZero(string expression)
         {
             string stylesheet = $"<xsl:stylesheet version=\"2.0\" {XslOnly} {Namespaces} xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
@@ -65,7 +67,8 @@ namespace CodeDeeds.Xslt.UnitTests
                 + "</xsl:template></xsl:stylesheet>";
 
             XsltException error = Assert.ThrowsExactly<XsltException>(
-                () => new Xslt(stylesheet, new XsltOptions { OmitXmlDeclaration = true }).TransformXml("<r/>"));
+                () => new Xslt(stylesheet, new XsltOptions { OmitXmlDeclaration = true, Version = XsltVersion.V20 })
+                    .TransformXml("<r/>"));
 
             return error.Code ?? string.Empty;
         }
