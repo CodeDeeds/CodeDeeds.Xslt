@@ -13,7 +13,7 @@ namespace CodeDeeds.Xslt.Compiler
     /// all outside its digits, and one grouping interval repeats. From 2.0 the specification gives its own
     /// picture language: every member of the zero digit's family is a mandatory digit sign, the characters a
     /// picture may contain are constrained and a picture breaking those constraints is <c>FODF1310</c>, and
-    /// 3.1 adds an exponent part. The differences are recorded in <c>XsltCompatibility.md</c>; they are
+    /// 3.1 adds an exponent part. The differences are recorded in <c>ConformanceNotes.md</c>; they are
     /// deliberate, and <c>XslCompiledTransform</c> was asked about every picture that tells the two apart.
     /// <para>
     /// Pictures are parsed once when the stylesheet is compiled where the picture is a literal, which it almost

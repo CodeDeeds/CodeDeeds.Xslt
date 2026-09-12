@@ -125,8 +125,8 @@ namespace CodeDeeds.Xslt.Runtime
         /// A number rather than a flag because the specification writes it as one, and because <c>5</c>,
         /// <c>5.0</c> and <c>5.00</c> have to mean the same thing. Only the step to 5 changes anything here:
         /// HTML 5 replaced the document type declaration with a bare <c>&lt;!DOCTYPE html&gt;</c> and settled
-        /// which elements are empty by name rather than by DTD, which is what
-        /// <see cref="XsltCompatibility">the compatibility notes</see> describe.
+        /// which elements are empty by name rather than by DTD, which is what the conformance notes
+        /// (<c>ConformanceNotes.md</c>) describe.
         /// </remarks>
         public decimal? HtmlVersion { get; set; }
 

@@ -527,7 +527,7 @@ namespace CodeDeeds.Xslt.XPath
                     // already been read as part of a range, so one reaching here is neither — at 3.0,
                     // whose grammar (XSD 1.1's) says so. XSD 1.0's, which XPath 2.0 reads by, let a hyphen
                     // stand for itself anywhere: '[a-c-1-4]' is two ranges with a hyphen between, which
-                    // the 2.0 suite asks for and the 3.0 one refuses. Recorded in XsltCompatibility.md.
+                    // the 2.0 suite asks for and the 3.0 one refuses. Recorded in ConformanceNotes.md.
                     if (three && any && (index + 1 >= pattern.Length || pattern[index + 1] != ']'))
                     {
                         throw Invalid(

@@ -1525,7 +1525,7 @@ namespace CodeDeeds.Xslt.Runtime
         /// its arguments — that is what allows a call to be lifted out of a loop, evaluated once, or skipped —
         /// and letting a tunnelled value in through the side would make two calls with identical arguments
         /// return different answers. Templates it invokes therefore start from an empty set. The
-        /// specification never settled this corner; see the note in XsltCompatibility.md.
+        /// specification never settled this corner; see the note in ConformanceNotes.md.
         /// </para>
         /// </remarks>
         /// <param name="function">The function to call.</param>

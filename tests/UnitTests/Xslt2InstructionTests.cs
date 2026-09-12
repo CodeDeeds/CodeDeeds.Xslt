@@ -1043,7 +1043,7 @@ namespace CodeDeeds.Xslt.UnitTests
             // empty, so the template reads its default; the direct route sees the tunnelled value. A
             // stylesheet function has to be a function of its arguments — that is what lets a call be hoisted
             // or skipped — and a tunnelled value would make two identical calls return different answers.
-            // The specification never settled this corner; the choice is recorded in XsltCompatibility.md.
+            // The specification never settled this corner; the choice is recorded in ConformanceNotes.md.
             Assert.AreEqual(
                 "<out>[(none)][v]</out>",
                 Run(
@@ -2135,7 +2135,7 @@ namespace CodeDeeds.Xslt.UnitTests
         public void AMapOverridesTheOneItDrawsIn()
         {
             // Where the same character is substituted twice the last wins, and a map's own declarations are
-            // read after what it draws in. See the note in XsltCompatibility.md: the specification says the
+            // read after what it draws in. See the note in ConformanceNotes.md: the specification says the
             // last mapping wins but leaves the order of the two open.
             Assert.AreEqual(
                 "<out>[own]</out>",

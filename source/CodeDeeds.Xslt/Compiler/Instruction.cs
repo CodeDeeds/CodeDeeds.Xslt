@@ -1980,7 +1980,7 @@ namespace CodeDeeds.Xslt.Compiler
     /// can be a child of an element — so what reaches the output is what the same content would have
     /// produced in place. The difference shows only where a document node is a value rather than output,
     /// which needs the sequence-valued variables that <c>as</c> declarations bring; see
-    /// XsltCompatibility.md.
+    /// ConformanceNotes.md.
     /// </para>
     /// </remarks>
     internal sealed class DocumentInstruction : Instruction
