@@ -478,9 +478,7 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             // An ordinal written in digits is a suffix in English and a full stop in German: 3rd against 3.
-            return builder
-                .Append(GermanNumbers.Speaks(language) ? "." : EnglishNumbers.OrdinalSuffix(magnitude))
-                .ToString();
+            return builder.Append(Languages.Words(language).OrdinalSuffix(magnitude, m_variation)).ToString();
         }
 
         /// <summary>The separator that belongs this many digits from the right, if any.</summary>
@@ -502,17 +500,14 @@ namespace CodeDeeds.Xslt.XPath
             return null;
         }
 
-        /// <summary>Renders in words, cardinal or ordinal, in the language asked for.</summary>
+        /// <summary>
+        /// Renders in words, cardinal or ordinal, in the language asked for — or in English, where the
+        /// language is one this engine does not spell.
+        /// </summary>
         private string Words(ulong magnitude, string? language)
         {
-            if (GermanNumbers.Speaks(language))
-            {
-                return m_ordinal
-                    ? GermanNumbers.Ordinal(magnitude, m_variation)
-                    : GermanNumbers.Cardinal(magnitude);
-            }
-
-            return m_ordinal ? EnglishNumbers.Ordinal(magnitude) : EnglishNumbers.Cardinal(magnitude);
+            LanguageWords words = Languages.Words(language);
+            return m_ordinal ? words.Ordinal(magnitude, m_variation) : words.Cardinal(magnitude);
         }
 
         /// <summary>
@@ -564,9 +559,10 @@ namespace CodeDeeds.Xslt.XPath
     /// <summary>Numbers written out in English words.</summary>
     /// <remarks>
     /// <para>
-    /// English and German are the two languages this engine spells numbers in, and English is what every
-    /// other request falls back to. <c>fn:format-integer</c> asks for exactly that: a processor that does
-    /// not have the language wanted uses one it does have, and must not raise an error over it.
+    /// English is what a request for a language this engine does not spell falls back to; the languages it
+    /// does spell are found through <see cref="Languages"/>. <c>fn:format-integer</c> asks for exactly that:
+    /// a processor that does not have the language wanted uses one it does have, and must not raise an error
+    /// over it.
     /// </para>
     /// <para>
     /// The dialect is the one the specification's own examples use — <c>one hundred and twenty-three</c>,

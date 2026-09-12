@@ -974,19 +974,21 @@ namespace CodeDeeds.Xslt.Conformance
         /// Whether this engine spells numbers in a language, which is what <c>lang</c> asks of it.
         /// </summary>
         /// <remarks>
-        /// English and German, with the primary subtag deciding: a test asking for <c>de-AT</c> is asking
-        /// for German. Every other language falls back to English, which the specification allows a
-        /// processor to do — but a test declaring the language wants the language, so it is skipped rather
-        /// than answered in the wrong one.
+        /// The primary subtag decides: a test asking for <c>de-AT</c> is asking for German. Every other
+        /// language falls back to English, which the specification allows a processor to do — but a test
+        /// declaring the language wants the language, so it is skipped rather than answered in the wrong one.
         /// </remarks>
         /// <param name="language">The language code the test declares.</param>
         private static bool SpellsNumbersIn(string language)
         {
             string primary = language.Split('-')[0];
 
-            return primary.Equals("en", StringComparison.OrdinalIgnoreCase)
-                || primary.Equals("de", StringComparison.OrdinalIgnoreCase);
+            return Array.Exists(
+                s_spoken, code => code.Equals(primary, StringComparison.OrdinalIgnoreCase));
         }
+
+        /// <summary>The primary subtags of the languages the engine spells numbers in.</summary>
+        private static readonly string[] s_spoken = { "en", "de", "fr", "es", "pt", "it", "nb", "no", "nn", "sv", "da" };
 
         /// <summary>
         /// Decides whether a <c>spec</c> dependency takes in the version being run.

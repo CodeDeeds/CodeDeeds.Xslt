@@ -5,10 +5,11 @@ namespace CodeDeeds.Xslt.XPath
     /// <summary>Numbers written out in German words.</summary>
     /// <remarks>
     /// <para>
-    /// The second language this engine spells numbers in, and the only other one the conformance suite asks
-    /// for by name. Everything else still falls back to <see cref="EnglishNumbers"/>, which is what the
-    /// specification asks a processor to do for a language it does not have: use one it does have, and do
-    /// not raise an error over it.
+    /// The second language this engine learned to spell numbers in, and the one the conformance suite asks
+    /// for by name besides English; the others are found through <see cref="Languages"/>. A language none
+    /// of them covers falls back to <see cref="EnglishNumbers"/>, which is what the specification asks a
+    /// processor to do for a language it does not have: use one it does have, and do not raise an error
+    /// over it.
     /// </para>
     /// <para>
     /// German writes everything below a million as a single word, with the units before the tens —

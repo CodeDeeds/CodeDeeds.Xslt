@@ -218,9 +218,9 @@ namespace CodeDeeds.Xslt.Conformance
 
                     case "language":
                     case "default-language":
-                        // English is the one language this engine writes numbers in, so a test wanting it is
-                        // one this engine should be judged on rather than excused from.
-                        if (IsEnglish(value) != satisfied)
+                        // A test wanting a language this engine writes numbers and dates in is one it should
+                        // be judged on rather than excused from.
+                        if (IsSpoken(value) != satisfied)
                         {
                             why = $"needs {type} '{value}'";
                             return false;
@@ -251,11 +251,14 @@ namespace CodeDeeds.Xslt.Conformance
             return true;
         }
 
-        /// <summary>Whether a language tag names English, which is the only language for numbering here.</summary>
-        private static bool IsEnglish(string language)
+        /// <summary>The primary subtags of the languages the engine spells numbers and writes dates in.</summary>
+        private static readonly string[] s_spoken = { "en", "de", "fr", "es", "pt", "it", "nb", "no", "nn", "sv", "da" };
+
+        /// <summary>Whether a language tag names one of the languages the engine has, by its primary subtag.</summary>
+        private static bool IsSpoken(string language)
         {
-            return language.Equals("en", StringComparison.OrdinalIgnoreCase)
-                || language.StartsWith("en-", StringComparison.OrdinalIgnoreCase);
+            string primary = language.Split('-')[0];
+            return Array.Exists(s_spoken, code => code.Equals(primary, StringComparison.OrdinalIgnoreCase));
         }
 
         /// <summary>Whether a numbering sequence named by one of its characters is a family of digits.</summary>

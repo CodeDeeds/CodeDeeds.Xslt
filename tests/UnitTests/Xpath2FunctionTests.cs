@@ -680,13 +680,13 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
-        [DataRow("'de', ()", "[Language: en]August")]
+        [DataRow("'hu', ()", "[Language: en]August")]
         [DataRow("'en-GB', ()", "August")]
         [DataRow("'EN', ()", "August")]
         [DataRow("(), ()", "August")]
         [DataRow("'en', 'CB'", "[Calendar: AD]August")]
         [DataRow("'en', 'AD'", "August")]
-        [DataRow("'de', 'CB'", "[Language: en][Calendar: AD]August")]
+        [DataRow("'hu', 'CB'", "[Language: en][Calendar: AD]August")]
         public void AnotherLanguageOrCalendarIsAnsweredInEnglishAndSaysSo(string arguments, string expected)
         {
             // §9.8.4.8: a fallback names what it fell back to, in front of the answer.

@@ -16,44 +16,15 @@ namespace CodeDeeds.Xslt.XPath
     /// </para>
     /// <para>
     /// The numeric presentations are the ones <c>xsl:number</c> already formats — decimal with padding, roman
-    /// numerals, letter sequences — so they are formatted by the same code. Only the names are new, and they
-    /// are English: a call asking for another language is answered in English and says so, with the
-    /// <c>[Language: en]</c> prefix the specification asks for (§9.8.4.8), and a calendar other than the
-    /// Gregorian one is answered likewise with <c>[Calendar: AD]</c>.
+    /// numerals, letter sequences — so they are formatted by the same code. The names come from
+    /// <see cref="Languages"/>, in the language asked for where it is one this engine has; a call asking for
+    /// another is answered in English and says so, with the <c>[Language: en]</c> prefix the specification
+    /// asks for (§9.8.4.8), and a calendar other than the Gregorian one is answered likewise with
+    /// <c>[Calendar: AD]</c>.
     /// </para>
     /// </remarks>
     internal static class DateFormatting
     {
-        private static readonly string[] s_months =
-        {
-            "January", "February", "March", "April", "May", "June",
-            "July", "August", "September", "October", "November", "December",
-        };
-
-        private static readonly string[] s_days =
-        {
-            "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
-        };
-
-        /// <summary>
-        /// The conventional short forms, used before a name is cut to fit a width (§9.8.4.2).
-        /// </summary>
-        /// <remarks>
-        /// A width narrower than the full name asks for an abbreviation, and the conventional one comes
-        /// before the first few letters: <c>[FNn,3-5]</c> is <c>Thurs</c> and <c>[MNn,3-4]</c> is
-        /// <c>Sept</c>. Where even the abbreviation is too long, it is cut, so <c>[FNn,3-4]</c> is
-        /// <c>Thur</c> and <c>[MNn,3-3]</c> is <c>Sep</c>.
-        /// </remarks>
-        private static readonly string[] s_monthAbbreviations =
-        {
-            "Jan", "Feb", "Mar", "Apr", "May", "June", "July", "Aug", "Sept", "Oct", "Nov", "Dec",
-        };
-
-        private static readonly string[] s_dayAbbreviations =
-        {
-            "Mon", "Tues", "Weds", "Thurs", "Fri", "Sat", "Sun",
-        };
-
         /// <summary>The components each function will answer for.</summary>
         /// <remarks>
         /// Asking a date what hour it is has no answer, and the specification makes it an error rather than a
@@ -92,11 +63,14 @@ namespace CodeDeeds.Xslt.XPath
 
             StringBuilder result = new StringBuilder(picture.Length);
 
-            // The only names here are English and the only calendar the Gregorian one, so a call asking for
-            // another is answered with these and told so in front of the answer, which is what the
-            // specification asks of a fallback (§9.8.4.8). A language is English by its first subtag, so
-            // 'en-GB' and 'EN' are answered without comment.
-            if (language is not null && !IsEnglish(language))
+            // The names are the language's, where it is one this engine has, and the only calendar is the
+            // Gregorian one. A call asking for anything else is answered in English, or in that calendar,
+            // and told so in front of the answer, which is what the specification asks of a fallback
+            // (§9.8.4.8). The primary subtag decides, so 'en-GB' and 'EN' are answered without comment.
+            DateNames? known = Languages.NamesIn(language);
+            DateNames names = known ?? Languages.English;
+
+            if (language is not null && known is null)
             {
                 result.Append("[Language: en]");
             }
@@ -150,8 +124,11 @@ namespace CodeDeeds.Xslt.XPath
                         $"The picture '{picture}' opens a component with '[' and never closes it.");
                 }
 
+                // Words are spelled in the same language as the names, and an unknown language gets
+                // English for both.
                 AppendComponent(
-                    result, value, picture.AsSpan(i + 1, end - i - 1), allowed, function, scratch, roundsFraction);
+                    result, value, picture.AsSpan(i + 1, end - i - 1), allowed, function, scratch, roundsFraction,
+                    names, known is null ? null : language);
                 i = end;
             }
 
@@ -171,6 +148,8 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="function">The function being called, for error messages.</param>
         /// <param name="scratch">Room for a number to be formatted into, supplied by the caller.</param>
         /// <param name="roundsFraction">Whether the fractional seconds are rounded rather than cut.</param>
+        /// <param name="names">The names of the language the value is written in.</param>
+        /// <param name="language">The language tag its words are spelled in, or null for English.</param>
         private static void AppendComponent(
             StringBuilder result,
             XdmDateTime value,
@@ -178,7 +157,9 @@ namespace CodeDeeds.Xslt.XPath
             string allowed,
             string function,
             Span<char> scratch,
-            bool roundsFraction)
+            bool roundsFraction,
+            DateNames names,
+            string? language)
         {
             ReadOnlySpan<char> marker = WithoutWhitespace(written);
 
@@ -218,7 +199,7 @@ namespace CodeDeeds.Xslt.XPath
                 case 'Y':
                     Fit(
                         result,
-                        Number(YearWithin(instant.Year, presentation, maximum), presentation, ordinal, scratch),
+                        Number(YearWithin(instant.Year, presentation, maximum), presentation, ordinal, scratch, language),
                         minimum,
                         maximum,
                         presentation);
@@ -228,19 +209,19 @@ namespace CodeDeeds.Xslt.XPath
                     Fit(
                         result,
                         IsName(presentation)
-                            ? Name(Abbreviated(s_months, s_monthAbbreviations, instant.Month - 1, maximum), presentation)
-                            : Number(instant.Month, presentation, ordinal, scratch),
+                            ? Name(Abbreviated(names.Months, names.MonthAbbreviations, instant.Month - 1, maximum), presentation)
+                            : Number(instant.Month, presentation, ordinal, scratch, language),
                         minimum,
                         maximum,
                         presentation);
                     return;
 
                 case 'D':
-                    Fit(result, Number(instant.Day, presentation, ordinal, scratch), minimum, maximum, presentation);
+                    Fit(result, Number(instant.Day, presentation, ordinal, scratch, language), minimum, maximum, presentation);
                     return;
 
                 case 'd':
-                    Fit(result, Number(instant.DayOfYear, presentation, ordinal, scratch), minimum, maximum, presentation);
+                    Fit(result, Number(instant.DayOfYear, presentation, ordinal, scratch, language), minimum, maximum, presentation);
                     return;
 
                 case 'F':
@@ -250,8 +231,8 @@ namespace CodeDeeds.Xslt.XPath
                     Fit(
                         result,
                         IsName(presentation)
-                            ? Name(Abbreviated(s_days, s_dayAbbreviations, day, maximum), presentation)
-                            : Number(day + 1, presentation, ordinal, scratch),
+                            ? Name(Abbreviated(names.Days, names.DayAbbreviations, day, maximum), presentation)
+                            : Number(day + 1, presentation, ordinal, scratch, language),
                         minimum,
                         maximum,
                         presentation);
@@ -259,39 +240,39 @@ namespace CodeDeeds.Xslt.XPath
                 }
 
                 case 'W':
-                    Fit(result, Number(WeekOfYear(instant), presentation, ordinal, scratch), minimum, maximum, presentation);
+                    Fit(result, Number(WeekOfYear(instant), presentation, ordinal, scratch, language), minimum, maximum, presentation);
                     return;
 
                 case 'w':
                     Fit(
                         result,
-                        Number(((instant.Day - 1) / 7) + 1, presentation, ordinal, scratch),
+                        Number(((instant.Day - 1) / 7) + 1, presentation, ordinal, scratch, language),
                         minimum,
                         maximum,
                         presentation);
                     return;
 
                 case 'H':
-                    Fit(result, Number(instant.Hour, presentation, ordinal, scratch), minimum, maximum, presentation);
+                    Fit(result, Number(instant.Hour, presentation, ordinal, scratch, language), minimum, maximum, presentation);
                     return;
 
                 case 'h':
                 {
                     int hour = instant.Hour % 12;
-                    Fit(result, Number(hour == 0 ? 12 : hour, presentation, ordinal, scratch), minimum, maximum, presentation);
+                    Fit(result, Number(hour == 0 ? 12 : hour, presentation, ordinal, scratch, language), minimum, maximum, presentation);
                     return;
                 }
 
                 case 'P':
-                    Fit(result, Name(HalfDay(instant.Hour < 12, maximum), presentation), 0, maximum, presentation);
+                    Fit(result, Name(names.HalfDay(instant.Hour < 12, maximum), presentation), 0, maximum, presentation);
                     return;
 
                 case 'm':
-                    Fit(result, Number(instant.Minute, presentation, ordinal, scratch), minimum, maximum, presentation);
+                    Fit(result, Number(instant.Minute, presentation, ordinal, scratch, language), minimum, maximum, presentation);
                     return;
 
                 case 's':
-                    Fit(result, Number(instant.Second, presentation, ordinal, scratch), minimum, maximum, presentation);
+                    Fit(result, Number(instant.Second, presentation, ordinal, scratch, language), minimum, maximum, presentation);
                     return;
 
                 case 'f':
@@ -299,7 +280,7 @@ namespace CodeDeeds.Xslt.XPath
                     return;
 
                 case 'E':
-                    result.Append(instant.Year > 0 ? "AD" : "BC");
+                    result.Append(instant.Year > 0 ? names.AnnoDomini : names.BeforeChrist);
                     return;
 
                 case 'C':
@@ -707,19 +688,18 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
-        /// A name, or its conventional short form where the name is longer than the width allows.
+        /// A name, or its conventional short form where the name is longer than the width allows (§9.8.4.2).
         /// </summary>
-        private static string Abbreviated(string[] names, string[] abbreviations, int index, int maximum)
+        /// <remarks>
+        /// A width narrower than the full name asks for an abbreviation, and the conventional one comes
+        /// before the first few letters: <c>[FNn,3-5]</c> is <c>Thurs</c> and <c>[MNn,3-4]</c> is
+        /// <c>Sept</c>. Where even the abbreviation is too long it is cut, so <c>[FNn,3-4]</c> is
+        /// <c>Thur</c> and <c>[MNn,3-3]</c> is <c>Sep</c>; and a language whose conventional forms this
+        /// engine does not have is cut from the start.
+        /// </remarks>
+        private static string Abbreviated(string[] names, string[]? abbreviations, int index, int maximum)
         {
-            return names[index].Length > maximum ? abbreviations[index] : names[index];
-        }
-
-        /// <summary>Whether a language tag names English, by its first subtag.</summary>
-        private static bool IsEnglish(string language)
-        {
-            int dash = language.IndexOf('-');
-            ReadOnlySpan<char> primary = dash < 0 ? language : language.AsSpan(0, dash);
-            return primary.Equals("en", StringComparison.OrdinalIgnoreCase);
+            return abbreviations is not null && names[index].Length > maximum ? abbreviations[index] : names[index];
         }
 
         private static string Name(string name, ReadOnlySpan<char> presentation)
@@ -785,7 +765,8 @@ namespace CodeDeeds.Xslt.XPath
             int value,
             ReadOnlySpan<char> presentation,
             bool ordinal,
-            Span<char> scratch)
+            Span<char> scratch,
+            string? language)
         {
             if (!ordinal
                 && IsPlainDigits(presentation)
@@ -797,7 +778,9 @@ namespace CodeDeeds.Xslt.XPath
 
             try
             {
-                return IntegerPicture.Parse(presentation.ToString(), modifiers: false, ordinal).Format(value).AsSpan();
+                return IntegerPicture.Parse(presentation.ToString(), modifiers: false, ordinal)
+                    .Format(value, language)
+                    .AsSpan();
             }
             catch (XsltException)
             {
@@ -870,22 +853,6 @@ namespace CodeDeeds.Xslt.XPath
             {
                 result.Append(text).Append(' ', minimum - text.Length);
             }
-        }
-
-        /// <summary>
-        /// The am/pm marker in the width it is asked for.
-        /// </summary>
-        /// <remarks>
-        /// The marker has no one spelling, so the width modifier chooses between the spellings rather than
-        /// padding or cutting one of them: <c>[PN]</c> is A.M. and <c>[PN,2-2]</c> is AM, where cutting
-        /// would have left A. and padding <c>[PNn,3-3]</c> a trailing space. The minimum is therefore spent
-        /// on the choice and not applied again afterwards; only a maximum below two still cuts, to A.
-        /// </remarks>
-        /// <param name="morning">Whether the time is before noon.</param>
-        /// <param name="maximum">The width to stay within.</param>
-        private static string HalfDay(bool morning, int maximum)
-        {
-            return maximum < 4 ? (morning ? "am" : "pm") : (morning ? "a.m." : "p.m.");
         }
 
         /// <summary>

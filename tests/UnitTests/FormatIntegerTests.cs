@@ -60,7 +60,7 @@ namespace CodeDeeds.Xslt.UnitTests
 
             // A language this engine does not spell falls back to English rather than being refused, which
             // is what the specification asks of a processor that does not have the one wanted.
-            Assert.AreEqual("twenty-one", Writes("format-integer(21, 'w', 'fr')"));
+            Assert.AreEqual("twenty-one", Writes("format-integer(21, 'w', 'hu')"));
             Assert.AreEqual("twenty-one", Writes("format-integer(21, 'w', ())"));
         }
 
