@@ -2466,38 +2466,62 @@ namespace CodeDeeds.Xslt.Compiler
                     + "configured. Set XsltOptions.StylesheetResolver to allow references to be followed.");
             }
 
+            // Asked once per reference, however many walks pass it. The static variables of a module are
+            // settled on a first walk, before the module is loaded, and both walks follow every import; a
+            // resolver reading from the network would otherwise fetch each module twice. The reference as
+            // written, with what it resolves against, names one resource — a resolver answers the same
+            // identity for the same stylesheet every time, which is what ResolvedResource asks of it.
+            string reference = string.Concat(baseUri, "\n", href);
+
+            if (m_references.TryGetValue(reference, out (XdmTree Tree, string Uri) known))
+            {
+                RequireNotBeingRead(loading, known.Uri, href);
+                return known;
+            }
+
             ResolvedResource? resolved = m_options.StylesheetResolver.Resolve(href, baseUri)
                 ?? throw new XsltException($"The stylesheet 'xsl:{kind} href=\"{href}\"' could not be found.");
 
-            if (loading.Contains(resolved.Uri))
-            {
-                resolved.Reader.Dispose();
-                throw new XsltException(
-                    $"The stylesheet reference '{href}' forms a cycle: '{resolved.Uri}' is already being read.");
-            }
-
-            // Read once, however many times it is named: the static variables of a module are settled on a
-            // first walk, before the module is loaded, and the tree settled then is the tree loaded later.
             try
             {
-                if (m_moduleCache.TryGetValue(resolved.Uri, out XdmTree? cached))
+                RequireNotBeingRead(loading, resolved.Uri, href);
+
+                // And parsed once, however many references name it: two spellings of one module are one tree.
+                if (!m_moduleCache.TryGetValue(resolved.Uri, out XdmTree? tree))
                 {
-                    return (cached, resolved.Uri);
+                    tree = XdmTreeBuilder.FromXml(
+                        resolved.Reader, locations: true, entityResolver: m_options.EntityResolver, baseUri: resolved.Uri);
+                    m_moduleCache[resolved.Uri] = tree;
                 }
 
-                XdmTree parsed = XdmTreeBuilder.FromXml(
-                    resolved.Reader, locations: true, entityResolver: m_options.EntityResolver, baseUri: resolved.Uri);
-                m_moduleCache[resolved.Uri] = parsed;
-                return (parsed, resolved.Uri);
+                known = (tree, resolved.Uri);
             }
             finally
             {
                 resolved.Reader.Dispose();
             }
+
+            m_references[reference] = known;
+            return known;
+        }
+
+        /// <summary>Refuses a reference to a module that is still being read above it, which is a cycle.</summary>
+        private static void RequireNotBeingRead(HashSet<string> loading, string uri, string href)
+        {
+            if (loading.Contains(uri))
+            {
+                throw new XsltException(
+                    $"The stylesheet reference '{href}' forms a cycle: '{uri}' is already being read.");
+            }
         }
 
         /// <summary>The modules read so far, by the URI they resolved to.</summary>
         private readonly Dictionary<string, XdmTree> m_moduleCache = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// What each reference resolved to, by the reference as written together with its base URI.
+        /// </summary>
+        private readonly Dictionary<string, (XdmTree Tree, string Uri)> m_references = new(StringComparer.Ordinal);
 
         /// <summary>
         /// Records one top-level declaration, without compiling any bodies yet, so that later references to it
@@ -6918,7 +6942,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// stylesheet saying 3.0 is being read forwards-compatibly — where an instruction this processor
         /// does not have is meant to be refused when reached and an <c>xsl:fallback</c> beside it taken.
         /// Implementing a 3.0 instruction and acting on it anyway would take that fallback away from every
-        /// stylesheet that wrote one, which is not this engine's to do while it still says it is 2.0.
+        /// stylesheet that wrote one, which is not this engine's to do while a caller has asked it to be 2.0.
         /// </remarks>
         private bool Claims30(int element)
         {

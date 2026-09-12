@@ -60,6 +60,30 @@ namespace CodeDeeds.Xslt.UnitTests
         // ---- The trust boundary --------------------------------------------------------------------------
 
         [TestMethod]
+        public void AModuleIsResolvedOncePerReferenceWhateverTheProcessorClaims()
+        {
+            // A 3.0 processor follows every import twice, once to settle static variables and once to load,
+            // and a resolver over the network would fetch each module twice. The resolver is asked once per
+            // reference. The same module named from two places is two references, since what a relative
+            // reference means against each base is the resolver's to decide.
+            foreach (XsltVersion version in new[] { XsltVersion.V20, XsltVersion.V30 })
+            {
+                MapResolver resolver = new MapResolver()
+                    .Add("a.xsl", Sheet("<xsl:import href=\"lib.xsl\"/>"))
+                    .Add("b.xsl", Sheet("<xsl:import href=\"lib.xsl\"/>"))
+                    .Add("lib.xsl", Sheet("<xsl:template match=\"/\"><lib/></xsl:template>"));
+
+                string output = new Xslt(
+                    Sheet("<xsl:import href=\"a.xsl\"/><xsl:import href=\"b.xsl\"/>"),
+                    new XsltOptions { StylesheetResolver = resolver, OmitXmlDeclaration = true, Version = version })
+                    .TransformXml("<r/>");
+
+                Assert.AreEqual("<lib/>", output, version.ToString());
+                Assert.AreEqual(4, resolver.ResolveCount, $"resolutions under a {version} claim");
+            }
+        }
+
+        [TestMethod]
         public void WithoutAResolverAReferenceIsRefused()
         {
             // The default posture: a stylesheet cannot reach anything the caller has not opted into.
