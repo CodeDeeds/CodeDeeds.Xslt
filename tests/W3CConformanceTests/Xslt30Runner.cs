@@ -62,9 +62,17 @@ namespace CodeDeeds.Xslt.Conformance
 
         /// <summary>Features a test may declare that this engine does not have.</summary>
         /// <remarks>
+        /// <para>
         /// Read in both directions: a test declaring a feature this engine lacks is skipped, and so is a test
         /// declaring <c>satisfied="false"</c> on one it has. A feature absent from this set is one the engine
         /// claims, so a test asking for it is judged rather than excused.
+        /// </para>
+        /// <para>
+        /// Every entry is therefore an assertion about the engine that nothing checks, and it is worth
+        /// re-reading whenever a feature lands. <c>namespace_axis</c> stayed here long after the axis was
+        /// built, and taking it out brought 71 tests in: 59 passed at once and 12 were real defects the suite
+        /// had been ready to report all along.
+        /// </para>
         /// </remarks>
         private static readonly HashSet<string> s_absentFeatures = new(StringComparer.Ordinal)
         {
@@ -72,12 +80,7 @@ namespace CodeDeeds.Xslt.Conformance
             "XSD_1.1",
             "streaming",
             "streaming-fallback",
-
-
-            "namespace_axis",
             "XML_1.1",
-
-
             "xsl-stylesheet-processing-instruction",
         };
 

@@ -5881,6 +5881,45 @@ default was the last thing and not the first, and the condition set for it — e
 in `XsltElements`, the list above down to corners — was met with the 99.5% figure; it says `V30` now (see
 *The claim moves to 3.0*).
 
+### What a stale skip list hides
+
+Each conformance driver holds a hand-written list of the suite's feature names it does not claim, and skips
+every test that declares one. Nothing checks the list against the engine, so an entry outlives the omission
+it describes: the tests go on being skipped, and the summary reports them as a feature this engine has not
+got rather than as a measurement nobody took.
+
+`namespace_axis` in the XSLT driver and `namespace-axis` in the XPath driver had both outlived the axis by a
+long way (see *The namespace axis exists*). Taking the two entries out brought 71 XSLT tests and 9 XPath tests
+into the runs. Fifty-nine of the 71 passed unchanged. **Twelve failed, and every one was a real defect** that
+the suite had been ready to report for as long as the entry stood. They came to five causes:
+
+- **`xmlns:xml` was written out.** The binding of the `xml` prefix is implicit in every XML document, so a
+  namespace node carrying it belongs to the data model and never to the output. Walking the namespace axis is
+  what brings one along, which is why nothing had ever noticed: `namespace-0601`, `namespace-0603`,
+  `namespace-2602` and `copy-3501` all differed from their expected results by that one attribute.
+- **`base-uri()` of a namespace node answered the element's.** A namespace node is not a place in the document
+  that a relative reference could be written from, and the data model gives it the empty sequence. Four tests
+  in `fn/accessor` and `fn/base-uri` asked exactly that and were told the parent's URI instead.
+- **`xsl:key` did not index namespace nodes.** From 3.0 a match pattern may name `namespace-node()`, and the
+  index was built over elements and their attributes only, so such a key filed nothing and `key()` answered
+  nothing. Namespace nodes are made on demand rather than held in the tree, so they are now walked for a key
+  whose pattern requires that kind and for no other — the cost falls only on a stylesheet that asked.
+- **`current()` inside a key's `use` was not the node being indexed.** There is no other current node while an
+  index is built, and `key-058` reaches for it to read an attribute of the node from an expression that has
+  moved the context on to a namespace node.
+- **A copied namespace node taking the element's own prefix was dropped.** The rename was already written for
+  `xsl:namespace`, which reports a clash it cannot move; the copy path silently preferred the element's name.
+  Namespace fixup says the other way round: the node keeps the prefix it came with and the element takes
+  another for the namespace it is in, which is what `namespace-2001` asserts.
+
+The three entries that looked as stale and were not are worth as much. `higherOrderFunctions`,
+`fn-transform-XSLT` and `fn-transform-XSLT30` name `function-lookup()` and `transform()`, which this engine
+has — inside a stylesheet. The XPath driver evaluates an expression on its own, with no `XsltOptions` and no
+stylesheet to carry a scope, so neither function is in the static context it builds. Removing the three ran
+1,676 more tests and failed 807 of them, and they went back in. That limit is the driver's, and it belongs
+beside `schemaImport` and `schemaValidation`, which are in the list because the driver cannot load an
+environment's schemas rather than because the engine cannot validate.
+
 ### Measuring the 3.0 work
 
 The QT3 driver runs the XPath 2.0 subset by default, asking the engine to be 2.0 for it. `--31` takes in

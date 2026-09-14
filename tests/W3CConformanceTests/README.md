@@ -132,6 +132,39 @@ schema files the suite does not contain. Six assert that the result *document* c
 which this driver cannot answer: it hands the engine's serialized output to a fresh parse, and
 serialized XML carries no annotations. The rest are small individual rules.
 
+## When the driver is behind the engine
+
+Each driver keeps a list of the suite's feature names it does not claim, and every test declaring one is
+skipped. The list is written by hand, so it goes stale the moment a feature is finished and nobody thinks to
+take it out again. That is a silent failure: the tests keep being skipped, the engine keeps being unmeasured,
+and nothing in the output says so.
+
+Both lists had drifted. `namespace_axis` was still in the XSLT driver's and `namespace-axis` in the XPath
+driver's, long after the axis was built. Taking the two entries out brought **71 XSLT tests and 9 XPath tests**
+into the runs. Of the 71, **59 passed at once and 12 failed** — twelve real gaps that had been hidden behind a
+stale line in a list rather than behind anything about the engine. All twelve are fixed, and five causes
+account for them:
+
+| what was wrong | tests |
+|---|---|
+| The serializer wrote `xmlns:xml`, which is implicit in every XML document and is never output | 4 |
+| `base-uri()` of a namespace node answered the element's, where the data model gives it nothing | 4 |
+| `xsl:key` did not index namespace nodes, so a `namespace-node()` pattern filed nothing | 2 |
+| `current()` inside a key's `use` was not the node being indexed | 1 |
+| A copied namespace node taking the element's own prefix was dropped, where namespace fixup renames the element | 1 |
+
+Three entries in the XPath driver's list looked equally stale and were not. `higherOrderFunctions`,
+`fn-transform-XSLT` and `fn-transform-XSLT30` name functions this engine has — `function-lookup()` and
+`transform()` — but has only inside a stylesheet. The XPath driver evaluates an expression directly, with no
+`XsltOptions` and no stylesheet around it, so neither function is in the context it builds. Removing the three
+entries ran 1,676 more tests and failed 807 of them. They went back in: that is the driver's limit and not the
+engine's, and it sits beside `schemaImport` and `schemaValidation`, which are in the list for the same reason —
+the driver has no way to load an environment's schemas.
+
+**The list is an assertion about the engine that nothing checks.** It is worth re-reading whenever a feature
+lands, and the cost of not doing so is measured above: twelve defects that the suite had been ready to report
+for as long as the entry was wrong.
+
 ## Reading the result
 
 A test the driver cannot present fairly is **skipped with a reason** rather than counted either way, so the
@@ -150,8 +183,8 @@ unrelated-looking reasons, while a reason shared across twenty files is nobody's
 
 ## The XPath run
 
-The 2.0 run stands at **14,044 of 14,180, 99.0%**, and the 3.1 run — `--31`, which takes in the tests marked
-`XP30+` and `XP31+` — at **17,409 of 17,606, 98.9%**. The second reads 3,426 more tests than the first and is
+The 2.0 run stands at **14,052 of 14,188, 99.0%**, and the 3.1 run — `--31`, which takes in the tests marked
+`XP30+` and `XP31+` — at **17,418 of 17,615, 98.9%**. The second reads 3,426 more tests than the first and is
 a tenth of a point behind it, which is the shape to expect: what it takes in is the newer half, and the
 newer half is where the work is.
 
@@ -381,7 +414,7 @@ tree** for the substring a branch processes, there being no atomic context item 
 written; there is one now, and a path written in a branch no longer walks a tree that was never in the
 stylesheet.
 
-The largest clusters behind the current **99.3% of 5,364**, and no one cause dominates:
+The largest clusters behind the current **99.4% of 5,431**, and no one cause dominates:
 
 | | |
 |---|---|
@@ -399,7 +432,7 @@ The largest skip left is not a failure either: **6,518 are XSLT 3.0 tests**, rea
 
 ## What the 3.0 run says
 
-That opt-in run measures the XSLT 3.0 half at **7,580 of 7,618, 99.5%**, from 4,994 of 6,427 when it was first
+That opt-in run measures the XSLT 3.0 half at **7,651 of 7,689, 99.5%**, from 4,994 of 6,427 when it was first
 taken. It reads more tests than it did as well as passing more of them, which is the part worth reading twice:
 opening a feature the suite writes *around* stops whole files being skipped, so the denominator moves too — and
 the percentage can fall while the work goes forward, which is why the two numbers are always given together.

@@ -1178,6 +1178,14 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="document">The document's own URI, or <see langword="null"/> if it has none.</param>
         internal static string? BaseUriOf(Model.XdmTree tree, int node, string? document)
         {
+            // A namespace node has no base URI at all. It is not a place in the document that a relative
+            // reference could be written, so the data model gives it the empty sequence rather than the
+            // base URI of the element it is attached to.
+            if (tree.KindOf(node) == Model.NodeKind.Namespace)
+            {
+                return null;
+            }
+
             if (tree.KindOf(node) is not (Model.NodeKind.Element or Model.NodeKind.Root)
                 && tree.ParentOf(node) < 0)
             {

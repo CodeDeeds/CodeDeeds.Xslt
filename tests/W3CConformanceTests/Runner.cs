@@ -47,19 +47,36 @@ namespace CodeDeeds.Xslt.Conformance
             m_version = version;
         }
 
-        /// <summary>Features a test may declare that this engine cannot offer.</summary>
+        /// <summary>Features a test may declare that this run cannot offer.</summary>
+        /// <remarks>
+        /// <para>
+        /// Every entry is an assertion about this engine or this driver that nothing checks, so it is worth
+        /// re-reading whenever a feature lands: an entry that outlives the omission it describes goes on
+        /// skipping tests, and the summary reports them as a feature not built rather than as a measurement
+        /// nobody took. <c>namespace-axis</c> sat here long after the axis did, hiding nine tests.
+        /// </para>
+        /// <para>
+        /// The first group below is the driver's limit rather than the engine's, which is why taking one out
+        /// measures nothing. <c>schemaImport</c> and <c>schemaValidation</c> need an environment's schemas
+        /// loaded, which this driver has no way to do. <c>higherOrderFunctions</c>, <c>fn-transform-XSLT</c>
+        /// and <c>fn-transform-XSLT30</c> name <c>function-lookup()</c> and <c>transform()</c>, which the
+        /// engine has inside a stylesheet: here an expression is evaluated on its own, with no
+        /// <c>XsltOptions</c> and no stylesheet to carry a scope, so neither is in the static context this
+        /// builds. Removing the three ran 1,676 more tests and failed 807 of them.
+        /// </para>
+        /// </remarks>
         private static readonly HashSet<string> s_unsupportedFeatures = new(StringComparer.Ordinal)
         {
             "schemaValidation",
             "schemaImport",
-            "staticTyping",
-            "moduleImport",
             "higherOrderFunctions",
-            "namespace-axis",
-            "collection-stability",
-            "directory-as-collation-uri",
             "fn-transform-XSLT",
             "fn-transform-XSLT30",
+
+            "staticTyping",
+            "moduleImport",
+            "collection-stability",
+            "directory-as-collation-uri",
             "fn-format-integer-CLDR",
             "non_empty_sequence_collection",
             "typedData",

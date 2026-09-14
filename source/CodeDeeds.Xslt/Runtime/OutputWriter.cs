@@ -1002,6 +1002,10 @@ namespace CodeDeeds.Xslt.Runtime
                 return;
             }
 
+            // Whether the element's own prefix had already been offered a binding, read before the note
+            // below records this one, since this call is itself an offer.
+            bool ownPrefixAlreadyOffered = m_elementNamespaceState[^1].OwnPrefixOffered;
+
             // Noted before the reasons it may not be written, because what the element's namespace nodes
             // are is a question about the data model and not about what the serializer does with them.
             {
@@ -1048,7 +1052,18 @@ namespace CodeDeeds.Xslt.Runtime
             if (string.Equals(elementPrefix, prefix, StringComparison.Ordinal)
                 && !string.Equals(m_elementNamespaces[^1], namespaceUri, StringComparison.Ordinal))
             {
-                return;
+                // Where the name has not gone out yet, the node keeps the prefix it came with and the
+                // element takes another for the namespace it is in. That is namespace fixup: a copied
+                // namespace node is part of the element's namespace nodes, and the element's own name
+                // gives way to it rather than the other way round.
+                if (prefix.Length != 0 && m_pendingName is not null && !ownPrefixAlreadyOffered)
+                {
+                    RenameElementPrefix(prefix);
+                }
+                else
+                {
+                    return;
+                }
             }
 
             WriteNamespaceDeclarationCore(prefix, namespaceUri);
@@ -2167,6 +2182,15 @@ namespace CodeDeeds.Xslt.Runtime
 
         private void WriteNamespaceDeclarationCore(string prefix, string namespaceUri)
         {
+            // The binding of the xml prefix is implicit in every XML document, so a namespace node carrying
+            // it is part of the data model but never part of the output. Serialization says not to write it,
+            // and a copied element brings one along whenever the namespace axis is walked.
+            if (string.Equals(prefix, "xml", StringComparison.Ordinal)
+                && string.Equals(namespaceUri, XmlNamespace, StringComparison.Ordinal))
+            {
+                return;
+            }
+
             // Recording the binding here, and only here, is what stops a declaration being repeated on every
             // descendant that happens to use the same prefix.
             Declare(prefix, namespaceUri);

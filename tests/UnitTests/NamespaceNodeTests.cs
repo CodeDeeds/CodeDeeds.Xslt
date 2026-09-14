@@ -24,9 +24,9 @@ namespace CodeDeeds.Xslt.UnitTests
             return "<xsl:template match=\"/\"><out>" + content + "</out></xsl:template>";
         }
 
-        private static string Value(string expression)
+        private static string Value(string expression, string input = Input)
         {
-            string result = Run(Root("<xsl:value-of select=\"" + expression + "\"/>"));
+            string result = Run(Root("<xsl:value-of select=\"" + expression + "\"/>"), input);
             return result == "<out/>" ? string.Empty : result["<out>".Length..^"</out>".Length];
         }
 
@@ -228,6 +228,120 @@ namespace CodeDeeds.Xslt.UnitTests
                 + "<xsl:namespace name=\"a\" select=\"'http://beta/'\"/></name></xsl:template>"));
 
             Assert.AreEqual("XTDE0430", twice.Code);
+        }
+
+        [TestMethod]
+        public void TheXmlPrefixIsNeverDeclaredInTheOutput()
+        {
+            // Every element has a namespace node for the xml prefix, so copying the axis brings one along.
+            // The binding is implicit in every XML document and writing it would be noise the reader has to
+            // discount; serialization leaves it out.
+            Assert.AreEqual(
+                "<out><x xmlns:a=\"urn:a\"/></out>",
+                Run(Root("<x><xsl:copy-of select=\"/r/namespace::*\"/></x>")));
+
+            // The same where the node is asked for by name rather than swept up by the axis.
+            Assert.AreEqual(
+                "<out><x/></out>",
+                Run(Root("<x><xsl:copy-of select=\"/r/namespace::xml\"/></x>")));
+
+            // And where an attribute in the xml namespace puts the prefix on the element.
+            Assert.AreEqual(
+                "<out><x xml:lang=\"en\"/></out>",
+                Run(Root("<x xml:lang=\"en\"/>")));
+        }
+
+        [TestMethod]
+        public void ANamespaceNodeHasNoBaseUri()
+        {
+            // A namespace node is not a place in the document a relative reference could be written from,
+            // so the data model gives it the empty sequence rather than the base URI of its element.
+            Assert.AreEqual("true", Value("empty(base-uri(/r/namespace::a))"));
+            Assert.AreEqual("true", Value("empty(/r/namespace::a/base-uri())"));
+
+            // The element it is attached to does have one where xml:base says so, which is what makes
+            // the answer above a rule about namespace nodes rather than a tree with nowhere to point at.
+            const string Based = "<r xml:base=\"http://example.org/\" xmlns:a=\"urn:a\"/>";
+
+            Assert.AreEqual("http://example.org/", Value("base-uri(/r)", Based));
+            Assert.AreEqual("true", Value("empty(base-uri(/r/namespace::a))", Based));
+        }
+
+        [TestMethod]
+        public void AKeyMayIndexNamespaceNodes()
+        {
+            // From 3.0 a match pattern may name namespace-node(), so a key can file one. The index is built
+            // over elements and their attributes; namespace nodes are made on demand and are walked only
+            // for a key whose pattern asks for that kind.
+            const string Document = "<r xmlns:a=\"urn:a\"><e xmlns:b=\"urn:b\"/><f xmlns:a=\"urn:a\"/></r>";
+
+            Assert.AreEqual(
+                "<out>r e f</out>",
+                Run(
+                    "<xsl:key name=\"ns\" match=\"namespace-node()\" use=\"name()\"/>"
+                    + Root("<xsl:value-of select=\"key('ns', 'a')/../name()\"/>"),
+                    Document));
+
+            Assert.AreEqual(
+                "<out>urn:b</out>",
+                Run(
+                    "<xsl:key name=\"ns\" match=\"namespace-node()\" use=\"string()\"/>"
+                    + Root("<xsl:value-of select=\"key('ns', 'urn:b')\"/>"),
+                    Document));
+
+            // A key that cannot match a namespace node files none, which is what keeps the walk off every
+            // other stylesheet's index.
+            Assert.AreEqual(
+                "<out>0</out>",
+                Run(
+                    "<xsl:key name=\"named\" match=\"*\" use=\"name()\"/>"
+                    + Root("<xsl:value-of select=\"count(key('named', 'a'))\"/>"),
+                    Document));
+        }
+
+        [TestMethod]
+        public void CurrentInsideAKeyUseIsTheNodeBeingIndexed()
+        {
+            // There is no other current node while an index is built. A stylesheet reaches for it to read
+            // something of the node from an expression whose own context has moved elsewhere — here onto
+            // the namespace axis, to turn a prefix written in an attribute into the URI it stands for.
+            const string Document =
+                "<r xmlns:a=\"urn:a\" xmlns:b=\"urn:b\">"
+                + "<t n=\"1\" ref=\"a:x\"/><t n=\"2\" ref=\"b:x\"/><t n=\"3\" ref=\"a:y\"/></r>";
+
+            Assert.AreEqual(
+                "<out>1 3</out>",
+                Run(
+                    "<xsl:key name=\"t\" match=\"t\""
+                    + " use=\"string(namespace::*[name() = substring-before(current()/@ref, ':')])\"/>"
+                    + Root("<xsl:value-of select=\"key('t', 'urn:a')/@n\"/>"),
+                    Document));
+        }
+
+        [TestMethod]
+        public void ACopiedNamespaceNodeTakesTheElementsPrefixFromIt()
+        {
+            // Namespace fixup, on the copy path rather than the xsl:namespace one: the copied node keeps the
+            // prefix it came with and the element takes another for the namespace it is in. Dropping the
+            // node instead would lose a part of the result the stylesheet asked for.
+            string result = Run(
+                "<xsl:template match=\"/\">"
+                + "<xsl:element name=\"ns:e\" namespace=\"urn:one\">"
+                + "<xsl:copy-of select=\"/r/namespace::ns\"/></xsl:element></xsl:template>",
+                "<r xmlns:ns=\"urn:two\"/>");
+
+            StringAssert.Contains(result, "xmlns:ns=\"urn:two\"");
+            Assert.IsFalse(result.StartsWith("<ns:e", StringComparison.Ordinal), "the element gave up the prefix");
+
+            // The namespace node survives into a tree the same way, where it can be asked for rather than read.
+            Assert.AreEqual(
+                "<out>urn:two</out>",
+                Run(
+                    "<xsl:template match=\"/\"><xsl:variable name=\"e\" as=\"element()\">"
+                    + "<xsl:element name=\"ns:e\" namespace=\"urn:one\">"
+                    + "<xsl:copy-of select=\"/r/namespace::ns\"/></xsl:element></xsl:variable>"
+                    + "<out><xsl:value-of select=\"$e/namespace::ns\"/></out></xsl:template>",
+                    "<r xmlns:ns=\"urn:two\"/>"));
         }
     }
 }

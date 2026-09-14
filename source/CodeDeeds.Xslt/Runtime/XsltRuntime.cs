@@ -1501,6 +1501,19 @@ namespace CodeDeeds.Xslt.Runtime
                 Runtime = this,
             };
 
+            // Namespace nodes are made on demand rather than held in the tree, so they are walked only for
+            // a key that can file one. From 3.0 a pattern may name namespace-node(), and nothing else
+            // reaches them: neither node() nor a name test matches a namespace node.
+            bool indexesNamespaces = false;
+
+            foreach (KeyRule rule in key.Rules)
+            {
+                foreach (Pattern pattern in rule.Patterns)
+                {
+                    indexesNamespaces |= pattern.RequiredKind == NodeKind.Namespace;
+                }
+            }
+
             for (int node = 0; node < tree.NodeCount; node++)
             {
                 IndexNode(key, node, index, ref context);
@@ -1509,6 +1522,14 @@ namespace CodeDeeds.Xslt.Runtime
                 for (int i = 0; i < attributeCount; i++)
                 {
                     IndexNode(key, tree.AttributeAt(node, i), index, ref context);
+                }
+
+                if (indexesNamespaces && tree.TryGetNamespaceNodes(node, out int firstNamespace, out int namespaceCount))
+                {
+                    for (int i = 0; i < namespaceCount; i++)
+                    {
+                        IndexNode(key, firstNamespace + i, index, ref context);
+                    }
                 }
             }
 
@@ -1545,6 +1566,11 @@ namespace CodeDeeds.Xslt.Runtime
 
                 DynamicContext useContext = context;
                 useContext.Node = node;
+
+                // current() inside a key's use expression is the node being indexed. There is no other
+                // current node while an index is built, and a stylesheet reaches for it to look at the
+                // node from an expression that has moved the context away from it.
+                useContext.CurrentNode = node;
                 useContext.Position = 1;
                 useContext.Size = 1;
 
