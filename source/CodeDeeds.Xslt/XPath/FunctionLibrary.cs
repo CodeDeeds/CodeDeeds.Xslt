@@ -54,7 +54,8 @@ namespace CodeDeeds.Xslt.XPath
             XsltVersion version,
             XsltVersion syntaxVersion,
             bool legacySyntax,
-            IReadOnlyDictionary<string, string>? namespaces = null)
+            IReadOnlyDictionary<string, string>? namespaces = null,
+            string defaultElementNamespace = "")
         {
             if (namespaceUri == MapArrayFunctionExpr.MapNamespace
                 || namespaceUri == MapArrayFunctionExpr.ArrayNamespace)
@@ -69,7 +70,8 @@ namespace CodeDeeds.Xslt.XPath
 
             if (namespaceUri == XdmType.SchemaNamespace)
             {
-                return TypeConstructor(localName, arguments, namespaces, syntaxVersion);
+                return TypeConstructor(
+                    localName, arguments, namespaces, syntaxVersion, defaultElementNamespace);
             }
 
             return namespaceUri.Length == 0 || namespaceUri == XdmType.FunctionNamespace
@@ -164,7 +166,8 @@ namespace CodeDeeds.Xslt.XPath
             string localName,
             Expr[] arguments,
             IReadOnlyDictionary<string, string>? namespaces,
-            XsltVersion syntaxVersion)
+            XsltVersion syntaxVersion,
+            string defaultElementNamespace)
         {
             // A few schema types have no constructor function, and the specification names them: the abstract
             // xs:NOTATION, and the three at the top of the hierarchy that stand for 'any of these' rather than
@@ -202,7 +205,7 @@ namespace CodeDeeds.Xslt.XPath
             // against the namespaces where the call was written, which is where a prefix means anything.
             XdmType.RequireLiteralNameBelowThree(type, arguments[0], syntaxVersion);
 
-            return new TypeConstructorExpr(arguments[0], type, namespaces);
+            return new TypeConstructorExpr(arguments[0], type, namespaces, defaultElementNamespace);
         }
     }
 }

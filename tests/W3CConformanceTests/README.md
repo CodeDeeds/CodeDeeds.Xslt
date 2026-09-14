@@ -313,8 +313,8 @@ unrelated-looking reasons, while a reason shared across twenty files is nobody's
 
 ## The XPath run
 
-The 2.0 run stands at **14,052 of 14,188, 99.0%**, and the 3.1 run — `--31`, which takes in the tests marked
-`XP30+` and `XP31+` — at **17,418 of 17,615, 98.9%**. The second reads 3,426 more tests than the first and is
+The 2.0 run stands at **14,053 of 14,177, 99.1%**, and the 3.1 run — `--31`, which takes in the tests marked
+`XP30+` and `XP31+` — at **17,429 of 17,599, 99.0%**. The second reads 3,422 more tests than the first and is
 a tenth of a point behind it, which is the shape to expect: what it takes in is the newer half, and the
 newer half is where the work is.
 
@@ -323,17 +323,32 @@ newer half is where the work is.
 | `math` | *3.0 and later* | 130 / 130, 100% |
 | `misc` | 31 / 31, 100% | 33 / 33, 100% |
 | `app` | 330 / 330, 100% | 772 / 777, 99.4% |
-| `prod` | 5,472 / 5,521, 99.1% | 5,889 / 5,952, 98.9% |
-| `fn` | 4,993 / 5,026, 99.3% | 6,969 / 7,034, 99.1% |
+| `prod` | 5,480 / 5,520, 99.3% | 5,906 / 5,949, 99.3% |
+| `fn` | 4,996 / 5,028, 99.4% | 6,974 / 7,034, 99.1% |
 | `op` | 3,147 / 3,195, 98.5% | 3,360 / 3,413, 98.4% |
-| `xs` | 71 / 77, 92.2% | 115 / 121, 95.0% |
+| `xs` | 69 / 73, 94.5% | 113 / 117, 96.6% |
 | `map` | *3.1* | 110 / 112, 98.2% |
 | `array` | *3.1* | 31 / 34, 91.2% |
 
-The failures cluster in few places. Casting is the largest on both runs — `prod/CastExpr`, `CastableExpr` and
-`CastExpr.derived`, 46 between them — and most of that is dates before the common era, which
-`System.DateTime` does not reach. Then `op/to`, almost all of it the 64-bit `xs:integer`; and, on the 3.1 run
-only, `fn/parse-json`. The compatibility document keeps the account of what is behind each.
+The failures cluster in few places. Casting is the largest on both runs — `prod/CastExpr` and
+`CastableExpr`, 26 between them on the 3.1 run — and nearly all of what is left there is dates before the
+common era, which `System.DateTime` does not reach. Then `op/to`, almost all of it the 64-bit `xs:integer`;
+and, on the 3.1 run only, `fn/parse-json`. The compatibility document keeps the account of what is behind
+each.
+
+### Which XML Schema version a test asks for
+
+XSD 1.1 widened several value spaces this engine reads by 1.0 rules: it added the year zero, allowed a
+leading plus on `INF`, and introduced `xs:dateTimeStamp`. A test case that carries
+`<dependency type="xsd-version" value="1.1"/>` is asking for the 1.1 answer and would be told the 1.0 one,
+so the driver skips it — 26 cases, mostly in `CastExpr` and `CastableExpr`.
+
+Only where the **case** declares it. A whole test set carrying the dependency is saying what its subject
+came in with rather than what each case expects, and taking that at face value would hide answers instead
+of a version: every one of the 54 cases in `xs/error.xml` passes here, because `xs:error` belongs to
+XPath 3.0 as much as to XSD 1.1. Skipping on the set-level declaration cost 35 genuine passes to hide 17
+failures, which is the wrong trade in both directions — so the three cases in `xs/dateTimeStamp.xml` are
+run and reported as what they are, a type this engine has not implemented.
 
 `assert-eq` builds the value it expects with a small literal parser rather than by evaluating the expectation
 through the engine under test. That is deliberate: using the engine to decide what the engine should have

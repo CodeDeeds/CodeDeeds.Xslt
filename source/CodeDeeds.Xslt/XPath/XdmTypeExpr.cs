@@ -945,6 +945,7 @@ namespace CodeDeeds.Xslt.XPath
         private readonly bool m_allowEmpty;
         private readonly bool m_testOnly;
         private readonly IReadOnlyDictionary<string, string>? m_namespaces;
+        private readonly string m_defaultElementNamespace = string.Empty;
 
         /// <summary>Initializes a cast.</summary>
         /// <param name="value">The value to cast.</param>
@@ -955,18 +956,23 @@ namespace CodeDeeds.Xslt.XPath
         /// The namespace bindings in scope where the cast is written, which a cast to <c>xs:QName</c>
         /// resolves a prefix against and every other cast has no use for.
         /// </param>
+        /// <param name="defaultElementNamespace">
+        /// The namespace an unprefixed name goes to, which a cast to <c>xs:QName</c> reads.
+        /// </param>
         public CastExpr(
             Expr value,
             XdmType.BuiltInType type,
             bool allowEmpty,
             bool testOnly,
-            IReadOnlyDictionary<string, string>? namespaces = null)
+            IReadOnlyDictionary<string, string>? namespaces = null,
+            string defaultElementNamespace = "")
         {
             m_value = value;
             m_type = type;
             m_allowEmpty = allowEmpty;
             m_testOnly = testOnly;
             m_namespaces = namespaces;
+            m_defaultElementNamespace = defaultElementNamespace;
         }
 
         /// <summary>Initializes a cast to a type from a schema, which is also that type's constructor function.</summary>
@@ -1039,7 +1045,7 @@ namespace CodeDeeds.Xslt.XPath
             {
                 return m_schemaType is not null
                     ? m_schemaType.Cast(single, m_namespaces)
-                    : XdmType.Cast(single, m_type, m_namespaces);
+                    : XdmType.Cast(single, m_type, m_namespaces, m_defaultElementNamespace);
             }
 
             try
@@ -1050,7 +1056,7 @@ namespace CodeDeeds.Xslt.XPath
                 }
                 else
                 {
-                    XdmType.Cast(single, m_type, m_namespaces);
+                    XdmType.Cast(single, m_type, m_namespaces, m_defaultElementNamespace);
                 }
 
                 return XPathValue.FromBoolean(true);

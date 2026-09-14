@@ -41,6 +41,38 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>Gets whether the duration is negative.</summary>
         public bool IsNegative => Months < 0 || Seconds < 0m;
 
+        /// <summary>How reading a duration turned out.</summary>
+        public enum Reading : byte
+        {
+            /// <summary>A value was read.</summary>
+            Value,
+
+            /// <summary>The text is not in the type lexical space.</summary>
+            NotLexical,
+
+            /// <summary>The text names a duration too large for this engine to hold.</summary>
+            Overflow,
+        }
+
+        /// <summary>Whether a run of text is digits and nothing else.</summary>
+        private static bool AllDigits(ReadOnlySpan<char> text)
+        {
+            if (text.Length == 0)
+            {
+                return false;
+            }
+
+            foreach (char c in text)
+            {
+                if (c < '0' || c > '9')
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         /// <summary>
         /// Parses the lexical form of a duration.
         /// </summary>
@@ -55,6 +87,20 @@ namespace CodeDeeds.Xslt.XPath
         /// <returns><see langword="true"/> if the text is in the type's lexical space.</returns>
         public static bool TryParse(string text, XdmTypeCode type, out XdmDuration result)
         {
+            return Read(text, type, out result) == Reading.Value;
+        }
+
+        /// <summary>Reads a duration, saying which way it failed where it did.</summary>
+        /// <remarks>
+        /// A count of years or of days that no number here can hold is not a malformed duration: the text
+        /// says what it means and this engine cannot hold it, which is the overflow the specification
+        /// names rather than the lexical error it gives to text that says nothing.
+        /// </remarks>
+        /// <param name="text">The text to read.</param>
+        /// <param name="type">Which of the three duration types is wanted.</param>
+        /// <param name="result">The duration read, where one was.</param>
+        public static Reading Read(string text, XdmTypeCode type, out XdmDuration result)
+        {
             result = default;
             ReadOnlySpan<char> span = text.AsSpan().Trim();
 
@@ -66,7 +112,7 @@ namespace CodeDeeds.Xslt.XPath
 
             if (span.Length < 2 || span[0] != 'P')
             {
-                return false;
+                return Reading.NotLexical;
             }
 
             span = span[1..];
@@ -82,7 +128,7 @@ namespace CodeDeeds.Xslt.XPath
                 {
                     if (inTime || span.Length == 1)
                     {
-                        return false;
+                        return Reading.NotLexical;
                     }
 
                     inTime = true;
@@ -98,7 +144,7 @@ namespace CodeDeeds.Xslt.XPath
 
                 if (digits == 0 || digits == span.Length)
                 {
-                    return false;
+                    return Reading.NotLexical;
                 }
 
                 ReadOnlySpan<char> number = span[..digits];
@@ -112,16 +158,22 @@ namespace CodeDeeds.Xslt.XPath
                     if (!IsSecondsLexical(number)
                         || !decimal.TryParse(number, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out seconds))
                     {
-                        return false;
+                        return Reading.NotLexical;
                     }
 
                     continue;
                 }
 
-                if (number.IndexOf('.') >= 0
-                    || !long.TryParse(number, NumberStyles.None, CultureInfo.InvariantCulture, out long value))
+                if (number.IndexOf('.') >= 0)
                 {
-                    return false;
+                    return Reading.NotLexical;
+                }
+
+                if (!long.TryParse(number, NumberStyles.None, CultureInfo.InvariantCulture, out long value))
+                {
+                    // Digits and nothing else, and still too many of them: the text says what it means
+                    // and no number here holds it, which is an overflow rather than a malformed duration.
+                    return AllDigits(number) ? Reading.Overflow : Reading.NotLexical;
                 }
 
                 switch (designator)
@@ -147,38 +199,47 @@ namespace CodeDeeds.Xslt.XPath
                         break;
 
                     default:
-                        return false;
+                        return Reading.NotLexical;
                 }
             }
 
             if (!any)
             {
-                return false;
+                return Reading.NotLexical;
             }
 
-            long totalMonths = (years * 12) + months;
+            long totalMonths;
+
+            try
+            {
+                totalMonths = checked((years * 12) + months);
+            }
+            catch (OverflowException)
+            {
+                return Reading.Overflow;
+            }
             decimal totalSeconds = (days * 86400m) + (hours * 3600m) + (minutes * 60m) + seconds;
 
             if (type == XdmTypeCode.YearMonthDuration && totalSeconds != 0m)
             {
-                return false;
+                return Reading.NotLexical;
             }
 
             if (type == XdmTypeCode.DayTimeDuration && totalMonths != 0)
             {
-                return false;
+                return Reading.NotLexical;
             }
 
             if (totalMonths > int.MaxValue)
             {
-                return false;
+                return Reading.Overflow;
             }
 
             result = negative
                 ? new XdmDuration((int)-totalMonths, -totalSeconds, type)
                 : new XdmDuration((int)totalMonths, totalSeconds, type);
 
-            return true;
+            return Reading.Value;
         }
 
         /// <summary>

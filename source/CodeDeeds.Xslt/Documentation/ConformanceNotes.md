@@ -434,17 +434,34 @@ filter quietly kept everything. `.` is now a primary expression rather than `sel
 2.0 grammar makes it, and a filter over anything that is not a node-set filters it as the sequence it is.
 A node context item still yields a node-set of one, so the 1.0 half is unchanged down to its fast paths.
 
-Five errors say five different things about a cast that failed, and the codes are not interchangeable:
+Seven errors say seven different things about a cast that failed, and the codes are not interchangeable.
+The division that runs through all of them is **whose limit was reached**: a value the type does not have
+is the type's limit and `FORG0001`, while a value the type has and this engine cannot hold is the engine's
+and gets an overflow code.
+
 `FODT0001` is a date or time whose form is good and whose value this engine cannot hold — `xs:date('2004-02-30')`
 names no day and never will, where `xs:date('-1999-05-31')` names one perfectly well and `System.DateTime`
 starts at the common era. The rest of the form is still checked past the sign, so a bad month in a bad era is
-still `FORG0001`, and February keeps its length in a year too long to hold. The other four:
+still `FORG0001`, and February keeps its length in a year too long to hold. An out-of-range year is reported
+as one only where the rest of the text reads: `'99999999999999999999999999999-XX' cast as xs:gYearMonth` has
+a month that is no month, and naming the year's size would send a reader after the wrong half of it.
+`FODT0002` is the durations' overflow, on the same reading: `xs:yearMonthDuration('P100000000000Y')` says
+plainly what it means and the months are held in a 32-bit signed integer here.
+
+`FOAR0002` is the integers' overflow, and the line it draws is the target type's own value space.
+`xs:unsignedLong('18446744073709551615')` is exactly that type's maximum — a value of the type, which only
+this engine's 64-bit signed storage cannot hold — so it overflows. `xs:unsignedLong('18446744073709551616')`
+and `xs:long('9223372036854775808')` are each one past the type itself, so no processor holds them however
+it is built, and they are `FORG0001`. The rest:
 `FORG0001` is text outside the type's lexical space, and also a value outside a *derived* type's range —
 `xs:byte(300)` is not an overflow but an integer that is not an `xs:byte`. `FOCA0003` is a number too large
 to be an `xs:integer` at all and `FOCA0001` too large to be an `xs:decimal`, both of which are this engine's
 storage speaking. `FOCA0002` is an invalid lexical value where nothing was being cast: `xs:decimal(xs:double('INF'))`,
 where infinity has no decimal spelling to be too large for, and `QName('', 'a:b')`, where a prefix was given
 nothing to stand for.
+
+A constructor is declared `xs:anyAtomicType? -> T?`, so more than one value in is the argument being of the
+wrong type rather than a value that will not convert: `xs:integer((1, 2))` is `XPTY0004`, not `FORG0001`.
 
 **`xs:anyURI` is a type of its own**, not an alias for `xs:string`. It holds text and every string operation
 works on it — the function conversion rules promote it, so `substring-after(base-uri(.), '/')` means what it

@@ -137,6 +137,13 @@ namespace CodeDeeds.Xslt.Conformance
                 foreach ((string prefix, string uri) in environment.Namespaces)
                 {
                     staticContext.DeclarePrefix(prefix, uri);
+
+                    // The empty prefix in an environment is the static context's default element/type
+                    // namespace, which is what an unprefixed element name and a cast to xs:QName go to.
+                    if (prefix.Length == 0)
+                    {
+                        staticContext.DefaultElementNamespace = uri;
+                    }
                 }
 
                 foreach (XElement declaration in environment.DecimalFormats)
@@ -219,6 +226,7 @@ namespace CodeDeeds.Xslt.Conformance
                 string type = (string?)dependency.Attribute("type") ?? string.Empty;
                 string value = (string?)dependency.Attribute("value") ?? string.Empty;
                 bool satisfied = (string?)dependency.Attribute("satisfied") != "false";
+                bool onCase = dependency.Parent == testCase;
 
                 switch (type)
                 {
@@ -244,6 +252,23 @@ namespace CodeDeeds.Xslt.Conformance
                         if (satisfied && value.Contains("1.1", StringComparison.Ordinal))
                         {
                             why = "needs XML 1.1";
+                            return false;
+                        }
+
+                        break;
+
+                    case "xsd-version":
+                        // XSD 1.1 widens value spaces this engine reads by XSD 1.0 rules: the year zero,
+                        // a leading plus on INF. A case that declares the dependency is asking for the
+                        // 1.1 answer and would be told the 1.0 one.
+                        //
+                        // Only where the case declares it. A whole set carrying the dependency is saying
+                        // what its subject came in with, not what each case expects: every case in
+                        // xs/error.xml passes here, because xs:error is XPath 3.0's as much as XSD 1.1's,
+                        // and skipping the set would hide the answers rather than the version.
+                        if (onCase && satisfied && value.Trim().Contains("1.1", StringComparison.Ordinal))
+                        {
+                            why = "needs XSD 1.1";
                             return false;
                         }
 

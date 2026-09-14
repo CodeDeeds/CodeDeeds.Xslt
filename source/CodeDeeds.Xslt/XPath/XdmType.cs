@@ -453,16 +453,21 @@ namespace CodeDeeds.Xslt.XPath
                 + "where it was written, and only a literal was there to be read then.");
         }
 
-        internal static XPathValue CastToQName(string text, IReadOnlyDictionary<string, string>? namespaces)
+        internal static XPathValue CastToQName(
+            string text, IReadOnlyDictionary<string, string>? namespaces, string defaultElementNamespace = "")
         {
             if (!XdmQName.TrySplit(text, out string prefix, out string localName))
             {
                 throw XsltErrors.Error(XsltErrorCode.FORG0001, $"'{text}' is not a valid xs:QName.");
             }
 
+            // An unprefixed name has the shape an unprefixed element name has, so it goes where those go:
+            // the default element/type namespace, which a stylesheet declares with xpath-default-namespace.
+            // Not what xmlns says, which XPath does not read for this.
             if (prefix.Length == 0)
             {
-                return XPathValue.FromQName(new XdmQName(string.Empty, string.Empty, localName));
+                return XPathValue.FromQName(
+                    new XdmQName(string.Empty, defaultElementNamespace, localName));
             }
 
             if (prefix == "xml")
@@ -481,7 +486,10 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         public static XPathValue Cast(
-            XPathValue value, BuiltInType type, IReadOnlyDictionary<string, string>? namespaces = null)
+            XPathValue value,
+            BuiltInType type,
+            IReadOnlyDictionary<string, string>? namespaces = null,
+            string defaultElementNamespace = "")
         {
             // A node casts by way of its typed value — its string value, untyped, unless the node was
             // validated — for the constructor function as for 'cast as'. Left as a node, xs:boolean() read
@@ -504,11 +512,14 @@ namespace CodeDeeds.Xslt.XPath
             // The result carries the name it was made under, which is narrower than the type it is held in
             // for the derived integers and the string-derived types. Nothing but 'instance of' reads it, and
             // casting to a name that is not a derived one clears whatever the value arrived with.
-            return Convert(value, type, namespaces).AsDerived(type.Derived);
+            return Convert(value, type, namespaces, defaultElementNamespace).AsDerived(type.Derived);
         }
 
         private static XPathValue Convert(
-            XPathValue value, BuiltInType type, IReadOnlyDictionary<string, string>? namespaces)
+            XPathValue value,
+            BuiltInType type,
+            IReadOnlyDictionary<string, string>? namespaces,
+            string defaultElementNamespace)
         {
             // xs:error admits no values at all, so every cast to it fails. FORG0001 rather than XPTY0004:
             // the complaint is that the value is outside the type's space, which is what that code says, and
@@ -633,11 +644,21 @@ namespace CodeDeeds.Xslt.XPath
                             type.Code));
                     }
 
-                    return XdmDuration.TryParse(value.ToStringValue(), type.Code, out XdmDuration duration)
-                        ? XPathValue.FromDuration(duration)
-                        : throw XsltErrors.Error(
+                    // A duration whose counts are beyond what this engine holds is an overflow rather
+                    // than a lexical error: the text says what it means and nothing here can hold it.
+                    return XdmDuration.Read(value.ToStringValue(), type.Code, out XdmDuration duration) switch
+                    {
+                        XdmDuration.Reading.Value => XPathValue.FromDuration(duration),
+
+                        XdmDuration.Reading.Overflow => throw XsltErrors.Error(
+                            XsltErrorCode.FODT0002,
+                            $"'{value.ToStringValue()}' names a duration beyond the range this engine "
+                            + "holds durations in."),
+
+                        _ => throw XsltErrors.Error(
                             XsltErrorCode.FORG0001,
-                            $"'{value.ToStringValue()}' is not a valid xs:{type.Name}.");
+                            $"'{value.ToStringValue()}' is not a valid xs:{type.Name}."),
+                    };
                 }
 
                 case XdmTypeCode.QName:
@@ -647,7 +668,7 @@ namespace CodeDeeds.Xslt.XPath
                         return value;
                     }
 
-                    return CastToQName(value.ToStringValue(), namespaces);
+                    return CastToQName(value.ToStringValue(), namespaces, defaultElementNamespace);
                 }
 
                 case XdmTypeCode.HexBinary:
@@ -682,11 +703,19 @@ namespace CodeDeeds.Xslt.XPath
                         return XPathValue.FromGregorian(PartOf(value.AsDateTime(), type.Name));
                     }
 
-                    return XdmGregorian.TryParse(value.ToStringValue(), type.Name, out XdmGregorian? gregorian)
-                        ? XPathValue.FromGregorian(gregorian!)
-                        : throw XsltErrors.Error(
+                    return XdmGregorian.Read(value.ToStringValue(), type.Name, out XdmGregorian? gregorian) switch
+                    {
+                        XdmGregorian.Reading.Value => XPathValue.FromGregorian(gregorian!),
+
+                        XdmGregorian.Reading.OutOfRange => throw XsltErrors.Error(
+                            XsltErrorCode.FODT0001,
+                            $"'{value.ToStringValue()}' names a year outside the range this engine holds "
+                            + "years in."),
+
+                        _ => throw XsltErrors.Error(
                             XsltErrorCode.FORG0001,
-                            $"'{value.ToStringValue()}' is not a valid xs:{type.Name}.");
+                            $"'{value.ToStringValue()}' is not a valid xs:{type.Name}."),
+                    };
                 }
 
                 default:
@@ -1299,11 +1328,11 @@ namespace CodeDeeds.Xslt.XPath
 
                 // XPath 1.0's number() has no INF or NaN in its lexical space; a cast to xs:double does. The
                 // spellings are exactly these — 'nan' and 'Infinity' are not among them, however readily
-                // .NET would read them. '+INF' is the one XML Schema 1.1 added to 1.0's two.
+                // .NET would read them, and neither is '+INF', which XML Schema 1.1 added and this
+                // engine does not implement.
                 switch (text)
                 {
                     case "INF":
-                    case "+INF":
                         return double.PositiveInfinity;
                     case "-INF":
                         return double.NegativeInfinity;
@@ -1358,6 +1387,38 @@ namespace CodeDeeds.Xslt.XPath
             return FromDouble(value.ToNumber(), "xs:decimal");
         }
 
+        /// <summary>Whether text is an optionally signed run of digits and nothing else.</summary>
+        private static bool IsIntegerLexical(string text)
+        {
+            int start = text.Length != 0 && (text[0] == '-' || text[0] == '+') ? 1 : 0;
+
+            if (start == text.Length)
+            {
+                return false;
+            }
+
+            for (int i = start; i < text.Length; i++)
+            {
+                if (text[i] < '0' || text[i] > '9')
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Whether a run of integer digits names a value the type allows, asked only of text no 64-bit
+        /// number could hold. Text past what a decimal holds is past every bounded integer type as well.
+        /// </summary>
+        private static bool IsWithinValueSpace(string text, BuiltInType type)
+        {
+            return decimal.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out decimal parsed)
+                && parsed >= type.Minimum
+                && parsed <= type.Maximum;
+        }
+
         private static long CastToInteger(XPathValue value, BuiltInType type)
         {
             long result;
@@ -1389,6 +1450,18 @@ namespace CodeDeeds.Xslt.XPath
 
                 if (!long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out result))
                 {
+                    // Digits naming a value the type does admit: the text is a good xs:{type.Name} and it
+                    // is this engine's 64-bit signed representation that cannot hold it, which is an
+                    // overflow. A value the type itself excludes, such as xs:long("9223372036854775808"),
+                    // is invalid rather than overflowing, and falls through to FORG0001 below.
+                    if (IsIntegerLexical(text) && IsWithinValueSpace(text, type))
+                    {
+                        throw XsltErrors.Error(
+                            XsltErrorCode.FOAR0002,
+                            $"{text} is a value of xs:{type.Name} beyond what this engine holds, which is "
+                            + "the range of a 64-bit signed integer.");
+                    }
+
                     // A decimal or exponent form is not in xs:integer's lexical space, even though the value
                     // it names might be an integer.
                     throw XsltErrors.Error(XsltErrorCode.FORG0001, $"'{value.ToStringValue()}' is not a valid xs:{type.Name}.");
@@ -1453,6 +1526,7 @@ namespace CodeDeeds.Xslt.XPath
         private readonly Expr m_argument;
         private readonly XdmType.BuiltInType m_type;
         private readonly IReadOnlyDictionary<string, string>? m_namespaces;
+        private readonly string m_defaultElementNamespace = string.Empty;
 
         /// <summary>Initializes a constructor call.</summary>
         /// <param name="argument">The single argument, whose value is cast.</param>
@@ -1461,14 +1535,19 @@ namespace CodeDeeds.Xslt.XPath
         /// The namespace bindings in scope where the call is written, which <c>xs:QName()</c> resolves a
         /// prefix against and every other constructor has no use for.
         /// </param>
+        /// <param name="defaultElementNamespace">
+        /// The namespace an unprefixed name goes to, which <c>xs:QName()</c> reads and nothing else does.
+        /// </param>
         public TypeConstructorExpr(
             Expr argument,
             XdmType.BuiltInType type,
-            IReadOnlyDictionary<string, string>? namespaces = null)
+            IReadOnlyDictionary<string, string>? namespaces = null,
+            string defaultElementNamespace = "")
         {
             m_argument = argument;
             m_type = type;
             m_namespaces = namespaces;
+            m_defaultElementNamespace = defaultElementNamespace;
         }
 
         /// <inheritdoc/>
@@ -1488,7 +1567,18 @@ namespace CodeDeeds.Xslt.XPath
                 return XPathValue.FromSequence(XdmSequence.Empty);
             }
 
-            return XdmType.Cast(argument, m_type, m_namespaces);
+            // And at most one: the signature admits one optional value, so two is the argument being of
+            // the wrong type rather than a value that will not convert. Counted only where the argument
+            // could hold more than one thing, which an atomic value cannot.
+            if (argument.Kind is XPathValueKind.Sequence or XPathValueKind.NodeSet
+                && XdmSequence.Items(argument).Count > 1)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XPTY0004,
+                    $"A constructor for xs:{m_type.Name} takes at most one value, and was given several.");
+            }
+
+            return XdmType.Cast(argument, m_type, m_namespaces, m_defaultElementNamespace);
         }
     }
 }

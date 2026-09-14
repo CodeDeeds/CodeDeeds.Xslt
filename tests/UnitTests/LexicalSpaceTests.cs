@@ -150,20 +150,25 @@ namespace CodeDeeds.Xslt.UnitTests
         [DataRow("xs:double('e5')")]
         public void ANumberIsSpelledTheWaySchemaSpellsIt(string expression)
         {
-            // The special values are NaN, INF, +INF and -INF, exactly so. Everything else .NET would read
-            // here — 'Infinity', a thousands separator, a lone exponent — is text, not a number.
+            // The special values are NaN, INF and -INF, exactly so. Everything else .NET would read here
+            // — 'Infinity', a thousands separator, a lone exponent — is text, not a number.
             Refuses(expression);
         }
 
         [TestMethod]
-        public void TheInfinitiesAreSpelledFourWays()
+        public void TheInfinitiesAreSpelledTwoWays()
         {
-            // '+INF' is the one XML Schema 1.1 added to 1.0's two, and the suite expects it.
-            Assert.AreEqual("INF", Writes("xs:double('+INF')"));
-            Assert.AreEqual("INF", Writes("xs:float('+INF')"));
-            Assert.AreEqual("true", Writes("xs:double('+INF') eq xs:double('INF')"));
+            Assert.AreEqual("INF", Writes("xs:double('INF')"));
+            Assert.AreEqual("-INF", Writes("xs:double('-INF')"));
+            Assert.AreEqual("INF", Writes("xs:float('INF')"));
 
-            // Still exactly those four; nothing else spells one.
+            // '+INF' is the third XML Schema 1.1 adds, and this engine reads values by 1.0 rules, so a
+            // leading plus on an infinity is text rather than a number. The suite asks about it only
+            // under an xsd-version 1.1 dependency, which the drivers skip.
+            Refuses("xs:double('+INF')");
+            Refuses("xs:float('+INF')");
+
+            // And nothing else spells one at all.
             Refuses("xs:double('+Infinity')");
             Refuses("xs:double('inf')");
         }

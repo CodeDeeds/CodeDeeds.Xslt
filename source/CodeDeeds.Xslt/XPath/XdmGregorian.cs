@@ -44,6 +44,61 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>The timezone, if the value was written with one.</summary>
         public TimeSpan? Offset { get; }
 
+        /// <summary>How reading a Gregorian value turned out.</summary>
+        public enum Reading : byte
+        {
+            /// <summary>A value was read.</summary>
+            Value,
+
+            /// <summary>The text is not in the type lexical space.</summary>
+            NotLexical,
+
+            /// <summary>The text names a year outside the range this engine holds.</summary>
+            OutOfRange,
+        }
+
+        /// <summary>Whether the last read refused a year for its size rather than its shape.</summary>
+        [ThreadStatic]
+        private static bool s_yearOutOfRange;
+
+        /// <summary>Reads a Gregorian value, saying which way it failed where it did.</summary>
+        /// <param name="text">The text to read.</param>
+        /// <param name="name">The type name, which says how many parts to expect.</param>
+        /// <param name="result">The value read, where one was.</param>
+        public static Reading Read(string text, string name, out XdmGregorian? result)
+        {
+            s_yearOutOfRange = false;
+
+            if (TryParse(text, name, out result))
+            {
+                return Reading.Value;
+            }
+
+            // A year of nothing but digits that no number here holds is not a malformed year: the text
+            // says which year it means and this engine cannot hold it. Only where the rest of the text
+            // reads, though: "999999999999-XX" has a month that is no month, and a text that is not in
+            // the lexical space at all is better complained about as such.
+            bool yearTooBig = s_yearOutOfRange;
+
+            return yearTooBig && TryParse(WithYear(text, "9999"), name, out _)
+                ? Reading.OutOfRange
+                : Reading.NotLexical;
+        }
+
+        /// <summary>The same text with the year digits swapped for others, to ask about the rest of it.</summary>
+        private static string WithYear(string text, string year)
+        {
+            int start = text.StartsWith("-", StringComparison.Ordinal) ? 1 : 0;
+            int end = start;
+
+            while (end < text.Length && text[end] >= '0' && text[end] <= '9')
+            {
+                end++;
+            }
+
+            return string.Concat(text.AsSpan(0, start), year, text.AsSpan(end));
+        }
+
         /// <summary>Reads the lexical form of one of the five types.</summary>
         /// <param name="text">The text to read.</param>
         /// <param name="name">Which type's lexical form to expect.</param>
@@ -205,9 +260,22 @@ namespace CodeDeeds.Xslt.XPath
 
             // Four digits at least, and a longer year must not start with a zero: 02004 is not 2004 written
             // differently but outside the lexical space, and reading it as 2004 would take a typo for a year.
-            if (digits.Length < 4
-                || (digits.Length > 4 && digits[0] == '0')
-                || !int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out year))
+            if (digits.Length < 4 || (digits.Length > 4 && digits[0] == '0'))
+            {
+                return false;
+            }
+
+            if (!int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out year))
+            {
+                // Digits and nothing else, and too many of them for an int: a year this engine cannot
+                // hold rather than text that is not a year at all.
+                s_yearOutOfRange = AllDigits(digits);
+                return false;
+            }
+
+            // There is no year zero. XSD 1.0 counts 1 BCE as -0001, so 0000 names nothing, and reading
+            // it as a year would invent one.
+            if (year == 0)
             {
                 return false;
             }
@@ -218,6 +286,20 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             return true;
+        }
+
+        /// <summary>Whether a run of text is digits and nothing else.</summary>
+        private static bool AllDigits(string text)
+        {
+            foreach (char c in text)
+            {
+                if (c < '0' || c > '9')
+                {
+                    return false;
+                }
+            }
+
+            return text.Length != 0;
         }
 
         /// <summary>

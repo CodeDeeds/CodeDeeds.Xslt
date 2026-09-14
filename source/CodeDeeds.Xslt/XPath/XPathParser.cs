@@ -799,7 +799,13 @@ namespace CodeDeeds.Xslt.XPath
             (XdmType.BuiltInType? type, XdmSchemaType? schemaType, bool allowEmpty) = ParseSingleType();
 
             return type is XdmType.BuiltInType builtIn
-                ? new CastExpr(value, builtIn, allowEmpty, testOnly: true, m_context.InScopeNamespaces)
+                ? new CastExpr(
+                    value,
+                    builtIn,
+                    allowEmpty,
+                    testOnly: true,
+                    m_context.InScopeNamespaces,
+                    m_context.DefaultElementNamespace)
                 : new CastExpr(value, schemaType!, allowEmpty, testOnly: true, m_context.InScopeNamespaces);
         }
 
@@ -822,7 +828,13 @@ namespace CodeDeeds.Xslt.XPath
 
             XdmType.RequireLiteralNameBelowThree(builtIn, value, m_context.SyntaxVersion);
 
-            return new CastExpr(value, builtIn, allowEmpty, testOnly: false, m_context.InScopeNamespaces);
+            return new CastExpr(
+                value,
+                builtIn,
+                allowEmpty,
+                testOnly: false,
+                m_context.InScopeNamespaces,
+                m_context.DefaultElementNamespace);
         }
 
         /// <summary>
@@ -2156,7 +2168,8 @@ namespace CodeDeeds.Xslt.XPath
                     m_context.Version,
                     m_context.SyntaxVersion,
                     m_context.LegacySyntax,
-                    m_context.InScopeNamespaces));
+                    m_context.InScopeNamespaces,
+                    m_context.DefaultElementNamespace));
             }
 
             // A simple type a schema defines is a constructor function of its own name, as the built-in
@@ -2179,9 +2192,12 @@ namespace CodeDeeds.Xslt.XPath
                 throw XsltErrors.Error(XsltErrorCode.FORG0001, $"'{text}' is not a valid xs:QName.");
             }
 
+            // An unprefixed name has the shape an unprefixed element name has, and goes where those
+            // go: the default element/type namespace, which xpath-default-namespace declares.
             if (prefix.Length == 0)
             {
-                return XPathValue.FromQName(new XdmQName(string.Empty, string.Empty, localName));
+                return XPathValue.FromQName(
+                    new XdmQName(string.Empty, m_context.DefaultElementNamespace, localName));
             }
 
             string uri = m_context.ResolvePrefix(prefix)
@@ -2219,7 +2235,8 @@ namespace CodeDeeds.Xslt.XPath
                     m_context.Version,
                     m_context.SyntaxVersion,
                     m_context.LegacySyntax,
-                    m_context.InScopeNamespaces))
+                    m_context.InScopeNamespaces,
+                    m_context.DefaultElementNamespace))
                 ?? throw XsltErrors.Error(XsltErrorCode.XPST0017, $"Unknown function '{localName}()'.");
         }
 

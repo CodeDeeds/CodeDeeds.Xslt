@@ -238,6 +238,14 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>Gets or sets the collations of the caller's own, or <see langword="null"/> for none.</summary>
         public IXsltCollationResolver? CollationResolver { get; set; }
 
+        /// <summary>
+        /// Gets or sets the namespace an unprefixed element or type name is in, empty for none. This is
+        /// the default element/type namespace of the static context and not what <c>xmlns</c> declares:
+        /// binding the empty prefix here would say where unprefixed names in a document live, which is a
+        /// different question and one XPath does not read that binding for.
+        /// </summary>
+        public string DefaultElementNamespace { get; set; } = string.Empty;
+
         /// <summary>Binds a prefix to a namespace URI for the expressions compiled against this context.</summary>
         /// <param name="prefix">The prefix to bind.</param>
         /// <param name="namespaceUri">The namespace URI.</param>
