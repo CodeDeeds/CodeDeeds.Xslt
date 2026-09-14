@@ -2674,6 +2674,27 @@ namespace CodeDeeds.Xslt.Compiler
             m_implements30 = implements30;
         }
 
+
+        /// <summary>Renders a message for whoever is reading messages.</summary>
+        /// <remarks>
+        /// Serialized rather than flattened. A message is a document node built from the instruction's
+        /// content, and an xsl:message writing an element means the element: reducing it to the text
+        /// inside throws away what the stylesheet put there to be read. How a message is presented is
+        /// left to the processor (XSLT 3.0 §6.3), and every other one presents it as XML.
+        /// </remarks>
+        /// <param name="content">What the message is made of.</param>
+        private static string Present(XPathValue content)
+        {
+            using StringWriter text = new StringWriter();
+            Runtime.OutputWriter writer = new Runtime.OutputWriter(
+                text,
+                new Runtime.OutputSettings { Method = Runtime.OutputMethod.Xml, OmitXmlDeclaration = true });
+
+            SequenceInstruction.WriteValue(content, writer);
+            writer.Flush();
+            return text.ToString();
+        }
+
         /// <inheritdoc/>
         public override void Execute(ref DynamicContext context, XsltRuntime runtime)
         {
@@ -2691,7 +2712,7 @@ namespace CodeDeeds.Xslt.Compiler
                 // copied. That is what a message is â€” an xsl:message may be asked for the elements in it.
                 content = VariableInstruction.Evaluate(null, m_body, ref context, runtime);
 
-                message = Join(content, " ");
+                message = Present(content);
             }
             catch (XsltException failed) when (m_implements30)
             {

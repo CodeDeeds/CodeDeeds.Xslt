@@ -104,6 +104,9 @@ namespace CodeDeeds.Xslt.Conformance
                 case "assert-serialization":
                     return CheckSerialization(assertion, outcome);
 
+                case "assert-message":
+                    return CheckMessage(assertion, outcome);
+
                 default:
                     return Skip($"assertion '{assertion.Name.LocalName}' is not one this driver can present");
             }
@@ -111,9 +114,67 @@ namespace CodeDeeds.Xslt.Conformance
 
         // ---- The assertions ------------------------------------------------------------------------------
 
+
+        /// <summary>
+        /// Puts the assertion inside an <c>assert-message</c> to what <c>xsl:message</c> wrote rather
+        /// than to the result.
+        /// </summary>
+        /// <remarks>
+        /// A message is a result of its own, and the catalog asks about it with the same assertions it
+        /// asks about the principal one, so the inner assertion is answered by standing the messages in
+        /// the result's place. Everything the run wrote is one string here: the tests asking this write
+        /// one message, and a driver splitting them would have to invent where one ends.
+        /// </remarks>
+        private static TestResult CheckMessage(XElement assertion, Transformation outcome)
+        {
+            if (outcome.Messages.Count == 0)
+            {
+                return outcome.Error is not null
+                    ? Fail($"error raised: {outcome.Error}")
+                    : Fail("the transformation wrote no message");
+            }
+
+            if (assertion.Elements().FirstOrDefault() is not XElement inner)
+            {
+                return Pass();
+            }
+
+            // The catalog names one message and a run may write several, so it holds of the run if it
+            // holds of any of them. Which one it is about the catalog does not say.
+            TestResult last = Fail("no message answered the assertion");
+
+            foreach (string message in outcome.Messages)
+            {
+                last = Check(
+                    inner,
+                    new Transformation
+                    {
+                        Result = message,
+                        Directory = outcome.Directory,
+                        ResultUri = outcome.ResultUri,
+                        Schemas = outcome.Schemas,
+                    });
+
+                if (last.Outcome == Outcome.Passed)
+                {
+                    return last;
+                }
+            }
+
+            return last;
+        }
+
         private static TestResult CheckError(XElement assertion, Transformation outcome)
         {
             string expected = (string?)assertion.Attribute("code") ?? "*";
+
+            // A code the catalog writes in the Q{uri}local form, which xsl:message error-code allows a
+            // stylesheet to invent. In no namespace it is the local name, which is what the engine
+            // reports; in one this driver cannot present it, the engine carrying codes as names alone.
+            if (expected.StartsWith("Q{}", StringComparison.Ordinal))
+            {
+                expected = expected["Q{}".Length..];
+            }
 
             if (outcome.Error is null)
             {

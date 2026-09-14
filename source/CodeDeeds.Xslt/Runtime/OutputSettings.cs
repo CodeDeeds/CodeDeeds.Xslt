@@ -113,10 +113,28 @@ namespace CodeDeeds.Xslt.Runtime
         public bool MayInferXhtml { get; set; } = true;
 
         /// <summary>Gets or sets the public identifier of the emitted document type declaration.</summary>
-        public string? DoctypePublic { get; set; }
+        /// <remarks>
+        /// An empty string is no identifier rather than an empty one, which is how a stylesheet takes
+        /// back a document type declaration an imported one asked for (serialization erratum E31).
+        /// Writing an empty system identifier would produce a declaration pointing at the document
+        /// itself, which is not what any stylesheet writing it means.
+        /// </remarks>
+        public string? DoctypePublic
+        {
+            get => m_doctypePublic;
+            set => m_doctypePublic = string.IsNullOrEmpty(value) ? null : value;
+        }
 
         /// <summary>Gets or sets the system identifier of the emitted document type declaration.</summary>
-        public string? DoctypeSystem { get; set; }
+        /// <remarks>Empty is none, as it is for the public identifier above.</remarks>
+        public string? DoctypeSystem
+        {
+            get => m_doctypeSystem;
+            set => m_doctypeSystem = string.IsNullOrEmpty(value) ? null : value;
+        }
+
+        private string? m_doctypePublic;
+        private string? m_doctypeSystem;
 
         /// <summary>
         /// Gets or sets which version of HTML the <c>html</c> and <c>xhtml</c> methods are writing.

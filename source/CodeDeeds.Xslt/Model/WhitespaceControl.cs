@@ -10,9 +10,10 @@ namespace CodeDeeds.Xslt.Model
     /// heavily indented document costs neither the memory nor the traversal.
     /// </para>
     /// <para>
-    /// XSLT resolves conflicting declarations by specificity: an exact name beats <c>prefix:*</c> and
-    /// <c>*:name</c>, which beat <c>*</c>. Among equally specific declarations the last one written wins,
-    /// which is why entries record the order they were declared in.
+    /// XSLT resolves conflicting declarations in three steps (XSLT 3.0 §4.4). Highest import precedence
+    /// first, so that an importing module saying <c>strip</c> of a wildcard settles an element an imported
+    /// one named exactly; then specificity, an exact name beating <c>prefix:*</c> and <c>*:name</c>, which
+    /// beat <c>*</c>; then the last one written, which is why entries record the order they came in.
     /// </para>
     /// </remarks>
     public sealed class WhitespaceControl
@@ -34,13 +35,18 @@ namespace CodeDeeds.Xslt.Model
         /// </param>
         /// <param name="localName">The local name, or <c>*</c> to match any name.</param>
         /// <param name="strip">Whether matching elements have their whitespace-only text stripped.</param>
-        public void Declare(string? namespaceUri, string localName, bool strip)
+        /// <param name="precedence">
+        /// The import precedence of the module that declared it, higher being nearer the top. What an
+        /// importing module says settles an element however unspecific its test, which is why this is
+        /// compared before specificity is.
+        /// </param>
+        public void Declare(string? namespaceUri, string localName, bool strip, int precedence = 0)
         {
             // A test that names both halves is the most specific, one that names neither the least, and
             // 'p:*' and '*:a' are equally specific between them — which is the order of the priorities a
             // name test carries as a pattern, since these are name tests and that is what they are for.
             int specificity = (namespaceUri is null ? 0 : 1) + (localName == "*" ? 0 : 1);
-            m_entries.Add(new Entry(namespaceUri, localName, specificity, strip, m_entries.Count));
+            m_entries.Add(new Entry(namespaceUri, localName, specificity, strip, m_entries.Count, precedence));
         }
 
         /// <summary>
@@ -59,10 +65,7 @@ namespace CodeDeeds.Xslt.Model
                     continue;
                 }
 
-                // More specific wins; among equals, the one declared later.
-                if (best is null
-                    || entry.Specificity > best.Value.Specificity
-                    || (entry.Specificity == best.Value.Specificity && entry.Order > best.Value.Order))
+                if (best is null || Beats(entry, best.Value))
                 {
                     best = entry;
                 }
@@ -71,12 +74,26 @@ namespace CodeDeeds.Xslt.Model
             return best?.Strip ?? false;
         }
 
+        /// <summary>Whether one declaration settles an element that another also names.</summary>
+        private static bool Beats(Entry entry, Entry standing)
+        {
+            if (entry.Precedence != standing.Precedence)
+            {
+                return entry.Precedence > standing.Precedence;
+            }
+
+            return entry.Specificity != standing.Specificity
+                ? entry.Specificity > standing.Specificity
+                : entry.Order > standing.Order;
+        }
+
         private readonly record struct Entry(
             string? NamespaceUri,
             string LocalName,
             int Specificity,
             bool Strip,
-            int Order)
+            int Order,
+            int Precedence)
         {
             public bool Matches(string namespaceUri, string localName)
             {

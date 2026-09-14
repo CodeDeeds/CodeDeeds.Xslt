@@ -17,13 +17,13 @@ Conformance as last measured, on 14 September 2026, against the W3C suites (see 
 
 | Suite | Result |
 | --- | --- |
-| XSLT 3.0 test suite, 3.0 processor | 7,670 of 7,708, 99.5% |
-| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,396 of 5,431, 99.4% |
+| XSLT 3.0 test suite, 3.0 processor | 7,785 of 7,828, 99.5% |
+| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,494 of 5,533, 99.3% |
 | QT3 (XPath), 3.1 | 98.9% of 17,615 |
 | QT3 (XPath), 2.0 | 99.0% of 14,188 |
 
 The 2,900 streaming tests are skipped by design. The 686 schema-aware tests are read only by the driver's
-opt-in `--schema` run, which stands at 8,223 of 8,299 (99.1%), the same on both backends; the figures
+opt-in `--schema` run, which stands at 8,345 of 8,430 (99.0%), the same on both backends; the figures
 above are the run without it.
 
 ## Not implemented, and not planned
@@ -75,6 +75,7 @@ above are the run without it.
 | `xsl:sort` without `lang` | Text is compared by code point rather than by the machine's culture, so one stylesheet orders the same everywhere. `lang` or `collation` asks for a named collation and gets it, on `xsl:sort`, `xsl:merge-key`, `xsl:for-each-group` and `xsl:key` alike. |
 | Document order across documents | Nodes of several documents are ordered by the sequence the documents were loaded in. Stable within a transformation, which is all the specification asks. |
 | Binary ordering | `xs:hexBinary` and `xs:base64Binary` are ordered octet by octet at every version, which XPath 3.1 defines and 2.0 left undefined. |
+| `xsl:message` | Presented as XML to `XsltOptions.MessageWriter`, one message per line. A message is a document node built from the instruction's content, so one writing an element writes the element rather than the text inside it; how a message is presented is left to the processor and this is what the conformance suite asks about. |
 | Output details | Indentation uses `\n` and indents uniformly; where exactly lines break is the processor's choice. `xsl:vendor` is `CodeDeeds` and `xsl:vendor-url` is empty. |
 
 ## Using it from .NET

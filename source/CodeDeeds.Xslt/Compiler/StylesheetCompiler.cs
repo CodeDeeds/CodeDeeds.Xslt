@@ -2632,6 +2632,11 @@ namespace CodeDeeds.Xslt.Compiler
             string href = GetAttribute(element, "href")
                 ?? throw new XsltException($"An xsl:{kind} must have an href.");
 
+            // What the reference resolves against is the base URI of the element that wrote it, not the
+            // module as a whole: an xml:base above it moves it, and so does having been read out of an
+            // external entity, which is relative to where the entity was and not to where it was used.
+            baseUri = XPath.Xpath2FunctionExpr.BaseUriOf(m_tree, element, baseUri) ?? baseUri;
+
             if (m_options.StylesheetResolver is null)
             {
                 throw new XsltException(
@@ -4420,7 +4425,7 @@ namespace CodeDeeds.Xslt.Compiler
                 m_whitespaceDeclared[test] = (precedence, strip);
             }
 
-            WhitespaceOf(CurrentPackage).Declare(namespaceUri, localName, strip);
+            WhitespaceOf(CurrentPackage).Declare(namespaceUri, localName, strip, precedence);
         }
 
         private void ReadWhitespaceControl(int element, bool strip, int precedence)

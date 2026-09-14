@@ -46,6 +46,15 @@ namespace CodeDeeds.Xslt.Conformance
         /// schema-element(E) in an assertion is a question the assertion cannot ask without them.
         /// </summary>
         public System.Xml.Schema.XmlSchemaSet? Schemas { get; init; }
+
+        /// <summary>
+        /// What each xsl:message wrote, one entry per message, for an assert-message.
+        /// </summary>
+        /// <remarks>
+        /// Kept apart rather than run together, because the assertion is about a message and a run that
+        /// writes three has written three results, not one long one.
+        /// </remarks>
+        public IReadOnlyList<string> Messages { get; init; } = Array.Empty<string>();
     }
 
     /// <summary>
@@ -137,7 +146,13 @@ namespace CodeDeeds.Xslt.Conformance
                 return new TestResult(Outcome.Skipped, problem);
             }
 
-            List<XElement> stylesheets = test.Elements(Xslt30Catalog.Ns + "stylesheet").ToList();
+            // A test naming several stylesheets names one to run and the rest as modules it imports or
+            // includes. Those are files beside it, which the suite resolver already serves by URI, so
+            // what the driver has to settle is only which of them is the one to compile: the one the
+            // catalog does not mark secondary.
+            List<XElement> stylesheets = test.Elements(Xslt30Catalog.Ns + "stylesheet")
+                .Where(sheet => (string?)sheet.Attribute("role") != "secondary")
+                .ToList();
             string? stylesheetFile = principals.Count == 1
                 ? (string?)principals[0].Attribute("file")
                 : stylesheets.Count switch
@@ -297,6 +312,7 @@ namespace CodeDeeds.Xslt.Conformance
         {
             ResultCollector results = new ResultCollector();
             StringWriter output = new StringWriter();
+            MessageCollector messages = new MessageCollector();
             Xslt? stylesheet = null;
 
             try
@@ -334,6 +350,7 @@ namespace CodeDeeds.Xslt.Conformance
                 // stylesheet reading two of them gets each as the catalog declares it.
                 SuiteResolver resolver = new SuiteResolver(m_catalog.Root)
                 {
+                    Encodings = DeclaredEncodings(environment),
                     Validated = m_schemaAware && environment is not null
                         ? new HashSet<string>(environment.ValidatedFiles, StringComparer.OrdinalIgnoreCase)
                         : new HashSet<string>(StringComparer.OrdinalIgnoreCase),
@@ -399,7 +416,7 @@ namespace CodeDeeds.Xslt.Conformance
                     EntityResolver = new EntityResolverWithin(resolver, directory),
                     BaseUri = new Uri(stylesheetPath).AbsoluteUri,
                     ResultResolver = results,
-                    MessageWriter = TextWriter.Null,
+                    MessageWriter = messages,
                     Parameters = parameters,
                     TemplateParameters = template,
                     TunnelParameters = tunnel,
@@ -493,6 +510,7 @@ namespace CodeDeeds.Xslt.Conformance
                 Directory = directory,
                 Tree = m_schemaAware && !compileOnly ? () => RunAgainIntoATree(compiled, source) : null,
                 Schemas = m_schemaAware ? EnvironmentSchemas(environment, directory) : null,
+                Messages = messages.Written,
             };
         }
 
@@ -672,6 +690,48 @@ namespace CodeDeeds.Xslt.Conformance
                 staticContext.Names);
 
             return compiled.Evaluate(ref context);
+        }
+
+
+        /// <summary>The encodings an environment declares for the files it serves, by file name.</summary>
+        private static Dictionary<string, string> DeclaredEncodings(Xslt30Environment? environment)
+        {
+            Dictionary<string, string> encodings = new(StringComparer.OrdinalIgnoreCase);
+
+            foreach ((string file, _, string? declared) in environment?.Resources ?? new())
+            {
+                if (declared is not null)
+                {
+                    encodings[Path.GetFileName(file)] = declared;
+                }
+            }
+
+            return encodings;
+        }
+
+
+        /// <summary>Keeps each xsl:message the run wrote, in order.</summary>
+        /// <remarks>
+        /// The engine writes one message per WriteLine, so a line is a message. Buffering the characters
+        /// and splitting afterwards would cut a message that has a newline inside it in two.
+        /// </remarks>
+        private sealed class MessageCollector : TextWriter
+        {
+            private readonly List<string> m_written = new();
+
+            public override System.Text.Encoding Encoding => System.Text.Encoding.UTF8;
+
+            public IReadOnlyList<string> Written => m_written;
+
+            public override void WriteLine(string? value)
+            {
+                m_written.Add(value ?? string.Empty);
+            }
+
+            public override void Write(char value)
+            {
+                // Nothing else writes here, and a stray character is not a message.
+            }
         }
 
         /// <summary>Serves the suite's stylesheets and documents, addressed as URIs.</summary>
@@ -909,6 +969,13 @@ namespace CodeDeeds.Xslt.Conformance
             /// </summary>
             public HashSet<string> Validated { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
+            /// <summary>
+            /// The encoding the environment declared for a file it serves, by file name. A file with no
+            /// byte-order mark and no XML declaration says nothing about itself, and unparsed-text() reads
+            /// bytes as characters, so guessing UTF-8 reads an ISO-8859-1 file as mojibake.
+            /// </summary>
+            public Dictionary<string, string> Encodings { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
             public ResolvedResource? Resolve(string href, string? baseUri)
             {
                 Uri baseline = baseUri is null ? m_root : new Uri(baseUri);
@@ -922,13 +989,32 @@ namespace CodeDeeds.Xslt.Conformance
                 }
 
                 return new ResolvedResource(
-                    new StreamReader(resolved.LocalPath, detectEncodingFromByteOrderMarks: true),
+                    Open(resolved.LocalPath),
                     resolved.AbsoluteUri)
                 {
                     Validation = Validated.Contains(Path.GetFileName(resolved.LocalPath))
                         ? XsltValidation.Strict
                         : null,
                 };
+            }
+
+            /// <summary>Opens a file in the encoding the environment declared, or by what it says of itself.</summary>
+            private StreamReader Open(string path)
+            {
+                if (Encodings.TryGetValue(Path.GetFileName(path), out string? declared))
+                {
+                    try
+                    {
+                        return new StreamReader(path, System.Text.Encoding.GetEncoding(declared));
+                    }
+                    catch (ArgumentException)
+                    {
+                        // An encoding this platform does not know; read it the ordinary way rather than
+                        // refusing to serve the file at all.
+                    }
+                }
+
+                return new StreamReader(path, detectEncodingFromByteOrderMarks: true);
             }
         }
 

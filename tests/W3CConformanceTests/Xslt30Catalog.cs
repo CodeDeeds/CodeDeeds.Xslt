@@ -122,6 +122,17 @@ namespace CodeDeeds.Xslt.Conformance
         /// </summary>
         public List<(string File, string? Role)> Schemas { get; } = new();
 
+        /// <summary>
+        /// The files the environment says to serve, each with the URI a stylesheet asks for it by and the
+        /// encoding the catalog declares for it.
+        /// </summary>
+        /// <remarks>
+        /// Mostly for <c>unparsed-text()</c>, which reads bytes as characters and so has to be told which
+        /// characters: a file with no byte-order mark and no XML declaration says nothing about itself,
+        /// and the catalog is where that is written down.
+        /// </remarks>
+        public List<(string File, string Uri, string? Encoding)> Resources { get; } = new();
+
         /// <summary>Why this environment is beyond the driver, or null if it is usable.</summary>
         public string? Unsupported { get; private init; }
 
@@ -132,9 +143,33 @@ namespace CodeDeeds.Xslt.Conformance
             // A collation an environment declares is one the engine provides or the driver does, through
             // SuiteCollations, which every transformation is given; nothing to arrange per environment. A
             // schema is recorded for the runner, which decides by whether the run is schema-aware.
-            string? unsupported =
-                element.Element(ns + "resource") is not null ? "environment declares a resource"
-                : null;
+            string? unsupported = null;
+
+            List<(string File, string Uri, string? Encoding)> resources = new();
+
+            foreach (XElement resource in element.Elements(ns + "resource"))
+            {
+                string? file = (string?)resource.Attribute("file");
+                string? at = (string?)resource.Attribute("uri") ?? file;
+
+                // A resource naming an absolute http URI is a document on the web, which this driver
+                // does not fetch: a conformance run that depends on the network measures the network.
+                if (file is null || at is null || file.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                {
+                    unsupported ??= "environment declares a resource that is not a local file";
+                    continue;
+                }
+
+                // An XQuery module is code for a processor this engine has not got, so serving the file
+                // would only move the refusal from the driver to fn:load-xquery-module.
+                if ((string?)resource.Attribute("media-type") == "application/xquery")
+                {
+                    unsupported ??= "environment declares an XQuery module as a resource";
+                    continue;
+                }
+
+                resources.Add((file, at, (string?)resource.Attribute("encoding")));
+            }
 
             List<(string, string?)> schemas = new();
 
@@ -234,6 +269,7 @@ namespace CodeDeeds.Xslt.Conformance
             environment.Parameters.AddRange(element.Elements(ns + "param"));
             environment.Collections.AddRange(collections);
             environment.Schemas.AddRange(schemas);
+            environment.Resources.AddRange(resources);
 
             foreach (string validated in validatedFiles)
             {

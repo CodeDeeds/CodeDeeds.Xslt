@@ -1164,9 +1164,17 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="runtime">The transformation, whose current output it goes to.</param>
         internal static void WriteValue(XPathValue value, XsltRuntime runtime)
         {
+            WriteValue(value, runtime.Output);
+        }
+
+        /// <summary>Writes a value into a target of the caller's choosing.</summary>
+        /// <param name="value">The value to write.</param>
+        /// <param name="output">Where it goes.</param>
+        internal static void WriteValue(XPathValue value, Runtime.OutputTarget output)
+        {
             // Where the result is a sequence rather than markup, the value goes in as it is: this is the one
             // instruction that can contribute something other than nodes and text.
-            if (runtime.Output.TryAppendValue(value))
+            if (output.TryAppendValue(value))
             {
                 return;
             }
@@ -1176,7 +1184,7 @@ namespace CodeDeeds.Xslt.Compiler
                 NodeSet nodes = value.AsNodeSet();
                 for (int i = 0; i < nodes.Count; i++)
                 {
-                    NodeCopier.CopyDeep(nodes.TreeAt(i), nodes[i], runtime.Output);
+                    NodeCopier.CopyDeep(nodes.TreeAt(i), nodes[i], output);
                 }
 
                 return;
@@ -1188,7 +1196,7 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 if (items[i].Kind == XPathValueKind.Node)
                 {
-                    NodeCopier.CopyDeep(items[i].NodeTree, items[i].NodeId, runtime.Output);
+                    NodeCopier.CopyDeep(items[i].NodeTree, items[i].NodeId, output);
                     continue;
                 }
 
@@ -1203,7 +1211,7 @@ namespace CodeDeeds.Xslt.Compiler
 
                 // Written as an atomic value, which is what puts a single space between it and an atomic value
                 // written just before — by this instruction or by the one before it, and never after a node.
-                runtime.Output.WriteAtomic(XdmSequence.StringValueOf(items[i]));
+                output.WriteAtomic(XdmSequence.StringValueOf(items[i]));
             }
         }
     }
