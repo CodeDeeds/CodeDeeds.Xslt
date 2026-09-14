@@ -17,6 +17,7 @@
 /tests/W3CConformanceTests/xslt30-test/
 
 /tests/Benchmarks/BenchmarkDotNet.Artifacts
+BenchmarkDotNet.Artifacts/
  
 # Worktrees created for background tasks are checkouts of this repository, not part of it.
 **/.claude/worktrees/

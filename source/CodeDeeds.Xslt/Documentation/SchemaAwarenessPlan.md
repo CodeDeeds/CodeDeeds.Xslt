@@ -434,7 +434,11 @@ feed it.
    (`import-schema` 118-120, 137), `xsl:output item-separator` applied when a result document is built
    rather than serialized (`attr/validation` 0214), and validating an element against `xs:untypedAtomic`
    (`attr/validation` 0109). Each is its own small rule rather than a theme.
-2. Keep the DocBook benchmarks as the check that an untyped transformation has not slowed.
+2. **Done.** `SchemaAwareBenchmarks` measures what schema awareness costs, each measurement paired
+   with the same work done without it: validating the input roughly doubles the read (1.89x, 2.49x the
+   allocation) and validating what the stylesheet builds costs about as much again (2.68x, 7.07x),
+   while the untyped rows are what they were before any of this was built. The DocBook benchmarks stay
+   as the check that an untyped transformation has not slowed; their allocation has not moved.
 3. The QT3 driver still skips its 140 schema environments: it evaluates XPath outside a stylesheet, and
    validating a source there needs the tree builder's validated entry point reached through something
    public. A small addition now that the entry point stands.

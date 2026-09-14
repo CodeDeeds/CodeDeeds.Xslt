@@ -9,6 +9,7 @@ This project provides comprehensive performance benchmarks for the XSLT transfor
 1. **XSLT Compilation** - Measures the cost of compiling different XSLT stylesheets
 2. **XML Transformation** - Benchmarks XML to HTML transformations with various input sizes
 3. **JSON Transformation** - Benchmarks JSON to HTML transformations with various input sizes
+4. **Schema awareness** - What validating an input, and validating what a stylesheet builds, cost over doing neither
 
 ## Projects & Files
 
@@ -25,6 +26,11 @@ This project provides comprehensive performance benchmarks for the XSLT transfor
 - **JsonTransformationBenchmarks.cs** - Tests JSON transformation performance
   - Small dataset (100 products, 23 KB) transformations to string, TextWriter, and Stream
   - Large dataset (1000 products, 230 KB) transformations to string, TextWriter, and Stream
+
+- **SchemaAwareBenchmarks.cs** - What schema awareness costs, each measurement paired with the same work done without it
+  - Reading 100 products untyped and with the input validated strictly
+  - Building a 100-product document, validated strictly and not at all
+  - Compiling a stylesheet that imports a schema
 
 ### Sample Data & Stylesheets
 
@@ -69,6 +75,9 @@ dotnet run -c Release -- --filter *XmlTransformation*
 
 # Only the JSON transformation benchmarks
 dotnet run -c Release -- --filter *JsonTransformation*
+
+# Only the schema-awareness benchmarks
+dotnet run -c Release -- --filter *SchemaAware*
 
 # One benchmark, by its method name
 dotnet run -c Release -- --filter *TransformLargeXmlToString*
@@ -120,6 +129,33 @@ the result back out; the engine's own work is the same in all three.
 For scale: before the September 2026 performance work, the large XML transformation measured 12.9 ms and
 12.0 MB per operation on the same machine, with a gen2 collection on every run, and the large JSON
 transformation 3.0 ms and 5.6 MB with a gen2 collection every second run.
+
+### Schema awareness
+
+Measured 14 September 2026 on the same machine. Every pair transforms the same 100-product document with
+the same stylesheet, so what separates the two members of a pair is the schema awareness and nothing else.
+
+| Benchmark | Mean | Ratio | Allocated | Alloc ratio |
+|---|---:|---:|---:|---:|
+| Read 100 products, untyped | 258.4 μs | 1.00 | 76.2 KB | 1.00 |
+| Read 100 products, input validated and typed | 488.7 μs | 1.89 | 189.6 KB | 2.49 |
+| Build 100 products, nothing validated | 333.4 μs | 1.29 | 122.3 KB | 1.60 |
+| Build 100 products, result validated strictly | 693.4 μs | 2.68 | 539.0 KB | 7.07 |
+| Compile a stylesheet that imports the schema | 65.7 μs | 0.25 | 55.5 KB | 0.73 |
+
+**Validating the input roughly doubles the read.** The document is parsed through a validating reader
+rather than a plain one, and the elements and attributes it settles types for carry them, which is the
+extra allocation. What the stylesheet then does with the typed values costs nothing extra: a sum over
+typed prices is a sum over numbers rather than over strings that have to be cast.
+
+**Validating what the stylesheet builds costs about the same again, and rather more memory.** The result
+is built, walked into a validator, and written out carrying what validation settled, so the nodes exist
+twice over for as long as that takes. It is asked for per instruction, so a stylesheet validating one
+element of a large result pays for that element.
+
+**Nothing is paid for not asking.** The untyped rows are the engine as it stands with no schema in sight,
+and they are what they were before schema awareness was built: the option costs a field and a branch that
+is never taken.
 
 ## Benchmark Methodology
 
