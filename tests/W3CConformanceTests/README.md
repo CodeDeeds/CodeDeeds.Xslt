@@ -313,10 +313,10 @@ unrelated-looking reasons, while a reason shared across twenty files is nobody's
 
 ## The XPath run
 
-The 2.0 run stands at **14,088 of 14,177, 99.4%**, and the 3.1 run — `--31`, which takes in the tests marked
-`XP30+` and `XP31+` — at **17,468 of 17,598, 99.3%**. The second reads 3,421 more tests than the first and is
-a tenth of a point behind it, which is the shape to expect: what it takes in is the newer half, and the
-newer half is where the work is.
+The 2.0 run stands at **14,097 of 14,177, 99.4%**, and the 3.1 run — `--31`, which takes in the tests marked
+`XP30+` and `XP31+` — at **17,479 of 17,598, 99.3%**. The second reads 3,421 more tests than the first and is
+level with it, which is not the shape to expect: what it takes in is the newer half, and the newer half is
+usually where the work is.
 
 | area | 2.0 | 3.1 |
 |---|---|---|
@@ -324,8 +324,8 @@ newer half is where the work is.
 | `misc` | 31 / 31, 100% | 33 / 33, 100% |
 | `app` | 330 / 330, 100% | 774 / 777, 99.6% |
 | `prod` | 5,506 / 5,520, 99.7% | 5,932 / 5,949, 99.7% |
-| `fn` | 4,998 / 5,028, 99.4% | 6,978 / 7,033, 99.2% |
-| `op` | 3,154 / 3,195, 98.7% | 3,367 / 3,413, 98.7% |
+| `fn` | 5,001 / 5,028, 99.5% | 6,983 / 7,033, 99.3% |
+| `op` | 3,160 / 3,195, 98.9% | 3,373 / 3,413, 98.8% |
 | `xs` | 69 / 73, 94.5% | 113 / 117, 96.6% |
 | `map` | *3.1* | 110 / 112, 98.2% |
 | `array` | *3.1* | 31 / 34, 91.2% |

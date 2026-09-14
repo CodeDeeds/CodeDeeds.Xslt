@@ -338,6 +338,18 @@ clock reading left alone: `adjust-date-to-timezone(xs:date('2002-03-07'), -PT10H
 not the day before, which is what converting would have made of it. Adjusting to the empty sequence goes the
 other way, removing the timezone and keeping what the clock said, for the same reason.
 
+**A value moved by a duration or into a timezone comes back as its own type**, which the specification
+says the long way round and means literally. Adding an `xs:dayTimeDuration` to an `xs:date` is defined as
+taking the date as a dateTime at midnight, moving that, and casting the result back to `xs:date`; the
+`adjust-*-to-timezone` family is defined the same way. The cast at the end is not decoration. It is what
+drops the hours the duration carried, and a value that keeps them is wrong in a way that hides: a date
+prints no time of day, so `xs:date('1999-08-12') + xs:dayTimeDuration('P23DT09H32M59S')` wrote itself as
+`1999-09-04` and then compared unequal to `xs:date('1999-09-04')`. The same step is what wraps an
+`xs:time` around the clock, a time having no day to roll into: twenty-three days and nine hours later is
+nine hours later. And it is what gives an adjusted date the instant its new timezone implies, so that
+`adjust-date-to-timezone(xs:date('2002-03-07Z'), PT10H)` begins ten hours earlier than the day it names
+did in UTC, rather than at the same moment with a different label on it.
+
 **The three `current-*` functions read the clock once and keep the reading**, shared by everything in the same
 execution scope — one transformation, or one expression evaluated outside a transformation. The specification
 requires it and the reason is plain: two templates asking the time must be told the same time, or a stylesheet

@@ -193,7 +193,10 @@ namespace CodeDeeds.Xslt.XPath
             // overflow in a date operation and not an argument this method would not take.
             try
             {
-                return At(moved, offset, Type);
+                // Back to this value's own type, which is where a date loses the time of day the
+                // timezone gave it and a time loses the day. The specification says the same thing the
+                // long way round: take the date as a dateTime at midnight, move that, cast back.
+                return At(moved, offset, Type).As(Type);
             }
             catch (ArgumentOutOfRangeException error)
             {
@@ -212,6 +215,11 @@ namespace CodeDeeds.Xslt.XPath
         /// Months first and as months, because they are not all the same length: one month after 31 January
         /// is 28 February, which no count of days would produce. A day past the end of the month it lands in
         /// comes back to that month's last day, which is what the specification's own algorithm does.
+        /// </remarks>
+        /// <remarks>
+        /// The result carries only what its own type carries. A date moved by a duration with hours in it
+        /// is a date and holds no hours afterwards, and a time moved past midnight is a time and holds no
+        /// day: keeping either would give a value that prints as one thing and compares as another.
         /// </remarks>
         /// <param name="months">The months to move by, which may be negative.</param>
         /// <param name="ticks">The ticks to move by afterwards, which may be negative.</param>
@@ -242,7 +250,11 @@ namespace CodeDeeds.Xslt.XPath
             long rest = ticks - (whole * TimeSpan.TicksPerDay);
 
             Moment moved = Normalize(DaysFromCivil(year, month, day) + whole, TickOfDay + rest);
-            return At(moved, Offset, Type);
+
+            // And back to this value's own type. A date plus P23DT09H32M59S is the date twenty-three
+            // days later and not that date carrying half a day: the hours move it and are then gone.
+            // A time has no day to keep, so the same step is what wraps it around the 24-hour clock.
+            return At(moved, Offset, Type).As(Type);
         }
 
         /// <summary>A text that tells this value from every other, for a map key or a grouping key.</summary>
