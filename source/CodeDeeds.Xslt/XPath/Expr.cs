@@ -1180,11 +1180,29 @@ namespace CodeDeeds.Xslt.XPath
 
             return value.TypeCode switch
             {
-                XdmTypeCode.Integer => XPathValue.FromInteger(-value.ToInteger()),
+                XdmTypeCode.Integer => Negated(value),
                 XdmTypeCode.Decimal => XPathValue.FromDecimal(-value.ToDecimal()),
                 XdmTypeCode.Float => XPathValue.FromFloat(-(float)value.ToNumber()),
                 _ => XPathValue.FromNumber(-value.ToNumber()),
             };
+        }
+
+        /// <summary>Negates an xs:integer, widening where the narrow form has no room for the answer.</summary>
+        private static XPathValue Negated(XPathValue value)
+        {
+            // Two integers have no negation in 64 bits: one already too wide to be held in them, and
+            // long.MinValue, whose positive counterpart is one past the top of the range. Both go through the
+            // wide form, which narrows the answer again wherever it fits.
+            if (value.IsWideInteger)
+            {
+                return XPathValue.FromInteger(-value.ToBigInteger());
+            }
+
+            long held = value.ToInteger();
+
+            return held == long.MinValue
+                ? XPathValue.FromInteger(-(System.Numerics.BigInteger)held)
+                : XPathValue.FromInteger(-held);
         }
 
         /// <inheritdoc/>

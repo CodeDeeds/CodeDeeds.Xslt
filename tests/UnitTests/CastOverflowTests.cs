@@ -14,7 +14,9 @@ namespace CodeDeeds.Xslt.UnitTests
     /// is not there, or files a bug against a limit that is documented.
     /// </para>
     /// <para>
-    /// The same split runs through the durations (<c>FODT0002</c>) and the integers (<c>FOAR0002</c>).
+    /// The same split runs through the durations, where <c>FODT0002</c> is the overflow. The integers
+    /// no longer have one: <c>xs:integer</c> is unbounded here, so the only way a cast to one fails is
+    /// by naming a value the target type excludes, which is <c>FORG0001</c> whatever its size.
     /// Every case here is drawn from the W3C QT3 suite.
     /// </para>
     /// </remarks>
@@ -108,12 +110,16 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
-        public void AnIntegerInsideItsTypeButPastSixtyFourBitsIsAnOverflow()
+        public void AnIntegerInsideItsTypeIsHeldHoweverWideItIs()
         {
-            // 18446744073709551615 is exactly xs:unsignedLong's maximum, so it is a value of the type and it
-            // is this engine that cannot hold it: integers live in a 64-bit signed number here. FOAR0002.
-            Refuses("FOAR0002", "xs:unsignedLong('18446744073709551615')");
-            Refuses("FOAR0002", "xs:unsignedLong('10000000000000000000')");
+            // 18446744073709551615 is exactly xs:unsignedLong's maximum, so it is a value of the type.
+            // It was FOAR0002 here for as long as an xs:integer was a 64-bit one and no wider; now that
+            // it is held, the only thing left for a cast to refuse is a value the type itself excludes.
+            Assert.AreEqual(
+                "18446744073709551615", Writes("xs:unsignedLong('18446744073709551615')"));
+
+            Assert.AreEqual(
+                "10000000000000000000", Writes("xs:unsignedLong('10000000000000000000')"));
         }
 
         [TestMethod]

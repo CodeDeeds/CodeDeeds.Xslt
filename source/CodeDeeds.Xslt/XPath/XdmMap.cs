@@ -242,20 +242,36 @@ namespace CodeDeeds.Xslt.XPath
                 {
                     double number = value.ToNumber();
 
-                    // A whole number keys as an integer whatever type wrote it, so 1, 1.0 and 1e0 meet; one
-                    // too large for that keys as a double, where they meet just as well.
-                    if (value.TypeCode == XdmTypeCode.Integer)
+                    // A whole number keys as an integer whatever type wrote it, so 1, 1.0 and 1e0 meet.
+                    if (value.TypeCode == XdmTypeCode.Integer && !value.IsWideInteger)
                     {
                         return new XdmKey(Family.Integral, value, null, value.ToInteger(), 0.0);
                     }
 
-                    return !double.IsNaN(number)
+                    if (!double.IsNaN(number)
                         && !double.IsInfinity(number)
                         && number == Math.Floor(number)
                         && number >= long.MinValue
-                        && number <= long.MaxValue
-                            ? new XdmKey(Family.Integral, value, null, (long)number, 0.0)
-                            : new XdmKey(Family.Real, value, null, 0L, number);
+                        && number <= long.MaxValue)
+                    {
+                        return new XdmKey(Family.Integral, value, null, (long)number, 0.0);
+                    }
+
+                    // A whole number with no 64-bit form keys by its digits rather than by the double
+                    // it approximates to. Past 2^53 a double stops telling consecutive integers apart,
+                    // so keying by one would put every pair of wide integers in the same bucket — and
+                    // a map has to keep the keys its own equality says are different.
+                    if (value.IsWideInteger)
+                    {
+                        return new XdmKey(
+                            Family.Text,
+                            value,
+                            "i:" + value.ToBigInteger().ToString(CultureInfo.InvariantCulture),
+                            0L,
+                            0.0);
+                    }
+
+                    return new XdmKey(Family.Real, value, null, 0L, number);
                 }
 
                 default:

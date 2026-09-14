@@ -383,23 +383,18 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
-        public void AnIntegerLiteralPastTheRangeHeldIsAnOverflow()
+        public void AnIntegerLiteralPastSixtyFourBitsIsReadExactly()
         {
-            // This engine's xs:integer is a 64-bit one, which the specification permits so long as going
-            // past the limit is reported. Reading the literal as a double instead would answer with a
+            // xs:integer is unbounded in the specification, so a literal past what a long holds is a
+            // wider integer and not an overflow. Reading it as a double instead would answer with a
             // different number than was written, and silently.
-            XsltException error = Assert.ThrowsExactly<XsltException>(
-                () => Writes(string.Empty, "18446744073709551616"));
-
-            Assert.AreEqual("FOAR0002", error.Code);
-
-            // Overflow is a dynamic error, so a branch that never runs never raises it and the stylesheet
-            // holding it still compiles.
             Assert.AreEqual(
-                "<out>ok</out>",
-                Writes(string.Empty, "if (false()) then 18446744073709551616 else 'ok'"));
+                "<out>18446744073709551616</out>", Writes(string.Empty, "18446744073709551616"));
 
-            // The largest a long holds is still a literal like any other.
+            Assert.AreEqual(
+                "<out>-18446744073709551616</out>", Writes(string.Empty, "-18446744073709551616"));
+
+            // The largest a long holds is still a literal like any other, and still narrow.
             Assert.AreEqual(
                 "<out>9223372036854775807</out>", Writes(string.Empty, "9223372036854775807"));
         }

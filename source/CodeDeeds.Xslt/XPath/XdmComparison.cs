@@ -344,6 +344,13 @@ namespace CodeDeeds.Xslt.XPath
         {
             if (left.TypeCode == XdmTypeCode.Integer && right.TypeCode == XdmTypeCode.Integer)
             {
+                // Either one wider than 64 bits and both are compared wide. Comparing the narrow one
+                // as a double would lose the digits that decide it.
+                if (left.IsWideInteger || right.IsWideInteger)
+                {
+                    return left.ToBigInteger().CompareTo(right.ToBigInteger());
+                }
+
                 return left.ToInteger().CompareTo(right.ToInteger());
             }
 
@@ -385,7 +392,10 @@ namespace CodeDeeds.Xslt.XPath
             return value.TypeCode switch
             {
                 XdmTypeCode.Decimal => (float)value.ToDecimal(),
-                XdmTypeCode.Integer => value.ToInteger(),
+
+                // A wide one has no 64-bit form to round from, and no float holds its digits anyway:
+                // it goes by way of a double, which is the same one rounding for a value this size.
+                XdmTypeCode.Integer => value.IsWideInteger ? (float)value.ToNumber() : value.ToInteger(),
                 _ => (float)value.ToNumber(),
             };
         }

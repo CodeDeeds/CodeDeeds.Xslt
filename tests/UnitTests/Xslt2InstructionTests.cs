@@ -3497,11 +3497,12 @@ namespace CodeDeeds.Xslt.UnitTests
                 AtVersion(
                     Root("<xsl:value-of select=\"1 div 100000000000000000000\"/>"), "<r/>", "1.0"));
 
+            // Under 2.0 the same digits are an xs:integer, and one past 64 bits is simply a wider one:
+            // an integer divided by an integer is an xs:decimal, which is where the answer lands.
             Assert.AreEqual(
-                "FOAR0002",
-                Assert.ThrowsExactly<XsltException>(
-                    () => AtVersion(
-                        Root("<xsl:value-of select=\"1 div 100000000000000000000\"/>"), "<r/>", "2.0")).Code);
+                "<out>0.00000000000000000001</out>",
+                AtVersion(
+                    Root("<xsl:value-of select=\"1 div 100000000000000000000\"/>"), "<r/>", "2.0"));
         }
 
         [TestMethod]

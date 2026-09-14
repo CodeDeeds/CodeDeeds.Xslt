@@ -313,8 +313,8 @@ unrelated-looking reasons, while a reason shared across twenty files is nobody's
 
 ## The XPath run
 
-The 2.0 run stands at **14,100 of 14,177, 99.5%**, and the 3.1 run — `--31`, which takes in the tests marked
-`XP30+` and `XP31+` — at **17,482 of 17,598, 99.3%**. The second reads 3,421 more tests than the first and is
+The 2.0 run stands at **14,109 of 14,172, 99.6%**, and the 3.1 run — `--31`, which takes in the tests marked
+`XP30+` and `XP31+` — at **17,487 of 17,589, 99.4%**. The second reads 3,417 more tests than the first and is
 a fraction behind it, which is the shape to expect: what it takes in is the newer half, and the newer half
 is where the work is.
 
@@ -323,18 +323,19 @@ is where the work is.
 | `math` | *3.0 and later* | 130 / 130, 100% |
 | `misc` | 31 / 31, 100% | 33 / 33, 100% |
 | `app` | 330 / 330, 100% | 774 / 777, 99.6% |
-| `prod` | 5,506 / 5,520, 99.7% | 5,932 / 5,949, 99.7% |
+| `prod` | 5,505 / 5,519, 99.7% | 5,927 / 5,944, 99.7% |
 | `fn` | 5,001 / 5,028, 99.5% | 6,983 / 7,033, 99.3% |
-| `op` | 3,163 / 3,195, 99.0% | 3,376 / 3,413, 98.9% |
+| `op` | 3,173 / 3,191, 99.4% | 3,386 / 3,409, 99.3% |
 | `xs` | 69 / 73, 94.5% | 113 / 117, 96.6% |
 | `map` | *3.1* | 110 / 112, 98.2% |
 | `array` | *3.1* | 31 / 34, 91.2% |
 
-The failures cluster in few places. `op/to` is the largest on both runs at 14, almost all of it the 64-bit
-`xs:integer`; then `fn/parse-json` on the 3.1 run only, and a scatter across the date and duration
-operators. Casting used to lead this list by some way, and dates before the common era were most of that;
-the year is no longer a `System.DateTime`'s, so both are gone. The compatibility document keeps the account
-of what is behind each.
+The failures cluster in few places. `fn/parse-json` is the largest on the 3.1 run at 7, and then nothing
+reaches five: four apiece in `op/to`, `fn/collection`, `fn/document-uri` and the two gregorian equality
+sets. Casting led this list by some way not long ago, and `op/to` after it; the years before the common
+era and the bound on `xs:integer` were most of both, and neither is there now. What is left of `op/to`
+is a range of more items than this engine will build, which is a deliberate cap and says so with
+`XPDY0130`. The compatibility document keeps the account of what is behind each.
 
 ### Which XML Schema version a test asks for
 

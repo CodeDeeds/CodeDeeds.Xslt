@@ -465,6 +465,27 @@ namespace CodeDeeds.Xslt.Conformance
             return parts;
         }
 
+        /// <summary>Whether text is an optionally signed run of digits and nothing else.</summary>
+        private static bool IsIntegerLiteral(string text)
+        {
+            int start = text.Length != 0 && (text[0] == '-' || text[0] == '+') ? 1 : 0;
+
+            if (start == text.Length)
+            {
+                return false;
+            }
+
+            for (int i = start; i < text.Length; i++)
+            {
+                if (text[i] < '0' || text[i] > '9')
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         public static bool TryParse(string text, out XPathValue value)
         {
             string trimmed = text.Trim();
@@ -501,6 +522,18 @@ namespace CodeDeeds.Xslt.Conformance
                 }
 
                 value = XPathValue.FromString(unescaped);
+                return true;
+            }
+
+            // Digits and nothing else are an xs:integer, and are built as one however many there are.
+            // Reading them as a double would throw away the digits past the fifteenth and then compare
+            // the rounded answer with an exact one: 18446744073709551615 would be judged against
+            // 18446744073709551616, and a test whose whole point is the width would fail for it.
+            if (IsIntegerLiteral(trimmed)
+                && System.Numerics.BigInteger.TryParse(
+                    trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out System.Numerics.BigInteger whole))
+            {
+                value = XPathValue.FromInteger(whole);
                 return true;
             }
 

@@ -683,14 +683,16 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         /// <param name="from">The lower bound, included.</param>
         /// <param name="to">The upper bound, included.</param>
-        public static XPathValue Range(long from, long to)
+        public static XPathValue Range(System.Numerics.BigInteger from, System.Numerics.BigInteger to)
         {
             if (to < from)
             {
                 return XPathValue.FromSequence(Empty);
             }
 
-            long length = to - from + 1;
+            // Counted in a wide integer, because the bounds are: the count of 1 to 10^21 is no more a
+            // long than its last item is, and subtracting them in one would wrap round to nonsense.
+            System.Numerics.BigInteger length = to - from + 1;
             if (length > 1_000_000)
             {
                 // A limit this engine sets and not one the language does, which is what XPDY0130 is for: a
@@ -702,8 +704,8 @@ namespace CodeDeeds.Xslt.XPath
                     $"The range {from} to {to} has {length} items, which is more than this engine will build.");
             }
 
-            XPathValue[] items = new XPathValue[length];
-            for (long i = 0; i < length; i++)
+            XPathValue[] items = new XPathValue[(int)length];
+            for (int i = 0; i < items.Length; i++)
             {
                 items[i] = XPathValue.FromInteger(from + i);
             }
@@ -766,36 +768,6 @@ namespace CodeDeeds.Xslt.XPath
 
         /// <inheritdoc/>
         public override XPathValue Evaluate(ref Runtime.DynamicContext context) => m_value;
-    }
-
-    /// <summary>
-    /// An integer literal beyond what this engine's <c>xs:integer</c> holds.
-    /// </summary>
-    /// <remarks>
-    /// XPath's <c>xs:integer</c> is unbounded and this engine's is a 64-bit one, which the specification
-    /// permits so long as going past the limit is reported as an overflow. Overflow is a <em>dynamic</em>
-    /// error, so it is raised where the literal is evaluated rather than where it is read — a branch that
-    /// never runs never raises it, and a stylesheet that only mentions such a number still compiles.
-    /// </remarks>
-    public sealed class OverflowingLiteralExpr : Expr
-    {
-        private readonly string m_written;
-
-        /// <summary>Initializes a literal that cannot be held.</summary>
-        /// <param name="written">The literal as it was written, named in the message.</param>
-        public OverflowingLiteralExpr(string written)
-        {
-            m_written = written;
-        }
-
-        /// <inheritdoc/>
-        public override XPathValue Evaluate(ref Runtime.DynamicContext context)
-        {
-            throw XsltErrors.Error(
-                XsltErrorCode.FOAR0002,
-                $"{m_written} is beyond the range of xs:integer this engine holds, which is that of a "
-                + "64-bit signed integer.");
-        }
     }
 
     /// <summary>The empty sequence, written <c>()</c>.</summary>
@@ -1073,11 +1045,11 @@ namespace CodeDeeds.Xslt.XPath
         /// is no next value after 1.1 that the notation picks out. Truncating to 1 would answer a question
         /// that was not asked. An untyped bound is read as an integer, as everywhere else.
         /// </remarks>
-        private static long ToBound(XPathValue value)
+        private static System.Numerics.BigInteger ToBound(XPathValue value)
         {
             if (value.TypeCode == XdmTypeCode.Integer)
             {
-                return value.ToInteger();
+                return value.ToBigInteger();
             }
 
             if (value.TypeCode is not (XdmTypeCode.UntypedAtomic or XdmTypeCode.None))
@@ -1089,11 +1061,11 @@ namespace CodeDeeds.Xslt.XPath
 
             string text = value.ToStringValue().Trim();
 
-            return long.TryParse(
+            return System.Numerics.BigInteger.TryParse(
                 text,
                 System.Globalization.NumberStyles.Integer,
                 System.Globalization.CultureInfo.InvariantCulture,
-                out long bound)
+                out System.Numerics.BigInteger bound)
                     ? bound
                     : throw XsltErrors.Error(
                         XsltErrorCode.FORG0001, $"'{text}' is not a valid bound for a range.");

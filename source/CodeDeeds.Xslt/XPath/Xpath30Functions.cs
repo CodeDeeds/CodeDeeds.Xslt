@@ -769,9 +769,7 @@ namespace CodeDeeds.Xslt.XPath
             {
                 try
                 {
-                    decimal exact = value.TypeCode == XdmTypeCode.Integer
-                        ? value.ToInteger()
-                        : value.ToDecimal();
+                    decimal exact = value.ToDecimal();
 
                     decimal factor = Power10(Math.Abs(digits));
                     decimal scaled = digits >= 0

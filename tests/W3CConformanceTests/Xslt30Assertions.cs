@@ -51,7 +51,8 @@ namespace CodeDeeds.Xslt.Conformance
 
                 case "any-of":
                 {
-                    TestResult worst = Skip("any-of had no branches");
+                    TestResult? failure = null;
+                    TestResult? unpresentable = null;
 
                     foreach (XElement child in assertion.Elements())
                     {
@@ -61,15 +62,20 @@ namespace CodeDeeds.Xslt.Conformance
                             return one;
                         }
 
-                        // A branch that failed says more than one that could not be presented, so it is what
-                        // gets reported when no branch succeeded.
-                        if (one.Outcome == Outcome.Failed || worst.Outcome != Outcome.Failed)
+                        if (one.Outcome == Outcome.Skipped)
                         {
-                            worst = one;
+                            unpresentable ??= one;
+                        }
+                        else
+                        {
+                            failure ??= one;
                         }
                     }
 
-                    return worst;
+                    // A branch the driver could not present might have been the one that held, so the test
+                    // is skipped rather than failed: any-of asks whether *some* branch holds, and one of
+                    // them was never asked. Calling it a failure would assert what the driver did not check.
+                    return unpresentable ?? failure ?? Skip("any-of had no branches");
                 }
 
                 case "not":

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 
 namespace CodeDeeds.Xslt.XPath
@@ -366,6 +367,24 @@ namespace CodeDeeds.Xslt.XPath
                 XPathValueKind.Number, XdmTypeCode.Integer, BitConverter.Int64BitsToDouble(value), null);
         }
 
+        /// <summary>
+        /// Creates an <c>xs:integer</c> of any width, narrowing it to 64 bits wherever it fits.
+        /// </summary>
+        /// <remarks>
+        /// <c>xs:integer</c> is unbounded in the specification and a <see cref="long"/> is not, so the
+        /// few values that do not fit keep a <see cref="BigInteger"/> in the reference field, which an
+        /// integer otherwise leaves empty. Narrowing here is what keeps that rare: a wide value exists
+        /// only while it is genuinely wide, so two integers that are equal are also stored alike and
+        /// every comparison, key and hash can go on treating the narrow form as the only one.
+        /// </remarks>
+        /// <param name="value">The value.</param>
+        public static XPathValue FromInteger(BigInteger value)
+        {
+            return value >= long.MinValue && value <= long.MaxValue
+                ? FromInteger((long)value)
+                : new XPathValue(XPathValueKind.Number, XdmTypeCode.Integer, 0.0, value);
+        }
+
         /// <summary>Creates an <c>xs:float</c>.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static XPathValue FromFloat(float value)
@@ -506,10 +525,49 @@ namespace CodeDeeds.Xslt.XPath
         {
             return TypeCode switch
             {
-                XdmTypeCode.Integer => BitConverter.DoubleToInt64Bits(m_number),
+                // A wide one refuses rather than truncating. Every caller of this asks for a 64-bit
+                // integer because that is what it can use, and handing back the low bits of a value that
+                // does not fit would answer a question about a different number. FOAR0002 is what the
+                // specification gives a bounded implementation to say so with.
+                XdmTypeCode.Integer => m_reference is BigInteger wide
+                    ? throw XsltErrors.Error(
+                        XsltErrorCode.FOAR0002,
+                        $"{wide} is beyond what this operation holds an xs:integer in, which is a 64-bit "
+                        + "signed integer.")
+                    : BitConverter.DoubleToInt64Bits(m_number),
                 XdmTypeCode.Decimal => (long)decimal.Truncate((decimal)m_reference!),
                 _ => (long)ToNumber(),
             };
+        }
+
+        /// <summary>Whether this is an <c>xs:integer</c> too large to hold in 64 bits.</summary>
+        public bool IsWideInteger => TypeCode == XdmTypeCode.Integer && m_reference is BigInteger;
+
+        /// <summary>Gets the value as an <c>xs:integer</c> of whatever width it needs.</summary>
+        public BigInteger ToBigInteger()
+        {
+            switch (TypeCode)
+            {
+                case XdmTypeCode.Integer:
+                    return m_reference is BigInteger wide
+                        ? wide
+                        : BitConverter.DoubleToInt64Bits(m_number);
+
+                case XdmTypeCode.Decimal:
+                    return (BigInteger)decimal.Truncate((decimal)m_reference!);
+
+                default:
+                {
+                    double number = ToNumber();
+
+                    // Neither infinity nor NaN names an integer, and BigInteger says so by throwing;
+                    // said plainly here, since the caller asked for a number and got one.
+                    return double.IsNaN(number) || double.IsInfinity(number)
+                        ? throw XsltErrors.Error(
+                            XsltErrorCode.FOCA0002, $"{number} cannot be read as an xs:integer.")
+                        : new BigInteger(Math.Truncate(number));
+                }
+            }
         }
 
         /// <summary>Gets the value as an <c>xs:decimal</c>, which it must already be.</summary>
@@ -518,7 +576,9 @@ namespace CodeDeeds.Xslt.XPath
             return TypeCode switch
             {
                 XdmTypeCode.Decimal => (decimal)m_reference!,
-                XdmTypeCode.Integer => BitConverter.DoubleToInt64Bits(m_number),
+                XdmTypeCode.Integer => m_reference is BigInteger wide
+                    ? (decimal)wide
+                    : BitConverter.DoubleToInt64Bits(m_number),
                 _ => (decimal)ToNumber(),
             };
         }
@@ -645,7 +705,9 @@ namespace CodeDeeds.Xslt.XPath
                     // decimal is off in the reference field, so neither can simply be read out.
                     return TypeCode switch
                     {
-                        XdmTypeCode.Integer => BitConverter.DoubleToInt64Bits(m_number),
+                        XdmTypeCode.Integer => m_reference is BigInteger wide
+                            ? (double)wide
+                            : BitConverter.DoubleToInt64Bits(m_number),
                         XdmTypeCode.Decimal => (double)(decimal)m_reference!,
                         _ => m_number,
                     };
@@ -720,8 +782,10 @@ namespace CodeDeeds.Xslt.XPath
                     // a decimal keeps the digits it was given rather than being rendered as a double.
                     return TypeCode switch
                     {
-                        XdmTypeCode.Integer => BitConverter.DoubleToInt64Bits(m_number)
-                            .ToString(CultureInfo.InvariantCulture),
+                        XdmTypeCode.Integer => m_reference is BigInteger wide
+                            ? wide.ToString(CultureInfo.InvariantCulture)
+                            : BitConverter.DoubleToInt64Bits(m_number)
+                                .ToString(CultureInfo.InvariantCulture),
                         XdmTypeCode.Decimal => DecimalToString((decimal)m_reference!),
                         _ => NumberToString(m_number),
                     };

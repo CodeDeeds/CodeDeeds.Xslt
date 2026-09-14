@@ -1902,17 +1902,18 @@ namespace CodeDeeds.Xslt.XPath
                         return new TypedLiteralExpr(TypedNumber(token));
                     }
 
-                    // An integer literal past what this engine's xs:integer holds is an overflow rather than
-                    // a double: reading it as one would answer with a different number than was written, and
-                    // silently. The specification allows a bounded implementation and asks for FOAR0002.
+                    // An integer literal past what 64 bits hold is a wider integer, xs:integer having no
+                    // bound in the specification. Reading it as a double would answer with a different
+                    // number than was written, and silently.
                     //
-                    // Except where the expression was written for XPath 1.0, which had no integers to
-                    // overflow — the same digits meant a double there, and the specification leaves what a
-                    // too-large literal becomes to the implementation. Refusing one a 1.0 stylesheet has
-                    // always been allowed to write would be the compatibility mode failing at its one job.
+                    // Except where the expression was written for XPath 1.0, which had no integers at
+                    // all — the same digits meant a double there, and reading them as one now is what
+                    // the compatibility mode is for.
                     return m_context.Version.IsBackwardsCompatible
                         ? new NumberLiteralExpr(token.Number)
-                        : new OverflowingLiteralExpr(token.Text);
+                        : new TypedLiteralExpr(
+                            XPathValue.FromInteger(System.Numerics.BigInteger.Parse(
+                                token.Text, System.Globalization.CultureInfo.InvariantCulture)));
 
                 case XPathTokenKind.Name:
                 {

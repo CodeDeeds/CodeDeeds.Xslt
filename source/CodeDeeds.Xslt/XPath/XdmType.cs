@@ -719,7 +719,7 @@ namespace CodeDeeds.Xslt.XPath
                 }
 
                 default:
-                    return XPathValue.FromInteger(CastToInteger(value, type));
+                    return CastToInteger(value, type);
             }
         }
 
@@ -1366,7 +1366,19 @@ namespace CodeDeeds.Xslt.XPath
 
             if (value.TypeCode == XdmTypeCode.Integer)
             {
-                return value.ToInteger();
+                // A wide one may still be wider than a decimal reaches, which is a magnitude the type
+                // has no room for rather than text that is not a decimal.
+                try
+                {
+                    return value.ToDecimal();
+                }
+                catch (OverflowException error)
+                {
+                    throw XsltErrors.Error(
+                        XsltErrorCode.FOCA0001,
+                        $"{value.ToStringValue()} is too large to hold as an xs:decimal.",
+                        error);
+                }
             }
 
             if (value.TypeCode is XdmTypeCode.String or XdmTypeCode.UntypedAtomic
@@ -1419,9 +1431,42 @@ namespace CodeDeeds.Xslt.XPath
                 && parsed <= type.Maximum;
         }
 
-        private static long CastToInteger(XPathValue value, BuiltInType type)
+        /// <summary>Whether a type admits an integer, which for most of them is a question of range.</summary>
+        /// <remarks>
+        /// Five of the integer types keep xs:integer's lack of a bound and are restricted by sign
+        /// alone: the recorded minimum and maximum for those are a 64-bit stand-in rather than the
+        /// type's own, so reading them would refuse values the type has. The rest are genuinely
+        /// bounded — xs:byte at 127, xs:unsignedLong at 18446744073709551615 — and a value outside
+        /// one of those is outside the type rather than beyond this engine.
+        /// </remarks>
+        private static bool Admits(BuiltInType type, System.Numerics.BigInteger value)
         {
-            long result;
+            switch (type.Derived)
+            {
+                case DerivedType.None:
+                    return true;
+
+                case DerivedType.NonNegativeInteger:
+                    return value.Sign >= 0;
+
+                case DerivedType.PositiveInteger:
+                    return value.Sign > 0;
+
+                case DerivedType.NonPositiveInteger:
+                    return value.Sign <= 0;
+
+                case DerivedType.NegativeInteger:
+                    return value.Sign < 0;
+
+                default:
+                    return value >= (System.Numerics.BigInteger)type.Minimum
+                        && value <= (System.Numerics.BigInteger)type.Maximum;
+            }
+        }
+
+        private static XPathValue CastToInteger(XPathValue value, BuiltInType type)
+        {
+            System.Numerics.BigInteger result;
 
             if (value.Kind == XPathValueKind.Boolean)
             {
@@ -1429,42 +1474,26 @@ namespace CodeDeeds.Xslt.XPath
             }
             else if (value.TypeCode == XdmTypeCode.Integer)
             {
-                result = value.ToInteger();
+                result = value.ToBigInteger();
             }
             else if (value.TypeCode == XdmTypeCode.Decimal)
             {
-                decimal truncated = decimal.Truncate(value.ToDecimal());
-
-                if (truncated < long.MinValue || truncated > long.MaxValue)
-                {
-                    throw XsltErrors.Error(
-                        XsltErrorCode.FOCA0003, $"{truncated} is too large to hold as an xs:integer.");
-                }
-
-                result = (long)truncated;
+                result = (System.Numerics.BigInteger)decimal.Truncate(value.ToDecimal());
             }
             else if (value.TypeCode is XdmTypeCode.String or XdmTypeCode.UntypedAtomic
                 || value.Kind == XPathValueKind.NodeSet)
             {
                 string text = value.ToStringValue().Trim();
 
-                if (!long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out result))
+                // However many digits: xs:integer is unbounded, so the only way text fails here is by
+                // not being an integer at all. A decimal or exponent form is not in the lexical space,
+                // even where the value it names is a whole number.
+                if (!System.Numerics.BigInteger.TryParse(
+                    text, NumberStyles.Integer, CultureInfo.InvariantCulture, out result))
                 {
-                    // Digits naming a value the type does admit: the text is a good xs:{type.Name} and it
-                    // is this engine's 64-bit signed representation that cannot hold it, which is an
-                    // overflow. A value the type itself excludes, such as xs:long("9223372036854775808"),
-                    // is invalid rather than overflowing, and falls through to FORG0001 below.
-                    if (IsIntegerLexical(text) && IsWithinValueSpace(text, type))
-                    {
-                        throw XsltErrors.Error(
-                            XsltErrorCode.FOAR0002,
-                            $"{text} is a value of xs:{type.Name} beyond what this engine holds, which is "
-                            + "the range of a 64-bit signed integer.");
-                    }
-
-                    // A decimal or exponent form is not in xs:integer's lexical space, even though the value
-                    // it names might be an integer.
-                    throw XsltErrors.Error(XsltErrorCode.FORG0001, $"'{value.ToStringValue()}' is not a valid xs:{type.Name}.");
+                    throw XsltErrors.Error(
+                        XsltErrorCode.FORG0001,
+                        $"'{value.ToStringValue()}' is not a valid xs:{type.Name}.");
                 }
             }
             else
@@ -1475,31 +1504,18 @@ namespace CodeDeeds.Xslt.XPath
                     throw XsltErrors.Error(XsltErrorCode.FOCA0002, $"{number} cannot be cast to xs:{type.Name}.");
                 }
 
-                double truncated = Math.Truncate(number);
-
-                // A double reaches far past what an integer is held in here, and converting one that does not
-                // fit is undefined rather than an error in C#: it would quietly answer long.MinValue, which
-                // the range check below would then wave through for xs:integer.
-                if (truncated < long.MinValue || truncated > long.MaxValue)
-                {
-                    throw XsltErrors.Error(
-                        XsltErrorCode.FOCA0003, $"{number} is too large to hold as an xs:integer.");
-                }
-
-                result = (long)truncated;
+                // A double reaches far past 64 bits, and an integer is not bounded by them either, so
+                // the whole of what one names is kept.
+                result = new System.Numerics.BigInteger(Math.Truncate(number));
             }
 
             // Reaching here, the value is an integer; whether it is a value of *this* type is the type's own
-            // restriction on the integers, and failing that restriction is an invalid value rather than an
-            // overflow. FOCA0003 above says the number was too large to be an integer at all, which is a
-            // different complaint from xs:byte(300), where 300 is a perfectly good integer.
-            if (result < type.Minimum || result > type.Maximum)
-            {
-                throw XsltErrors.Error(
+            // restriction on the integers, and failing that restriction is an invalid value: xs:byte(300) is
+            // a perfectly good integer that is not an xs:byte.
+            return Admits(type, result)
+                ? XPathValue.FromInteger(result)
+                : throw XsltErrors.Error(
                     XsltErrorCode.FORG0001, $"{result} is outside the range of xs:{type.Name}.");
-            }
-
-            return result;
         }
 
         private static decimal FromDouble(double number, string typeName)

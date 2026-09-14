@@ -126,9 +126,25 @@ namespace CodeDeeds.Xslt.Emit
 
         /// <summary>Looks up one of <see cref="XPathValue"/>'s public static methods.</summary>
         /// <param name="name">The method name.</param>
+        /// <param name="parameters">
+        /// The parameter types, where the name alone would be ambiguous. Naming them is not optional
+        /// once a factory has an overload: the lookup by name throws rather than choosing, and it
+        /// throws from a static constructor, which surfaces as every compiled transformation failing
+        /// to start rather than as anything to do with the method.
+        /// </param>
         public static MethodInfo ValueMethod(string name)
         {
             return typeof(XPathValue).GetMethod(name, BindingFlags.Public | BindingFlags.Static)
+                ?? throw new InvalidOperationException($"XPathValue.{name} could not be located.");
+        }
+
+        /// <summary>Looks up one of <see cref="XPathValue"/>'s public static methods by its signature.</summary>
+        /// <param name="name">The method name.</param>
+        /// <param name="parameters">The parameter types.</param>
+        public static MethodInfo ValueMethod(string name, Type[] parameters)
+        {
+            return typeof(XPathValue).GetMethod(
+                name, BindingFlags.Public | BindingFlags.Static, binder: null, parameters, modifiers: null)
                 ?? throw new InvalidOperationException($"XPathValue.{name} could not be located.");
         }
 
@@ -139,7 +155,8 @@ namespace CodeDeeds.Xslt.Emit
         public static readonly MethodInfo FromBoolean = ValueMethod(nameof(XPathValue.FromBoolean));
 
         /// <summary>Wraps a 64-bit integer as an <c>xs:integer</c> value.</summary>
-        public static readonly MethodInfo FromInteger = ValueMethod(nameof(XPathValue.FromInteger));
+        public static readonly MethodInfo FromInteger =
+            ValueMethod(nameof(XPathValue.FromInteger), new[] { typeof(long) });
 
         /// <summary>Reads <c>position()</c>, refusing where there is no focus.</summary>
         public static readonly MethodInfo PositionOf = Method(nameof(PositionOfFocus));

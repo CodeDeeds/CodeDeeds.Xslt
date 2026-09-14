@@ -262,12 +262,12 @@ having a type appear underneath it that the language it was written in does not 
 `position()` and `last()` to this rule as well, which it did not always do — see *What the emitted backend
 was never asked*.
 
-**An integer literal past what this engine's `xs:integer` holds is an overflow**, `FOAR0002`. XPath's
-`xs:integer` is unbounded and this one is 64-bit, which the specification permits so long as going past the
-limit is reported rather than absorbed — reading such a literal as an `xs:double` instead would answer with a
-different number than was written, and silently. Overflow is a *dynamic* error, so it is raised where the
-literal is evaluated: a branch that never runs never raises it, and a stylesheet merely holding such a number
-still compiles.
+**An integer literal past what a 64-bit one holds is a wider integer**, `xs:integer` being unbounded in
+the specification. It was `FOAR0002` here for a long time, which the specification permits so long as
+the limit is reported rather than absorbed; what it does not permit is reading the literal as an
+`xs:double`, which would answer with a different number than was written and do it silently. The value
+is now held instead: a `long` wherever it fits one and a `BigInteger` where it does not, narrowed back
+the moment it fits again.
 
 **The string functions count code points, not UTF-16 units.** A character above the basic plane is two units
 in a .NET string and one character to XPath, so `string-length('abc𝅖def')` is 7 where `String.Length` is 8.
@@ -460,11 +460,12 @@ a month that is no month, and naming the year's size would send a reader after t
 `FODT0002` is the durations' overflow, on the same reading: `xs:yearMonthDuration('P100000000000Y')` says
 plainly what it means and the months are held in a 32-bit signed integer here.
 
-`FOAR0002` is the integers' overflow, and the line it draws is the target type's own value space.
-`xs:unsignedLong('18446744073709551615')` is exactly that type's maximum — a value of the type, which only
-this engine's 64-bit signed storage cannot hold — so it overflows. `xs:unsignedLong('18446744073709551616')`
-and `xs:long('9223372036854775808')` are each one past the type itself, so no processor holds them however
-it is built, and they are `FORG0001`. The rest:
+`FOAR0002` was the integers' overflow and has almost nothing left to say, `xs:integer` no longer being
+bounded: what remains for it is `format-integer` and `xsl:number`, which render through a fixed-width
+number. A cast now fails only where the target type excludes the value, whatever its size, so
+`xs:unsignedLong('18446744073709551615')` is that type's maximum and is held, while
+`xs:unsignedLong('18446744073709551616')` and `xs:long('9223372036854775808')` are each one past the
+type itself and are `FORG0001`. The rest:
 `FORG0001` is text outside the type's lexical space, and also a value outside a *derived* type's range —
 `xs:byte(300)` is not an overflow but an integer that is not an `xs:byte`. `FOCA0003` is a number too large
 to be an `xs:integer` at all and `FOCA0001` too large to be an `xs:decimal`, both of which are this engine's
@@ -525,10 +526,9 @@ comparison against a number, in `avg` and `min` and `max`, and in a function arg
 produces NaN and prints as one; 2.0 raises `FORG0001`, on the grounds that nothing downstream will make sense
 of NaN either.
 
-Two ranges narrower than the specification's, both reported as such rather than passed off as bad values: a
-**year past 999,999,999** either side of the common era is `FODT0001`, and `xs:unsignedLong` above
-`long.MaxValue` is refused, being read through a signed 64-bit integer. An `xs:integer` is likewise 64
-bits rather than unbounded, so `1000000000000000000000 to …` has no range.
+One range narrower than the specification's, reported as such rather than passed off as a bad value: a
+**year past 999,999,999** either side of the common era is `FODT0001`. The integers used to be a second
+such range and are not any more.
 
 Two consequences worth knowing. Under 2.0 a comparison no longer takes the node-list fast path, and the IL
 backend hands comparisons, arithmetic and negation to the interpreter, because which operation a pair of
@@ -795,9 +795,12 @@ being year zero and zero divisible by 400; `-0004-02-29` is not, 4 BCE being yea
 proleptic Gregorian reading of XML Schema 1.0's own convention, where reading the digits would have made
 4 BCE leap for looking like 4 CE.
 
-**`xs:integer` is sixty-four bits rather than unbounded**, which is what stops `1000000000000000000000 to …`
-being a range: 12 of `op/to`'s 14. The other two ask for a range of a million items, which is a second limit
-and a deliberate one.
+**A range of more items than this engine will build** is what is left of `op/to`: all four of them, and
+`XPDY0130` is the code for exactly that. `xs:integer` being sixty-four bits was the other twelve until
+it stopped being sixty-four bits. The cap stands because a range is built as an array of items here,
+and the four ask for between a million and five hundred million of them while only wanting to know
+whether one number is among them; answering that without building the array means a lazy sequence,
+which is a change to how every sequence is held rather than anything about integers.
 
 The rest is a long tail with no one cause behind it, `fn/doc` and `fn/subsequence` at 5 apiece being the
 largest of it.
@@ -4706,9 +4709,9 @@ nothing else, so a stylesheet at 1.0 reads all three as the words they are and a
 what the cast answers when it fails, that being the one thing the function keeps from 1.0.
 
 `expr/math` went from 6 failures to 2 on the 3.0 run and from 3 to none on the 2.0 one. The two left are
-both about something other than arithmetic. 3601 rounds a twenty-one-digit integer, which needs an
-`xs:integer` wider than the 64-bit one this engine holds — a limit the specification permits so long as
-going past it is reported rather than absorbed, which it is. 3702 writes
+both about something other than arithmetic. 3601 rounds a twenty-one-digit integer, which the engine now
+holds; what it still does not do is keep it through `math:pow`, which works in doubles and hands back
+`1.2345678901234578E20` where the digits were wanted. 3702 writes
 `extension-element-prefixes="xs"` with `xs` bound to the schema namespace and wants `XTSE0085` for it —
 and the suite asks for three different codes for that one construct: `XTSE0800` from
 `fn/extension-functions`'s 0105, where an element in that namespace is then used as an instruction, and
@@ -5170,11 +5173,11 @@ them passing. The one Italian test stays skipped: a fallback to English is not w
 Italian is asking for.
 
 `insn/number` went from 2 failures to 1 on each run, and neither of the two left is a rule waiting to be
-implemented. On the 3.0 run, 0111 multiplies 1,234,567,890 by itself twice and wants all twenty-eight digits
-of the answer. XPath gives `xs:integer` an unbounded range and this engine's is sixty-four bits, which is
-the limited-precision implementation the specification provides for — the overflow is `FOAR0002` and
-conformant, and an unbounded integer is a change to how a value is represented rather than anything about
-numbering. On the 2.0 run, 1004 puts an `xsl:number` with no context item inside an `xsl:on-completion` and
+implemented. On the 3.0 run, 0111 multiplies 1,234,567,890 by itself twice and wants all twenty-eight
+digits of the answer. The arithmetic now keeps them; `xsl:number` does not, rendering through a
+fixed-width number as `format-integer` does. Widening those means widening the sequences they render
+through — the words for a quintillion and past it, the alphabetic and roman fallbacks — which is a
+piece of the numbering library rather than anything about how an integer is held. On the 2.0 run, 1004 puts an `xsl:number` with no context item inside an `xsl:on-completion` and
 wants `XTTE0990`, but its stylesheet says `version="2.0"` and `xsl:iterate` is an XSLT 3.0 instruction: a
 2.0 processor cannot reach the error the test is about, and the test's own dependency should read XSLT30+
 rather than XSLT20+. It passes on the 3.0 run, where the instruction exists.
@@ -5988,9 +5991,9 @@ dotnet run --project CodeDeeds.Xslt.Conformance -- --31 <path-to-qt3tests>
 ```
 
 That reads 17,573 tests where the 2.0 run reads 14,175, and stands at **98.9%** against 99.0% for 2.0. The
-gap is mostly the one 3.1 function listed as absent above — `fn:load-xquery-module` — the unbounded
-`xs:integer` and the negative years neither `System.DateTime`
-nor a 64-bit integer reaches, and the schema-aware forms, which this engine will never have. What is left
+gap is mostly the one 3.1 function listed as absent above — `fn:load-xquery-module` — and the
+schema-aware forms, which this engine will never have. The unbounded `xs:integer` and the years before
+the common era were both on this list and are not any more. What is left
 that is neither is the maps and JSON: `map` is the lowest area at 89.0%, and `fn:parse-json` accounts for 14
 on its own — seven pieces of malformed JSON accepted where `FOJS0001` was wanted, and five that reach for
 `unparsed-text()` where no transformation is running to answer it.

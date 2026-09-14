@@ -194,7 +194,7 @@ namespace CodeDeeds.Xslt.XPath
 
             return promoted switch
             {
-                XdmTypeCode.Integer => IntegerArithmetic(op, left.ToInteger(), right.ToInteger()),
+                XdmTypeCode.Integer => IntegerArithmetic(op, left, right),
                 XdmTypeCode.Decimal => DecimalArithmetic(op, left.ToDecimal(), right.ToDecimal()),
                 XdmTypeCode.Float => FloatArithmetic(op, left.ToNumber(), right.ToNumber()),
                 _ => DoubleResult(op, left.ToNumber(), right.ToNumber()),
@@ -664,8 +664,18 @@ namespace CodeDeeds.Xslt.XPath
         /// wrapped. An unchecked multiply would give a wrong answer, which is the one outcome not permitted,
         /// so every operation here is checked.
         /// </remarks>
-        private static XPathValue IntegerArithmetic(BinaryOperator op, long left, long right)
+        private static XPathValue IntegerArithmetic(BinaryOperator op, XPathValue first, XPathValue second)
         {
+            // An operand already too wide for 64 bits goes the wide way without trying the narrow one,
+            // which would refuse to hand over either number in the first place.
+            if (first.IsWideInteger || second.IsWideInteger)
+            {
+                return WideIntegerArithmetic(op, first.ToBigInteger(), second.ToBigInteger());
+            }
+
+            long left = first.ToInteger();
+            long right = second.ToInteger();
+
             try
             {
                 checked
@@ -701,8 +711,64 @@ namespace CodeDeeds.Xslt.XPath
             }
             catch (OverflowException)
             {
-                throw XsltErrors.Error(XsltErrorCode.FOAR0002,
-                    $"The result of {left} {Symbol(op)} {right} is outside the range of xs:integer.");
+                // Past what 64 bits hold, which xs:integer is not bounded by: the answer is a wider
+                // integer rather than an error. Reached only where the narrow arithmetic actually
+                // overflowed, so nothing that fits pays for it.
+                return WideIntegerArithmetic(op, left, right);
+            }
+        }
+
+        /// <summary>
+        /// The same arithmetic for integers that no 64-bit one holds.
+        /// </summary>
+        /// <remarks>
+        /// Division is the one operation that does not stay among the integers — <c>1 div 2</c> is the
+        /// decimal 0.5 — so it is handed to the decimal arithmetic, which refuses in its own words if
+        /// the operands are wider than a decimal reaches.
+        /// </remarks>
+        private static XPathValue WideIntegerArithmetic(
+            BinaryOperator op, System.Numerics.BigInteger left, System.Numerics.BigInteger right)
+        {
+            switch (op)
+            {
+                case BinaryOperator.Add:
+                    return XPathValue.FromInteger(left + right);
+
+                case BinaryOperator.Subtract:
+                    return XPathValue.FromInteger(left - right);
+
+                case BinaryOperator.Multiply:
+                    return XPathValue.FromInteger(left * right);
+
+                case BinaryOperator.IntegerDivide:
+                    return right.IsZero
+                        ? throw XsltErrors.Error(XsltErrorCode.FOAR0001, "Integer division by zero.")
+                        : XPathValue.FromInteger(left / right);
+
+                case BinaryOperator.Modulo:
+                    return right.IsZero
+                        ? throw XsltErrors.Error(XsltErrorCode.FOAR0001, "Integer division by zero.")
+                        : XPathValue.FromInteger(left % right);
+
+                default:
+                    return right.IsZero
+                        ? throw XsltErrors.Error(XsltErrorCode.FOAR0001, "Division by zero.")
+                        : DecimalArithmetic(op, ToDecimalBound(left, op), ToDecimalBound(right, op));
+            }
+        }
+
+        /// <summary>An integer as a decimal, saying which operation could not be carried out if it will not fit.</summary>
+        private static decimal ToDecimalBound(System.Numerics.BigInteger value, BinaryOperator op)
+        {
+            try
+            {
+                return (decimal)value;
+            }
+            catch (OverflowException)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.FOAR0002,
+                    $"'{Symbol(op)}' gives an xs:decimal here, and {value} is outside the range of one.");
             }
         }
 

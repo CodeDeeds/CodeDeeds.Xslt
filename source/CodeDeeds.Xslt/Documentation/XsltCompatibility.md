@@ -40,7 +40,7 @@ above are the run without it.
 
 | Area | Limit |
 | --- | --- |
-| `xs:integer` | A 64-bit signed integer. Which code a cast beyond it raises depends on whose limit was reached: text naming a value the target type admits, such as `xs:unsignedLong('18446744073709551615')`, is this engine's limit and `FOAR0002`; text naming a value the type itself excludes, such as `xs:long('9223372036854775808')`, is outside the type and `FORG0001`. |
+| `xs:integer` | Unbounded, as the specification has it. A value that fits a 64-bit signed integer is held in one and a wider value in a `BigInteger`, narrowing again the moment it fits, so the width is a storage detail rather than a limit. A cast fails only where the target type excludes the value — `xs:long('9223372036854775808')` is `FORG0001` — and the derived types that keep `xs:integer`'s lack of a bound keep it here too. `format-integer` and `xsl:number` are the exception: they render through a fixed-width number and refuse a value past it with `FOAR0002` rather than truncating. |
 | `xs:decimal` | About 28 significant digits, being `System.Decimal`. |
 | Dates and times | Years 1 to 999,999,999, before the common era and after it alike. A year past that is `FODT0001` — an overflow rather than `FORG0001`, because the text names a moment perfectly well and it is this engine that cannot hold it. Text that would not be a date whatever year stood in it is still `FORG0001`. |
 | Durations | Months in a 32-bit signed integer, seconds in `System.TimeSpan`. A duration beyond either is `FODT0002`, on the same reading as the dates above. |

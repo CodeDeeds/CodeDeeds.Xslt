@@ -521,7 +521,6 @@ namespace CodeDeeds.Xslt.UnitTests
         [DataRow("xs:boolean('yes')", "FORG0001")]
         [DataRow("xs:decimal('1e3')", "FORG0001")]
         [DataRow("xs:byte('128')", "FORG0001")]
-        [DataRow("xs:integer(99e100)", "FOCA0003")]
         [DataRow("xs:decimal(99e100)", "FOCA0001")]
         [DataRow("xs:decimal(xs:double('INF'))", "FOCA0002")]
         [DataRow("QName('', 'a:b')", "FOCA0002")]
@@ -530,7 +529,6 @@ namespace CodeDeeds.Xslt.UnitTests
         [DataRow("-'a string'", "XPTY0004")]
         [DataRow("1 idiv 0", "FOAR0001")]
         [DataRow("1 div 0", "FOAR0001")]
-        [DataRow("xs:integer('9223372036854775807') + 1", "FOAR0002")]
         [DataRow("zero-or-one((1, 2))", "FORG0003")]
         [DataRow("one-or-more(())", "FORG0004")]
         [DataRow("exactly-one((1, 2))", "FORG0005")]
@@ -1342,15 +1340,21 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
-        public void IntegerOverflowIsReportedRatherThanWrapped()
+        public void IntegerArithmeticWidensRatherThanWrapping()
         {
-            // A bounded xs:integer is allowed, but only if exceeding the range is signalled. An unchecked
-            // multiply would wrap to a negative number, which is the one answer the specification forbids.
-            Assert.ThrowsExactly<XsltException>(
-                () => Text("xs:integer('9223372036854775807') + 1"));
+            // xs:integer is unbounded, so arithmetic that leaves 64 bits behind carries on into a wider
+            // integer. An unchecked multiply would wrap to a negative number, which is the one answer
+            // the specification forbids, and refusing outright was the answer here until the wide form
+            // existed to carry it.
+            Assert.AreEqual("9223372036854775808", Text("xs:integer('9223372036854775807') + 1"));
+            Assert.AreEqual("12000000000000000000", Text("xs:integer('4000000000000000000') * 3"));
 
-            Assert.ThrowsExactly<XsltException>(
-                () => Text("xs:integer('4000000000000000000') * 3"));
+            // And back down again where the answer fits, so that a value is stored the one way
+            // whenever it can be.
+            Assert.AreEqual(
+                "9223372036854775807", Text("(xs:integer('9223372036854775807') + 1) - 1"));
+
+            Assert.AreEqual("true", Text("(xs:integer('9223372036854775807') + 1) gt 0"));
         }
 
         [TestMethod]

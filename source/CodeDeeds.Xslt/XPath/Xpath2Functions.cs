@@ -1936,6 +1936,27 @@ namespace CodeDeeds.Xslt.XPath
 
         // ---- Sequence functions --------------------------------------------------------------------------
 
+        /// <summary>The text two numbers share exactly when they are the same value.</summary>
+        /// <remarks>
+        /// Not the double. Past 2^53 a double stops telling consecutive integers apart, so keying by one
+        /// folded 9007199254740992 and 9007199254740993 into a single value, and every pair of integers
+        /// wider than that along with them. A whole number keys by its digits instead, which is exact at
+        /// any size and which an xs:integer, an xs:decimal and an xs:double of the same value all reach.
+        /// </remarks>
+        private static string NumericKey(XPathValue value)
+        {
+            if (value.TypeCode == XdmTypeCode.Integer)
+            {
+                return value.ToBigInteger().ToString(CultureInfo.InvariantCulture);
+            }
+
+            double number = value.ToNumber();
+
+            return !double.IsNaN(number) && !double.IsInfinity(number) && number == Math.Floor(number)
+                ? new System.Numerics.BigInteger(number).ToString(CultureInfo.InvariantCulture)
+                : number.ToString("R", CultureInfo.InvariantCulture);
+        }
+
         /// <summary>
         /// Removes duplicates, comparing items by value rather than by identity.
         /// </summary>
@@ -1963,7 +1984,7 @@ namespace CodeDeeds.Xslt.XPath
 
                 if (numeric)
                 {
-                    key = "n:" + atomic.ToNumber().ToString("R", CultureInfo.InvariantCulture);
+                    key = "n:" + NumericKey(atomic);
                 }
                 else if (atomic.TypeCode == XdmTypeCode.QName)
                 {
@@ -2319,7 +2340,8 @@ namespace CodeDeeds.Xslt.XPath
 
             return value.TypeCode switch
             {
-                XdmTypeCode.Integer => XPathValue.FromInteger(Math.Abs(value.ToInteger())),
+                XdmTypeCode.Integer => XPathValue.FromInteger(
+                    System.Numerics.BigInteger.Abs(value.ToBigInteger())),
                 XdmTypeCode.Decimal => XPathValue.FromDecimal(Math.Abs(value.ToDecimal())),
                 XdmTypeCode.Float => XPathValue.FromFloat(Math.Abs((float)value.ToNumber())),
                 _ => XPathValue.FromNumber(Math.Abs(value.ToNumber())),
