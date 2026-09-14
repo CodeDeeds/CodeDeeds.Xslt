@@ -247,7 +247,7 @@ namespace CodeDeeds.Xslt.Compiler
             bool identityConstraints)
         {
             TypeOverlay overlay = new TypeOverlay(m_schemas);
-            List<(bool Id, string Message)> problems = new();
+            Problems problems = new Problems();
 
             XmlNamespaceManager namespaces = new XmlNamespaceManager(m_set.NameTable);
             XmlSchemaValidator validator = new XmlSchemaValidator(
@@ -262,7 +262,7 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 if (e.Severity == XmlSeverityType.Error)
                 {
-                    problems.Add((IsIdentityProblem(e.Message), e.Message));
+                    problems.Add(e.Message);
                 }
             };
 
@@ -277,31 +277,37 @@ namespace CodeDeeds.Xslt.Compiler
                 validator.Initialize(partial);
             }
 
-            Walk(tree, element, validator, namespaces, overlay);
+            Walk(tree, element, validator, namespaces, overlay, problems);
+
+            // Anything reported from here on is a reference to an ID the document never declared: nothing
+            // else waits for the end to be known.
+            problems.Finishing = true;
             validator.EndValidation();
 
             // A document-level constraint — one ID used twice, a reference to an undeclared ID — is always
             // XTTE1555, whatever the mode; a value or content-model failure is the mode's own error.
-            foreach ((bool id, string message) in problems)
+            if (problems.Identity is string identity)
             {
-                if (id)
-                {
-                    throw XsltErrors.Error(XsltErrorCode.XTTE1555, $"The document is not valid: {message}");
-                }
+                throw XsltErrors.Error(XsltErrorCode.XTTE1555, $"The document is not valid: {identity}");
             }
 
             if (problems.Count > 0)
             {
                 throw XsltErrors.Error(
                     partial is not null ? invalid : strict ? invalid : laxInvalid,
-                    $"The constructed node is not valid: {problems[0].Message}");
+                    $"The constructed node is not valid: {problems.First}");
             }
 
             return overlay;
         }
 
         private void Walk(
-            XdmTree tree, int element, XmlSchemaValidator validator, XmlNamespaceManager namespaces, TypeOverlay overlay)
+            XdmTree tree,
+            int element,
+            XmlSchemaValidator validator,
+            XmlNamespaceManager namespaces,
+            TypeOverlay overlay,
+            Problems problems)
         {
             Model.NameTable names = tree.NameTable;
             int fingerprint = tree.FingerprintOf(element);
@@ -337,12 +343,23 @@ namespace CodeDeeds.Xslt.Compiler
                 }
 
                 XmlSchemaInfo attributeInfo = new XmlSchemaInfo();
+                string written = tree.StringValueOf(attribute);
+                int mark = problems.Count;
+
                 validator.ValidateAttribute(
-                    names.GetLocalName(attributeName), attributeUri, tree.StringValueOf(attribute), attributeInfo);
+                    names.GetLocalName(attributeName), attributeUri, written, attributeInfo);
 
                 if (attributeInfo.SchemaType is XmlSchemaType attributeType)
                 {
                     overlay.Set(attribute, m_schemas.TypeIdOf(attributeType));
+
+                    // Noted once the type is known, so that a value of some other type is never taken for
+                    // an ID. What the validator reported over this attribute is then about the ID rather
+                    // than about its content, and carries the document-level code.
+                    if (m_schemas.Wrap(attributeType).IsIdType && problems.RepeatsId(written))
+                    {
+                        problems.MarkIdentityFrom(mark);
+                    }
                 }
             }
 
@@ -378,17 +395,27 @@ namespace CodeDeeds.Xslt.Compiler
                         break;
 
                     case NodeKind.Element:
-                        Walk(tree, child, validator, namespaces, overlay);
+                        Walk(tree, child, validator, namespaces, overlay, problems);
                         break;
                 }
             }
 
             XmlSchemaInfo end = new XmlSchemaInfo();
+            int endMark = problems.Count;
             validator.ValidateEndElement(end);
 
             if (end.SchemaType is XmlSchemaType settled)
             {
                 overlay.Set(element, m_schemas.TypeIdOf(settled));
+
+                // An element may be the ID itself, where its content is typed as one.
+                XdmSchemaType held = m_schemas.Wrap(settled);
+                XdmSchemaType? simple = held.Variety == XdmSchemaVariety.Complex ? held.SimpleContent : held;
+
+                if (simple is { IsIdType: true } && problems.RepeatsId(tree.StringValueOf(element)))
+                {
+                    problems.MarkIdentityFrom(endMark);
+                }
             }
 
             if (end.IsNil)
@@ -409,20 +436,84 @@ namespace CodeDeeds.Xslt.Compiler
         }
 
         /// <summary>
-        /// Whether a validator's message is about an ID or an IDREF, which is the document-level
-        /// constraint <c>XTTE1555</c> names.
+        /// What validation reported, and which of it is about an ID or a reference to one, which is the
+        /// document-level constraint <c>XTTE1555</c> names rather than ordinary invalidity.
         /// </summary>
         /// <remarks>
+        /// <para>
+        /// The two are told apart by where they arise rather than by what the message says. A reference to
+        /// an ID nothing declares is only known to be dangling once there is no more document to declare
+        /// it, so the validator reports it while being asked to finish and at no other time. A repeated ID
+        /// is reported where it is written, and is recognised here by keeping the IDs the document has
+        /// used: the value is noted after the validator has settled the attribute's type, so a value that
+        /// is not an ID at all is not mistaken for one.
+        /// </para>
+        /// <para>
+        /// Reading the message instead would be reading English out of another library's resources, which
+        /// says nothing about the error on a runtime whose messages are translated.
+        /// </para>
+        /// <para>
         /// Only ID and IDREF. An <c>xs:unique</c>, <c>xs:key</c> or <c>xs:keyref</c> that is not satisfied
         /// makes the element invalid like any other content failure, and takes the code the mode gives
         /// that: the suite's own error-1555c validates a document whose <c>xs:unique</c> is broken and
         /// asks for <c>XTTE1510</c>.
+        /// </para>
         /// </remarks>
-        private static bool IsIdentityProblem(string message)
+        private sealed class Problems
         {
-            return message.Contains("as an ID", StringComparison.Ordinal)
-                || message.Contains("undeclared ID", StringComparison.Ordinal)
-                || message.Contains("Reference to undeclared", StringComparison.Ordinal);
+            private readonly List<(bool Identity, string Message)> m_seen = new();
+            private readonly HashSet<string> m_ids = new(StringComparer.Ordinal);
+
+            /// <summary>Whether the validator is being asked to finish, where a dangling reference surfaces.</summary>
+            public bool Finishing { get; set; }
+
+            /// <summary>How many problems have been reported, which is also the mark to reclassify from.</summary>
+            public int Count => m_seen.Count;
+
+            /// <summary>The first problem reported, for the message an ordinary invalidity carries.</summary>
+            public string First => m_seen[0].Message;
+
+            /// <summary>Records what the validator reported.</summary>
+            public void Add(string message)
+            {
+                m_seen.Add((Finishing, message));
+            }
+
+            /// <summary>The first problem about an ID, or null where none of them is.</summary>
+            public string? Identity
+            {
+                get
+                {
+                    foreach ((bool identity, string message) in m_seen)
+                    {
+                        if (identity)
+                        {
+                            return message;
+                        }
+                    }
+
+                    return null;
+                }
+            }
+
+            /// <summary>
+            /// Notes an ID the document has used, answering whether it had used it already. The value is
+            /// collapsed as the type's whitespace facet collapses it, so that one ID written with
+            /// surrounding space is the same ID.
+            /// </summary>
+            public bool RepeatsId(string value)
+            {
+                return !m_ids.Add(value.Trim());
+            }
+
+            /// <summary>Marks everything reported since a mark as being about an ID.</summary>
+            public void MarkIdentityFrom(int mark)
+            {
+                for (int i = mark; i < m_seen.Count; i++)
+                {
+                    m_seen[i] = (true, m_seen[i].Message);
+                }
+            }
         }
     }
 }

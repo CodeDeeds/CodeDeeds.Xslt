@@ -575,6 +575,80 @@ namespace CodeDeeds.Xslt.UnitTests
                 Fails(ConstructSheet("<wrap><xsl:attribute name=\"a\" type=\"xs:int\" select=\"'x'\"/></wrap>")));
         }
 
+        /// <summary>A schema with an ID, a reference to one, and an xs:unique that is not either.</summary>
+        private const string IdentitySchema =
+            "<xs:schema targetNamespace=\"urn:ids\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:i=\"urn:ids\">"
+            + "<xs:element name=\"item\"><xs:complexType>"
+            + "<xs:attribute name=\"id\" type=\"xs:ID\"/>"
+            + "<xs:attribute name=\"boss\" type=\"xs:IDREF\"/>"
+            + "<xs:attribute name=\"code\" type=\"xs:string\"/>"
+            + "</xs:complexType></xs:element>"
+            + "<xs:element name=\"box\"><xs:complexType><xs:sequence>"
+            + "<xs:element ref=\"i:item\" maxOccurs=\"unbounded\"/></xs:sequence></xs:complexType>"
+            + "<xs:unique name=\"oneCode\"><xs:selector xpath=\"i:item\"/><xs:field xpath=\"@code\"/></xs:unique>"
+            + "</xs:element></xs:schema>";
+
+        private static string IdentitySheet(string body)
+        {
+            return "<xsl:stylesheet version=\"3.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\""
+                + " xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:i=\"urn:ids\" exclude-result-prefixes=\"xs i\">"
+                + "<xsl:import-schema namespace=\"urn:ids\">" + IdentitySchema + "</xsl:import-schema>"
+                + "<xsl:template match=\"/\"><out>" + body + "</out></xsl:template></xsl:stylesheet>";
+        }
+
+        [TestMethod]
+        public void AnIdFaultIsToldFromOrdinaryInvalidityByWhereItArises()
+        {
+            // XTTE1555 is for the document-level ID constraints and for nothing else, and which of the
+            // validator's complaints those are is decided by where each arises rather than by reading the
+            // English out of its message: a repeated ID is caught where it is written, against the IDs the
+            // document has used so far, and a reference to an ID nothing declares can only be known once
+            // there is no more document to declare it.
+            const string Repeated =
+                "<xsl:variable name=\"d\"><i:box>"
+                + "<i:item id=\"a1\" code=\"x\"/><i:item id=\"a1\" code=\"y\"/></i:box></xsl:variable>";
+
+            Assert.AreEqual(
+                "XTTE1555",
+                Fails(IdentitySheet(Repeated + "<xsl:copy-of select=\"$d\" validation=\"strict\"/>")));
+
+            const string Dangling =
+                "<xsl:variable name=\"d\"><i:box>"
+                + "<i:item id=\"a1\" boss=\"nobody\" code=\"x\"/></i:box></xsl:variable>";
+
+            Assert.AreEqual(
+                "XTTE1555",
+                Fails(IdentitySheet(Dangling + "<xsl:copy-of select=\"$d\" validation=\"strict\"/>")));
+
+            // An xs:unique that is not satisfied is ordinary invalidity, and takes the mode's own code.
+            const string RepeatedCode =
+                "<xsl:variable name=\"d\"><i:box>"
+                + "<i:item id=\"a1\" code=\"x\"/><i:item id=\"a2\" code=\"x\"/></i:box></xsl:variable>";
+
+            Assert.AreEqual(
+                "XTTE1510",
+                Fails(IdentitySheet(RepeatedCode + "<xsl:copy-of select=\"$d\" validation=\"strict\"/>")));
+
+            // A value that is not an ID at all is never mistaken for one, however often it is repeated.
+            const string Ordinary =
+                "<xsl:variable name=\"d\"><i:box>"
+                + "<i:item id=\"a1\" code=\"x\"/><i:item id=\"a2\" wrong=\"x\"/></i:box></xsl:variable>";
+
+            Assert.AreEqual(
+                "XTTE1510",
+                Fails(IdentitySheet(Ordinary + "<xsl:copy-of select=\"$d\" validation=\"strict\"/>")));
+
+            // And a document that breaks none of them validates.
+            const string Sound =
+                "<xsl:variable name=\"d\"><i:box>"
+                + "<i:item id=\"a1\" code=\"x\"/><i:item id=\"a2\" boss=\"a1\" code=\"y\"/></i:box></xsl:variable>";
+
+            Assert.AreEqual(
+                "<i:box xmlns:i=\"urn:ids\"><i:item id=\"a1\" code=\"x\"/>"
+                + "<i:item id=\"a2\" boss=\"a1\" code=\"y\"/></i:box>",
+                Both(IdentitySheet(Sound + "<xsl:copy-of select=\"$d\" validation=\"strict\"/>")));
+        }
+
         [TestMethod]
         public void CopyOfValidatesTheDocumentAndItsIds()
         {
