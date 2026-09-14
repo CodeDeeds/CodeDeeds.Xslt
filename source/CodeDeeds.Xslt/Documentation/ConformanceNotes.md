@@ -4251,6 +4251,20 @@ it can write (XSD 1.0 §3.2.6.2).
 scale the arithmetic arrives at is not written either: `PT10.02S` halved is `5.010` in a decimal, which
 carries the scale of both operands, and the canonical form has no trailing zeros in its fraction.
 
+**A year-month duration scaled lands on a whole month, rounded the way `fn:round` rounds.** It is a
+count of months and nothing finer, so multiplying or dividing one has to choose a month; the
+specification says the nearest, and for a value exactly between two, the one nearer positive infinity.
+Neither of the two obvious library calls does that. `Math.Round` sends a half to its even neighbour by
+default, which made `P2Y11M * 2.3` — 80.5 months — come out `P6Y8M` instead of `P6Y9M`. And
+`MidpointRounding.ToPositiveInfinity`, which reads like the rule, is not a rule about halves at all but a
+ceiling: it carries 3.1 months up to 4 along with them. What the rule actually is is
+`floor(months + 0.5)`, which is how `fn:round` is written here too.
+
+Upwards means towards positive infinity and not away from zero, so the two signs do not mirror one
+another: `P1M * 0.5` is `P1M` and `P1M * -0.5` is `P0M`, and `P5M div -2` is −2.5 months and so
+`-P2M` rather than `-P3M`. None of this touches a day-time duration, which holds a fraction of a second
+and has nothing to round to: scaling one is exact.
+
 **A moment moves by ticks and not by seconds.** `DateTime.AddSeconds` takes a double, and 446400.3 is not
 one: adding `P5DT4H0M0.3S` to `00:12:00Z` truncated to 4,464,002,999,999 ticks and landed at
 `04:12:00.2999999Z` rather than the tenth of a second the duration names. The seconds are held in a decimal

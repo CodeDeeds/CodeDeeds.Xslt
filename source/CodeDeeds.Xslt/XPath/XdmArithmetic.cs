@@ -535,8 +535,18 @@ namespace CodeDeeds.Xslt.XPath
                 decimal months = divide ? duration.Months / scale : duration.Months * scale;
                 decimal seconds = divide ? duration.Seconds / scale : duration.Seconds * scale;
 
+                // A whole number of months, rounded the way fn:round rounds: to the nearest, and a half to
+                // whichever of the two is nearer positive infinity. P1M times 0.5 is P1M and not P0M,
+                // and P5M divided by -2 is -P2M and not -P3M.
+                //
+                // Written out rather than asked of Math.Round, whose default sends a half to the even
+                // neighbour and whose MidpointRounding.ToPositiveInfinity is not a rule about halves at
+                // all: it is a ceiling, and would carry 3.1 months up to 4 along with the halves.
+                //
+                // Seconds are not rounded: a dayTimeDuration holds a fraction of a second, so there is
+                // nothing there to round to.
                 return XPathValue.FromDuration(new XdmDuration(
-                    (int)Math.Round(months, MidpointRounding.ToEven), seconds, duration.Type));
+                    (int)decimal.Floor(months + 0.5m), seconds, duration.Type));
             }
             catch (Exception exception) when (exception is OverflowException or DivideByZeroException)
             {
