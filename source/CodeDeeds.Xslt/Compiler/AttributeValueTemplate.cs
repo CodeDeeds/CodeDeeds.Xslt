@@ -75,7 +75,7 @@ namespace CodeDeeds.Xslt.Compiler
                     int close = FindClosingBrace(text, index + 1);
                     if (close < 0)
                     {
-                        throw new XsltException($"Unclosed '{{' in attribute value template \"{text}\".");
+                        throw XsltErrors.Error(XsltErrorCode.XTSE0350, $"Unclosed '{{' in attribute value template \"{text}\".");
                     }
 
                     string embedded = text[(index + 1)..close];
@@ -113,7 +113,8 @@ namespace CodeDeeds.Xslt.Compiler
                         continue;
                     }
 
-                    throw new XsltException(
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XTSE0370,
                         $"A '}}' in an attribute value template must be doubled: \"{text}\".");
                 }
 

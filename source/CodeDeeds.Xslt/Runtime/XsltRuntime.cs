@@ -2352,7 +2352,8 @@ namespace CodeDeeds.Xslt.Runtime
                                 ? $"template '{named.LocalName}'"
                                 : "the template that matched";
 
-                            throw new XsltException(
+                            throw XsltErrors.Error(
+                                XsltErrorCode.XTDE0700,
                                 $"No value was supplied for the required {kind}parameter "
                                 + $"'{parameter.Name.LocalName}' of {owner}. A required parameter has no default "
                                 + "to fall back on.");
@@ -3231,7 +3232,8 @@ namespace CodeDeeds.Xslt.Runtime
 
                 if (global.Required)
                 {
-                    throw new XsltException(
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XTDE0050,
                         $"No value was supplied for the required stylesheet parameter "
                         + $"'{global.Name.LocalName}'. A required parameter has no default to fall back on.");
                 }
@@ -3287,7 +3289,7 @@ namespace CodeDeeds.Xslt.Runtime
 
                 // A package's private template is not a way into it. The caller is outside the package by
                 // definition, so what it may start at is what the package said it offers.
-                if (template.Visibility is not (Visibility.Public or Visibility.Final))
+                if (EntryVisibilityOf(template) is not (Visibility.Public or Visibility.Final))
                 {
                     throw XsltErrors.Error(
                         XsltErrorCode.XTDE0040,
@@ -3347,7 +3349,7 @@ namespace CodeDeeds.Xslt.Runtime
 
                 // The same rule as for a template the caller named: a package's private template is not a
                 // way into it, however it is called.
-                if (start.Visibility is not (Visibility.Public or Visibility.Final))
+                if (EntryVisibilityOf(start) is not (Visibility.Public or Visibility.Final))
                 {
                     throw XsltErrors.Error(
                         XsltErrorCode.XTDE0040,
@@ -3562,6 +3564,19 @@ namespace CodeDeeds.Xslt.Runtime
                 ApplyTemplatesToItem(items[i], mode, StartingParameters, ref inner);
                 CurrentAtomicItem = null;
             }
+        }
+
+
+        /// <summary>What the principal package holds a template as, which is what decides an entry point.</summary>
+        /// <remarks>
+        /// The visibility written on the declaration, except for a template that came from a package this
+        /// one uses, where what matters is what this package accepted it as. A library offering a template
+        /// publicly does not thereby make it a way into whoever uses the library.
+        /// </remarks>
+        /// <param name="template">The template being started at.</param>
+        private static Visibility EntryVisibilityOf(Template template)
+        {
+            return template.VisibleInPrincipal ?? template.Visibility;
         }
 
         /// <summary>The name XSLT 3.0 reserves for the template a transformation begins at by default.</summary>

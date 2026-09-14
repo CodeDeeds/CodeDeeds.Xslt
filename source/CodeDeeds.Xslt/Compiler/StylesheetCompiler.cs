@@ -72,6 +72,10 @@ namespace CodeDeeds.Xslt.Compiler
         /// </remarks>
         private bool m_isPackage;
 
+        // The module handed in, as against the ones its references reached: a module that does not
+        // start with a stylesheet element has a different code for each case.
+        private XdmTree? m_principalTree;
+
         /// <summary>Every component of every package read, for an xsl:expose to name.</summary>
         private readonly List<PackageComponent> m_components = new();
 
@@ -574,6 +578,7 @@ namespace CodeDeeds.Xslt.Compiler
         private CompiledStylesheet Run()
         {
             XdmTree principal = m_tree;
+            m_principalTree = principal;
             HashSet<string> loading = new(StringComparer.OrdinalIgnoreCase);
             if (m_options.BaseUri is not null)
             {
@@ -609,6 +614,7 @@ namespace CodeDeeds.Xslt.Compiler
             // package it names settled on.
             CheckAcceptances();
             CheckNothingAbstract();
+            SettleEntryPointVisibility();
 
             // Last, because whether two components of one name are both in view depends on everything the
             // acceptances said.
@@ -1683,7 +1689,12 @@ namespace CodeDeeds.Xslt.Compiler
                         return child;
                     }
 
-                    throw new XsltException(
+                    // The module handed in is the stylesheet, and one a reference reached is a module
+                    // the reference could not use. The specifications give the two a code each.
+                    throw XsltErrors.Error(
+                        ReferenceEquals(m_tree, m_principalTree)
+                            ? XsltErrorCode.XTSE0150
+                            : XsltErrorCode.XTSE0165,
                         $"The document element is '{LocalNameOf(child)}', but a stylesheet must start with "
                         + "xsl:stylesheet or xsl:transform, or be a literal result element carrying "
                         + "an xsl:version attribute.");
@@ -1974,6 +1985,10 @@ namespace CodeDeeds.Xslt.Compiler
                 }
             }
 
+            // Whether anything that is not an xsl:import has been seen in this module yet, which is what
+            // an xsl:import after one is measured against.
+            bool importsAreLate = false;
+
             // use-when is answered here, at the first sight of a declaration: it decides whether the
             // declaration exists, so an xsl:include it excludes is never followed and a template it excludes
             // is never named.
@@ -1986,6 +2001,38 @@ namespace CodeDeeds.Xslt.Compiler
                 }
 
                 m_tree = tree;
+
+                // Until 3.0 an xsl:import had to come before every other top-level element, so that what
+                // a module imported was settled before anything of its own was read. 3.0 dropped the
+                // rule and the suite has stylesheets written both ways, so this is asked of a 2.0
+                // stylesheet and of no other. The placement is checked before the reference is followed:
+                // a stylesheet that put its imports in the wrong place is wrong whether or not the
+                // modules it names are there to be read.
+                if (IsXsltElement(child, out string kindOfChild))
+                {
+                    if (kindOfChild == "import")
+                    {
+                        if (importsAreLate && !Implements30)
+                        {
+                            m_scopeElement = child;
+
+                            throw XsltErrors.Error(
+                                XsltErrorCode.XTSE0200,
+                                "An xsl:import stands after another top-level element. Until XSLT 3.0 the "
+                                + "imports had to come first, before every other declaration and before "
+                                + "any xsl:include.");
+                        }
+                    }
+                    else
+                    {
+                        importsAreLate = true;
+                    }
+                }
+                else
+                {
+                    importsAreLate = true;
+                }
+
                 if (IsXsltElement(child, out string localName) && localName == "include")
                 {
                     m_scopeElement = child;
@@ -2737,16 +2784,16 @@ namespace CodeDeeds.Xslt.Compiler
 
             if (m_references.TryGetValue(reference, out (XdmTree Tree, string Uri, int Root) known))
             {
-                RequireNotBeingRead(loading, known.Uri, href);
+                RequireNotBeingRead(loading, known.Uri, href, kind);
                 return known;
             }
 
             ResolvedResource? resolved = m_options.StylesheetResolver.Resolve(href, baseUri)
-                ?? throw new XsltException($"The stylesheet 'xsl:{kind} href=\"{href}\"' could not be found.");
+                ?? throw XsltErrors.Error(XsltErrorCode.XTSE0165, $"The stylesheet 'xsl:{kind} href=\"{href}\"' could not be found.");
 
             try
             {
-                RequireNotBeingRead(loading, resolved.Uri, href);
+                RequireNotBeingRead(loading, resolved.Uri, href, kind);
 
                 // And parsed once, however many references name it: two spellings of one module are one tree.
                 if (!m_moduleCache.TryGetValue(resolved.Uri, out XdmTree? tree))
@@ -2791,12 +2838,22 @@ namespace CodeDeeds.Xslt.Compiler
         }
 
         /// <summary>Refuses a reference to a module that is still being read above it, which is a cycle.</summary>
-        private static void RequireNotBeingRead(HashSet<string> loading, string uri, string href)
+        /// <remarks>
+        /// The two kinds of reference have a code each, which is the one place they are told apart by
+        /// anything but their name: including yourself is XTSE0180 and importing yourself XTSE0210.
+        /// </remarks>
+        /// <param name="loading">The modules being read above this one.</param>
+        /// <param name="uri">What the reference resolved to.</param>
+        /// <param name="href">The reference as written.</param>
+        /// <param name="kind">Whether it was an import or an include.</param>
+        private static void RequireNotBeingRead(
+            HashSet<string> loading, string uri, string href, string kind)
         {
             if (loading.Contains(uri))
             {
-                throw new XsltException(
-                    $"The stylesheet reference '{href}' forms a cycle: '{uri}' is already being read.");
+                throw XsltErrors.Error(
+                    kind == "import" ? XsltErrorCode.XTSE0210 : XsltErrorCode.XTSE0180,
+                    $"The xsl:{kind} of '{href}' forms a cycle: '{uri}' is already being read.");
             }
         }
 
@@ -2941,14 +2998,25 @@ namespace CodeDeeds.Xslt.Compiler
             string name = GetAttribute(element, "name")
                 ?? throw new XsltException("An xsl:function must have a name.");
 
-            if (name.IndexOf(':') < 0)
+            // A name written Q{uri}local carries its namespace in the braces and has no prefix to look
+            // for, so what decides is the namespace it ends up in rather than how it was spelled.
+            if (!name.TrimStart().StartsWith("Q{", StringComparison.Ordinal) && name.IndexOf(':') < 0)
             {
-                throw new XsltException(
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTSE0740,
                     $"The function name '{name}' has no prefix. A function declared by a stylesheet must be "
                     + "in a namespace, so that it can never shadow one from the core library.");
             }
 
             ExpandedName expanded = ResolveQualifiedName(element, name);
+
+            if (expanded.NamespaceUri.Length == 0)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTSE0740,
+                    $"The function name '{name}' is in no namespace. A function declared by a stylesheet "
+                    + "must be in one, so that it can never shadow one from the core library.");
+            }
 
             // override-extension-function is 3.0's spelling of override, the old name having been a poor one:
             // what it says is whether this function is preferred to an extension function of the same name,
@@ -3186,7 +3254,7 @@ namespace CodeDeeds.Xslt.Compiler
                 double parsed = XPathValue.ParseNumber(priorityText);
                 if (double.IsNaN(parsed))
                 {
-                    throw new XsltException($"'{priorityText}' is not a valid template priority.");
+                    throw XsltErrors.Error(XsltErrorCode.XTSE0530, $"'{priorityText}' is not a valid template priority.");
                 }
 
                 priority = parsed;
@@ -3208,7 +3276,8 @@ namespace CodeDeeds.Xslt.Compiler
                     templateName.Value,
                     -1,
                     element,
-                    visibility => template.Visibility = visibility));
+                    visibility => template.Visibility = visibility,
+                    reach: held => template.VisibleInPrincipal = held));
             }
 
             if (templateName is not null)
@@ -3219,7 +3288,14 @@ namespace CodeDeeds.Xslt.Compiler
                 {
                     if (existing.ImportPrecedence == precedence)
                     {
-                        throw new XsltException($"More than one template is named '{name}'.");
+                        // A package that overrides a component and also declares one of that name has
+                        // said the same thing twice in two ways, which has a code of its own: the
+                        // override is the declaration, and a second one beside it is the error.
+                        throw XsltErrors.Error(
+                            m_overridingKeys.Contains((m_package, "template", templateName.Value, -1))
+                                ? XsltErrorCode.XTSE3055
+                                : XsltErrorCode.XTSE0660,
+                            $"More than one template is named '{name}'.");
                     }
 
                     if (existing.ImportPrecedence < precedence)
@@ -3336,7 +3412,8 @@ namespace CodeDeeds.Xslt.Compiler
 
             if (ReadDeclarationFlag(element, "tunnel"))
             {
-                throw new XsltException(
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTSE0020,
                     $"The top-level {QualifiedNameOf(element)} '{name}' is declared tunnel=\"yes\". Only a "
                     + "template parameter can be a tunnel parameter; a global is already visible everywhere.");
             }
@@ -3788,7 +3865,8 @@ namespace CodeDeeds.Xslt.Compiler
             }
 
             return m_tree.ResolvePrefix(element, prefix)
-                ?? throw new XsltException(
+                ?? throw XsltErrors.Error(
+                    XsltErrorCode.XTSE0812,
                     $"Namespace prefix '{prefix}' on xsl:namespace-alias is not bound.");
         }
 
@@ -4140,7 +4218,8 @@ namespace CodeDeeds.Xslt.Compiler
         {
             if (!visiting.Add(set))
             {
-                throw new XsltException(
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTSE0720,
                     $"The attribute set '{set.Name.LocalName}' uses itself, directly or indirectly.");
             }
 
@@ -4184,7 +4263,8 @@ namespace CodeDeeds.Xslt.Compiler
                         continue;
                     }
 
-                    throw new XsltException(
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XTSE0690,
                         $"The call to template '{name}' does not supply its required parameter "
                         + $"'{parameter.Name.LocalName}'.");
                 }
@@ -4267,7 +4347,8 @@ namespace CodeDeeds.Xslt.Compiler
 
                 if (existing.Precedence == precedence)
                 {
-                    throw new XsltException(
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XTSE1580,
                         $"Two character maps are named '{name}' with the same import precedence. One replaces "
                         + "the other only by being declared in a module that imports it.");
                 }
@@ -4342,7 +4423,8 @@ namespace CodeDeeds.Xslt.Compiler
 
             if (!visiting.Add(name))
             {
-                throw new XsltException(
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTSE1600,
                     $"The character map '{name.LocalName}' uses itself, directly or indirectly.");
             }
 
@@ -4587,7 +4669,7 @@ namespace CodeDeeds.Xslt.Compiler
                 string? uri = m_tree.ResolvePrefix(element, prefix);
                 if (uri is null)
                 {
-                    throw new XsltException($"Namespace prefix '{prefix}' in '{token}' is not bound.");
+                    throw XsltErrors.Error(XsltErrorCode.XTSE0280, $"Namespace prefix '{prefix}' in '{token}' is not bound.");
                 }
 
                 DeclareWhitespace(precedence, uri, token[(colon + 1)..], strip);
@@ -4712,7 +4794,21 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="format">The name as written.</param>
         private OutputSettings NamedOutputSettings(int element, string format)
         {
-            ExpandedName name = ResolveQualifiedName(element, format);
+            ExpandedName name;
+
+            try
+            {
+                name = ResolveQualifiedName(element, format);
+            }
+            catch (XsltException failed) when (failed.Code == nameof(XsltErrorCode.XTSE0280))
+            {
+                // A format that is not a name cannot name an output definition either, and that is the
+                // error the specification gives it rather than the one about the prefix.
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTDE1460,
+                    $"'{format}' is not a name, so it names no output definition: {failed.Message}",
+                    failed);
+            }
 
             if (!m_namedOutputs.TryGetValue(Scoped(name), out List<ModuleElement>? declarations))
             {
@@ -5555,6 +5651,9 @@ namespace CodeDeeds.Xslt.Compiler
 
             /// <summary>Records a visibility an <c>xsl:expose</c> settled on.</summary>
             public Action<Visibility>? Apply { get; }
+
+            /// <summary>Records what the principal package ends up holding the component as.</summary>
+            public Action<Visibility>? Reach { get; init; }
         }
 
         /// <summary>One name written in an <c>xsl:expose</c>, which may be a wildcard in either half.</summary>
@@ -5819,7 +5918,8 @@ namespace CodeDeeds.Xslt.Compiler
             int arity,
             int element,
             Action<Visibility>? apply = null,
-            bool isParameter = false)
+            bool isParameter = false,
+            Action<Visibility>? reach = null)
         {
             bool overriding = IsOverriding(element);
 
@@ -5835,6 +5935,7 @@ namespace CodeDeeds.Xslt.Compiler
 
             return new PackageComponent(kind, name, arity, declared, apply, m_package)
             {
+                Reach = reach,
                 IsOverride = overriding,
                 IsParameter = isParameter,
                 Element = new ModuleElement(m_tree, element),
@@ -6158,6 +6259,36 @@ namespace CodeDeeds.Xslt.Compiler
                 Visibility.Abstract => Visibility.Absent,
                 _ => offered,
             };
+        }
+
+
+        /// <summary>
+        /// Records what the principal package holds each named template of a used package as, which is
+        /// what decides whether a transformation may start at it.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A template declares its visibility to the package that wrote it, and a package using that one
+        /// takes the template as whatever its <c>xsl:accept</c> asked for, or as private where it asked
+        /// for nothing. Using a package does not re-offer what that package offers. So a template a
+        /// library declares public is not an entry point of the package using it unless that package said
+        /// so, and the visibility the declaration wrote is the wrong question to put to it.
+        /// </para>
+        /// <para>
+        /// Only a template from a used package is rewritten. One the principal package declared itself is
+        /// already held as it declared it, and a stylesheet that is not a package has no boundary for a
+        /// component to cross.
+        /// </para>
+        /// </remarks>
+        private void SettleEntryPointVisibility()
+        {
+            foreach (PackageComponent component in m_components)
+            {
+                if (component.Package != 0 && component.Reach is Action<Visibility> record)
+                {
+                    record(VisibleAs(component, 0) ?? Visibility.Absent);
+                }
+            }
         }
 
         /// <summary>Reads one <c>xsl:accept</c>, once, leaving the module being compiled where it was.</summary>
@@ -8054,7 +8185,8 @@ namespace CodeDeeds.Xslt.Compiler
 
             if (required && (select is not null || body is not null))
             {
-                throw new XsltException(
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTSE0010,
                     $"The parameter '{name}' is declared required=\"yes\" and also given a default. A "
                     + "required parameter is one the caller must supply, so a default could never be used.");
             }
@@ -10429,7 +10561,8 @@ namespace CodeDeeds.Xslt.Compiler
 
                     if (select is not null && body.Length != 0)
                     {
-                        throw new XsltException(
+                        throw XsltErrors.Error(
+                            XsltErrorCode.XTSE0910,
                             "An xsl:namespace has both a select attribute and content. The URI comes from one "
                             + "or the other, so writing both leaves it ambiguous.");
                     }
@@ -10533,7 +10666,7 @@ namespace CodeDeeds.Xslt.Compiler
                 default:
                     if (!IsForwardsCompatible(element))
                     {
-                        throw new XsltException($"'xsl:{localName}' is not supported.");
+                        throw XsltErrors.Error(XsltErrorCode.XTSE0010, $"'xsl:{localName}' is not supported.");
                     }
 
                     // Under forwards-compatible processing the stylesheet is written for a later version of
@@ -10622,7 +10755,8 @@ namespace CodeDeeds.Xslt.Compiler
 
                 if (written is not null)
                 {
-                    throw new XsltException(
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XTSE1080,
                         $"An xsl:for-each-group has both '{written}' and '{attribute}', but a population can "
                         + "only be divided one way at a time.");
                 }
@@ -10633,7 +10767,8 @@ namespace CodeDeeds.Xslt.Compiler
 
             if (written is null)
             {
-                throw new XsltException(
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTSE1080,
                     "An xsl:for-each-group must say how to group: group-by, group-adjacent, "
                     + "group-starting-with or group-ending-with.");
             }
@@ -10947,7 +11082,7 @@ namespace CodeDeeds.Xslt.Compiler
 
             if (tests.Count == 0)
             {
-                throw new XsltException("An xsl:choose must contain at least one xsl:when.");
+                throw XsltErrors.Error(XsltErrorCode.XTSE0010, "An xsl:choose must contain at least one xsl:when.");
             }
 
             return new ChooseInstruction(tests.ToArray(), branches.ToArray(), otherwise);
@@ -11903,7 +12038,7 @@ namespace CodeDeeds.Xslt.Compiler
                 string local = colon < 0 ? token : token[(colon + 1)..];
 
                 string uri = m_tree.ResolvePrefix(element, prefix)
-                    ?? throw new XsltException($"Namespace prefix '{prefix}' in '{token}' is not bound.");
+                    ?? throw XsltErrors.Error(XsltErrorCode.XTSE0280, $"Namespace prefix '{prefix}' in '{token}' is not bound.");
 
                 if (!settings.CDataSectionElements.Contains((uri, local)))
                 {
@@ -11934,7 +12069,7 @@ namespace CodeDeeds.Xslt.Compiler
                 string local = colon < 0 ? token : token[(colon + 1)..];
 
                 string uri = m_tree.ResolvePrefix(element, prefix)
-                    ?? throw new XsltException($"Namespace prefix '{prefix}' in '{token}' is not bound.");
+                    ?? throw XsltErrors.Error(XsltErrorCode.XTSE0280, $"Namespace prefix '{prefix}' in '{token}' is not bound.");
 
                 if (!settings.SuppressIndentation.Contains((uri, local)))
                 {
@@ -12131,7 +12266,7 @@ namespace CodeDeeds.Xslt.Compiler
             string? uri = m_tree.ResolvePrefix(element, prefix);
             if (uri is null)
             {
-                throw new XsltException($"Namespace prefix '{prefix}' in '{qualifiedName}' is not bound.");
+                throw XsltErrors.Error(XsltErrorCode.XTSE0280, $"Namespace prefix '{prefix}' in '{qualifiedName}' is not bound.");
             }
 
             return new ExpandedName(uri, qualifiedName[(colon + 1)..]);

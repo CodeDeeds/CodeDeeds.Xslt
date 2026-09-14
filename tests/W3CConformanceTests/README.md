@@ -134,7 +134,7 @@ had gone. The engine now hands a result back as a tree — `TransformXmlToTree` 
 driver puts an assertion the serialized text answered no to that tree as well. The two are one result in
 two renderings, and one the engine satisfies in either it satisfies. The assertion's own static context
 also gets the environment's schemas, since `schema-element(E)` in an assertion is a question that cannot
-be read without them. That took the run to **8,204 of 8,280, 99.1%**, both backends, and the named-function entry point below to **8,223 of 8,299**, and the driver work after it to **8,345 of 8,430**, and the module-boundary fixes below to **8,352 of 8,430**.
+be read without them. That took the run to **8,204 of 8,280, 99.1%**, both backends, and the named-function entry point below to **8,223 of 8,299**, and the driver work after it to **8,345 of 8,430**, and the module-boundary fixes below to **8,352 of 8,430**, and the error codes after them to **8,440 of 8,518**.
 
 Of the 76 left, 15 fail in the headline run too and have nothing to do with schema awareness. Four name
 schema files the suite does not contain. The rest are small individual rules.
@@ -248,6 +248,42 @@ document element.
 Seven tests in all, the five and two that came with them: an `xsl:import` written after the templates it
 imports over, and a second `namespace-alias` case. The suites reach **7,792 of 7,828** at 3.0 on both
 backends, **5,500 of 5,533** at 2.0, and **8,352 of 8,430** schema-aware.
+
+## Saying which rule was broken
+
+A test that expects an error and gets one with no code is **skipped**, not passed: the right thing
+happened and whether it happened for the right reason is unknown. Ninety-seven tests stood there, and they
+were the largest single block of skips the driver had left that was about the engine rather than about the
+driver. The engine refused every one of those stylesheets. It simply did not say which rule they broke.
+
+Naming the codes turned 86 of those skips into passes. Most were a line each: a reference to a module that
+is not there is `XTSE0165`, a prefix nothing binds is `XTSE0280`, an attribute value template with an
+unclosed brace is `XTSE0350`, an attribute set that uses itself is `XTSE0720`. Four needed a distinction
+the engine was not drawing at all:
+
+| what had to be told apart | codes |
+|---|---|
+| A module that reaches itself, by `xsl:include` or by `xsl:import` | `XTSE0180`, `XTSE0210` |
+| A module that is not a stylesheet: the one handed in, or one a reference reached | `XTSE0150`, `XTSE0165` |
+| Two components of one name: two declarations, or a declaration beside an override of it | `XTSE0660`, `XTSE3055` |
+| An `xsl:import` after another top-level element, which 2.0 forbids and 3.0 allows | `XTSE0200`, none |
+
+The last of those is a rule this engine had never applied, and the tests for it name modules that are not
+in the suite: a stylesheet that puts its imports in the wrong place is wrong whether or not the modules it
+names are there to be read, so the placement is now checked before the reference is followed.
+
+Two more came out of reading what the engine said while it said it. `Q{uri}local` is a name with its
+namespace in braces and no prefix at all, and the check for a function name in no namespace was reading it
+as one — so `<xsl:function name="Q{f}n"/>` was refused for a fault it did not have. And a template that a
+package *uses* is not an entry point of the package using it unless that package accepted it as one, which
+is a different question from what the library declared.
+
+**The driver now prints what the engine said** beside a code it did not expect, and beside a refusal that
+carried no code. A code that is wrong is a code the engine chose for a reason, and the reason is what says
+which of the two is mistaken. Every fix above was found by reading that line.
+
+Eleven of the ninety-seven are left. Most are the suite naming two codes for one construct in two tests of
+different eras, which cannot be satisfied twice.
 
 ## Reading the result
 
@@ -498,7 +534,7 @@ tree** for the substring a branch processes, there being no atomic context item 
 written; there is one now, and a path written in a branch no longer walks a tree that was never in the
 stylesheet.
 
-The largest clusters behind the current **99.4% of 5,533**, and no one cause dominates:
+The largest clusters behind the current **99.4% of 5,615**, and no one cause dominates:
 
 | | |
 |---|---|
@@ -516,7 +552,7 @@ The largest skip left is not a failure either: **6,518 are XSLT 3.0 tests**, rea
 
 ## What the 3.0 run says
 
-That opt-in run measures the XSLT 3.0 half at **7,792 of 7,828, 99.5%**, from 4,994 of 6,427 when it was first
+That opt-in run measures the XSLT 3.0 half at **7,880 of 7,916, 99.5%**, from 4,994 of 6,427 when it was first
 taken. It reads more tests than it did as well as passing more of them, which is the part worth reading twice:
 opening a feature the suite writes *around* stops whole files being skipped, so the denominator moves too — and
 the percentage can fall while the work goes forward, which is why the two numbers are always given together.

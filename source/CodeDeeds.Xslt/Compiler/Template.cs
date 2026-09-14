@@ -144,6 +144,20 @@ namespace CodeDeeds.Xslt.Compiler
 
         /// <summary>How far outside its own package this template can be seen.</summary>
         public Visibility Visibility { get; set; } = Visibility.Private;
+
+        /// <summary>
+        /// What the principal package holds this template as, where it came from a package that one
+        /// uses; null where it was declared in the principal package itself and there is no boundary
+        /// for it to have crossed.
+        /// </summary>
+        /// <remarks>
+        /// A template declares its visibility to the package that wrote it, and a package using that
+        /// one takes it as whatever its <c>xsl:accept</c> asked for, or as private where it asked for
+        /// nothing: using a package does not re-offer what that package offers. So what a library
+        /// declares public is not an entry point of the package using it unless that package said so,
+        /// and the visibility written on the declaration is the wrong question to put to it.
+        /// </remarks>
+        public Visibility? VisibleInPrincipal { get; set; }
     }
 
     /// <summary>

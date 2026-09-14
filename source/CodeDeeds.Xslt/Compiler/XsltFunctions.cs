@@ -1542,7 +1542,8 @@ namespace CodeDeeds.Xslt.Compiler
         /// <inheritdoc/>
         public override XPathValue Evaluate(ref DynamicContext context)
         {
-            throw new XsltException(
+            throw XsltErrors.Error(
+                XsltErrorCode.XTDE1425,
                 $"No implementation is available for the extension function '{m_name}()' in namespace "
                 + $"'{m_namespaceUri}'. Guard the call with function-available('{m_name}') to supply a "
                 + "fallback for processors that do not provide it.");

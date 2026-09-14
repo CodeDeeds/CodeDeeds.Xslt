@@ -180,6 +180,11 @@ namespace CodeDeeds.Xslt
         /// <summary>An <c>xsl:import</c> somewhere other than at the top level.</summary>
         XTSE0190,
 
+        /// <summary>
+        /// An <c>xsl:import</c> after another top-level element, which XSLT 2.0 forbids and 3.0 allows.
+        /// </summary>
+        XTSE0200,
+
         /// <summary>An XSLT element that must be empty, and is not.</summary>
         XTSE0260,
 
@@ -780,8 +785,57 @@ namespace CodeDeeds.Xslt
         /// <summary>A function argument does not match the <c>as</c> the parameter declared.</summary>
         XTTE0790,
 
+        /// <summary>The principal stylesheet module does not start with a stylesheet element.</summary>
+        XTSE0150,
+
+        /// <summary>An <c>xsl:include</c> reaching a module that is already being read.</summary>
+        XTSE0180,
+
+        /// <summary>An <c>xsl:import</c> reaching a module that is already being read.</summary>
+        XTSE0210,
+
+        /// <summary>A prefix in a name written in the stylesheet that no namespace declaration binds.</summary>
+        XTSE0280,
+
+        /// <summary>An attribute value template with an unclosed <c>{</c>.</summary>
+        XTSE0350,
+
+        /// <summary>An attribute value template with a <c>}</c> that is not doubled.</summary>
+        XTSE0370,
+
+        /// <summary>A <c>priority</c> that is not a number.</summary>
+        XTSE0530,
+
+        /// <summary>Two templates of one name at one import precedence.</summary>
+        XTSE0660,
+
+        /// <summary>An <c>xsl:call-template</c> leaving a required parameter unsupplied.</summary>
+        XTSE0690,
+
+        /// <summary>An attribute set that uses itself, directly or through others.</summary>
+        XTSE0720,
+
+        /// <summary>An <c>xsl:function</c> whose name is in no namespace.</summary>
+        XTSE0740,
+
+        /// <summary>A prefix on <c>xsl:namespace-alias</c> that no namespace declaration binds.</summary>
+        XTSE0812,
+
+        /// <summary>An <c>xsl:for-each-group</c> saying how to group in no way, or in two.</summary>
+        XTSE1080,
+
+        /// <summary>Two character maps of one name at one import precedence.</summary>
+        XTSE1580,
+
+        /// <summary>A character map that uses itself, directly or through others.</summary>
+        XTSE1600,
+
+        /// <summary>An attribute added to an element whose content has already started.</summary>
+        XTDE0410,
+
         /// <summary>A type error: an operand or argument of the wrong type, or of the wrong cardinality.</summary>
         XPTY0004,
+
 
         /// <summary>The last step of a path gave both nodes and atomic values.</summary>
         XPTY0018,

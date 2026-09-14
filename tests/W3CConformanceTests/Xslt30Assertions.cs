@@ -185,7 +185,9 @@ namespace CodeDeeds.Xslt.Conformance
             {
                 // The right thing happened and whether it happened for the right reason is unknown, so
                 // counting it either way would be a guess. These skips are the work queue for the codes.
-                return Skip($"raised an error with no code, where {expected} was expected");
+                return Skip(
+                    $"raised an error with no code, where {expected} was expected: "
+                    + Flat(outcome.Error ?? string.Empty));
             }
 
             // XXXX9999 is the catalog's way of saying an error is required and the specification names
@@ -193,7 +195,9 @@ namespace CodeDeeds.Xslt.Conformance
             return expected is "*" or "XXXX9999"
                 || string.Equals(expected, outcome.ErrorCode, StringComparison.Ordinal)
                     ? Pass()
-                    : Fail($"expected error {expected}, got {outcome.ErrorCode}");
+                    // With the message, because a code that is wrong is a code the engine chose for
+                    // a reason, and the reason is what says which of the two is mistaken.
+                    : Fail($"expected error {expected}, got {outcome.ErrorCode}: {Flat(outcome.Error ?? string.Empty)}");
         }
 
         private static TestResult CheckResultDocument(XElement assertion, Transformation outcome)

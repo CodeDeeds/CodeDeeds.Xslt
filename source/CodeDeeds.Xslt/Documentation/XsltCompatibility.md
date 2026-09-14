@@ -17,13 +17,13 @@ Conformance as last measured, on 14 September 2026, against the W3C suites (see 
 
 | Suite | Result |
 | --- | --- |
-| XSLT 3.0 test suite, 3.0 processor | 7,792 of 7,828, 99.5% |
-| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,500 of 5,533, 99.4% |
+| XSLT 3.0 test suite, 3.0 processor | 7,880 of 7,916, 99.5% |
+| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,582 of 5,615, 99.4% |
 | QT3 (XPath), 3.1 | 98.9% of 17,615 |
 | QT3 (XPath), 2.0 | 99.0% of 14,188 |
 
 The 2,900 streaming tests are skipped by design. The 686 schema-aware tests are read only by the driver's
-opt-in `--schema` run, which stands at 8,352 of 8,430 (99.1%), the same on both backends; the figures
+opt-in `--schema` run, which stands at 8,440 of 8,518 (99.1%), the same on both backends; the figures
 above are the run without it.
 
 ## Not implemented, and not planned

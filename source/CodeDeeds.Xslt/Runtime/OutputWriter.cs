@@ -749,7 +749,8 @@ namespace CodeDeeds.Xslt.Runtime
 
             if (!m_startTagOpen)
             {
-                throw new XsltException(
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTDE0410,
                     $"An attribute ('{localName}') cannot be added after the element's content has started.");
             }
 
