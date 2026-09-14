@@ -17,13 +17,13 @@ Conformance as last measured, on 14 September 2026, against the W3C suites (see 
 
 | Suite | Result |
 | --- | --- |
-| XSLT 3.0 test suite, 3.0 processor | 7,651 of 7,689, 99.5% |
+| XSLT 3.0 test suite, 3.0 processor | 7,670 of 7,708, 99.5% |
 | XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,396 of 5,431, 99.4% |
 | QT3 (XPath), 3.1 | 98.9% of 17,615 |
 | QT3 (XPath), 2.0 | 99.0% of 14,188 |
 
 The 2,900 streaming tests are skipped by design. The 686 schema-aware tests are read only by the driver's
-opt-in `--schema` run, which stands at 8,204 of 8,280 (99.1%), the same on both backends; the figures
+opt-in `--schema` run, which stands at 8,223 of 8,299 (99.1%), the same on both backends; the figures
 above are the run without it.
 
 ## Not implemented, and not planned
@@ -54,7 +54,6 @@ above are the run without it.
 | --- | --- | --- |
 | Forwards-compatible processing | Instructions. A stylesheet claiming a version later than the processor may hold instructions the engine has never heard of; each falls back when reached, and is an error only if reached without an `xsl:fallback`. | Expression syntax from a later version. Every expression is parsed when the stylesheet is compiled, so one that is not XPath 3.1 is rejected even if never evaluated. |
 | Packages | `xsl:package`, `xsl:use-package`, `xsl:override`, `xsl:accept`, `xsl:expose`, visibility, `xsl:original`, version ranges on `package-version`, and the override signature check (`XTSE3070`). | A package used by two others that each override it differently, and re-exposing through `xsl:expose` a component a package accepted rather than declared. |
-| Entry points | A named initial template (`XsltOptions.InitialTemplate`), an initial mode (`InitialMode`), an initial match selection (`InitialMatchSelection`), with template and tunnel parameters. | Starting at a named function. |
 | Number words (`xsl:number`, `format-integer`) | Cardinal and ordinal words in English, German, French, Spanish, Portuguese (Brazil, and Portugal as `pt-PT`), Italian, Norwegian (Bokmål, and Nynorsk as `nn`), Swedish and Danish, with the feminine of a Romance ordinal on request. Numbering by any Unicode decimal-digit family, Latin letters and Roman numerals. | Other languages fall back to English. Other numbering sequences, such as circled digits or Greek letters, fall back to decimal digits. |
 | Date and time names (`format-date` and relatives) | Month, day, era and am/pm names in the same languages; the Gregorian calendar as `AD` or `ISO`. Conventional abbreviations for English only; other languages are cut to the width asked for. | Other languages get English with the `[Language: en]` prefix the specification prescribes; other calendars get `[Calendar: AD]`. |
 | `xsl:output` | Every attribute of every method, `json` and `adaptive` included; `normalization-form` NFC, NFD, NFKC and NFKD. | `normalization-form="fully-normalized"` is refused. `undeclare-prefixes` has no effect, since only XML 1.0 is written. |
@@ -86,6 +85,7 @@ above are the run without it.
 | `XsltOptions.OmitXmlDeclaration` | `null` follows the stylesheet, `true` suppresses the declaration, `false` forces it. `Xslt.With` gives a differently configured instance without compiling again. |
 | `Xslt.OutputMethod`, `OutputEncoding`, `OutputMediaType` | What the stylesheet's `xsl:output` settled, for a caller setting a `Content-Type` header. |
 | `XsltOptions.BaseUri`, `InputUri`, `BaseOutputUri` | Where the stylesheet, the input and the principal result are, which relative references resolve against. |
+| `XsltOptions.InitialTemplate`, `InitialMode`, `InitialMatchSelection`, `InitialFunction`, `FunctionArguments` | Where the transformation starts, which XSLT 3.0 gives three answers to. With none of them it processes the source document and the patterns decide. `InitialTemplate` calls a named template; `InitialMode` says which mode templates are applied in and `InitialMatchSelection` an expression whose items they are applied to in place of the document; `InitialFunction` calls a stylesheet function with `FunctionArguments` and makes what it returns the whole result. A template or function must be public, a package's private component being no way into it, and a name that is not there is `XTDE0040` for a template and `XTDE0041` for a function. `TemplateParameters` and `TunnelParameters` are the arguments of the call a template entry point makes. |
 | `XsltOptions.DynamicEvaluation` | `xsl:evaluate` is on by default and can be switched off, which makes `element-available('xsl:evaluate')` false. |
 | `XsltOptions.EnvironmentVariablesEnabled` | Off by default, so `environment-variable()` and `available-environment-variables()` answer nothing. On, they read the process's environment as it stood when the transformation first asked. |
 | `XsltOptions.CollationResolver` | Collations of the caller's own, as `XsltCollation` subclasses under URIs of the caller's choosing, for `xsl:sort`, `xsl:for-each-group`, `xsl:key`, `default-collation` and every function that takes a collation. The three collations the specification defines are provided without one (see *Collations* under Partly implemented for the UCA parameters); any other URI is `FOCH0002`. A caller's collation that makes no key cannot group, key or `distinct-values()`, and one that does not match substrings cannot `contains()`; both are `FOCH0004`. |

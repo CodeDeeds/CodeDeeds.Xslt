@@ -147,6 +147,12 @@ namespace CodeDeeds.Xslt
         /// <summary>The caller named a template to start at, and the stylesheet declares no such template.</summary>
         XTDE0040,
 
+        /// <summary>
+        /// The caller named a function to start at, and the stylesheet declares no public function of that
+        /// name and arity.
+        /// </summary>
+        XTDE0041,
+
         /// <summary>The caller named a mode to start in, and no template declares that mode.</summary>
         XTDE0045,
 

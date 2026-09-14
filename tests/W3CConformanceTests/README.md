@@ -134,7 +134,7 @@ had gone. The engine now hands a result back as a tree — `TransformXmlToTree` 
 driver puts an assertion the serialized text answered no to that tree as well. The two are one result in
 two renderings, and one the engine satisfies in either it satisfies. The assertion's own static context
 also gets the environment's schemas, since `schema-element(E)` in an assertion is a question that cannot
-be read without them. That took the run to **8,204 of 8,280, 99.1%**, both backends.
+be read without them. That took the run to **8,204 of 8,280, 99.1%**, both backends, and the named-function entry point below to **8,223 of 8,299**.
 
 Of the 76 left, 15 fail in the headline run too and have nothing to do with schema awareness. Four name
 schema files the suite does not contain. The rest are small individual rules.
@@ -171,6 +171,21 @@ the driver has no way to load an environment's schemas.
 **The list is an assertion about the engine that nothing checks.** It is worth re-reading whenever a feature
 lands, and the cost of not doing so is measured above: twelve defects that the suite had been ready to report
 for as long as the entry was wrong.
+
+## The third way in
+
+XSLT 3.0 defines three entry points and this engine had two: a source document to apply templates to, and
+a named template to call. The third calls a named stylesheet function with arguments the caller supplies
+and makes what it returns the whole result. Thirty-eight tests declared it and the driver skipped every
+one, which is not the same as their failing but is not a measurement either.
+
+It is `XsltOptions.InitialFunction` with `FunctionArguments` now. How many arguments there are is the
+arity the function is looked up by, so a stylesheet declaring one name at two arities is asked for the one
+the call fits; the function must be public, a package's private function being no way in; and a name with
+no public function of that arity is `XTDE0041`. The arguments are converted by the call itself, exactly as
+a call written in a stylesheet would be, so a value that will not convert raises the type error conversion
+raises rather than one of the entry point's own. Nineteen of the thirty-eight now run, and all nineteen
+pass; the rest are skipped for a second reason, most of them asserting the result as a typed sequence.
 
 ## Reading the result
 
@@ -439,7 +454,7 @@ The largest skip left is not a failure either: **6,518 are XSLT 3.0 tests**, rea
 
 ## What the 3.0 run says
 
-That opt-in run measures the XSLT 3.0 half at **7,651 of 7,689, 99.5%**, from 4,994 of 6,427 when it was first
+That opt-in run measures the XSLT 3.0 half at **7,670 of 7,708, 99.5%**, from 4,994 of 6,427 when it was first
 taken. It reads more tests than it did as well as passing more of them, which is the part worth reading twice:
 opening a feature the suite writes *around* stops whole files being skipped, so the denominator moves too — and
 the percentage can fall while the work goes forward, which is why the two numbers are always given together.

@@ -1151,8 +1151,19 @@ namespace CodeDeeds.Xslt.Compiler
                 return;
             }
 
-            XPathValue value = m_select.Evaluate(ref context);
+            WriteValue(m_select.Evaluate(ref context), runtime);
+        }
 
+        /// <summary>Writes a value into the current output, as xsl:sequence writes what it selected.</summary>
+        /// <remarks>
+        /// Also what a transformation started at a named function writes: the value the function returned
+        /// is the whole result, and it reaches the output the way an xsl:sequence at the top of a template
+        /// would have put it there.
+        /// </remarks>
+        /// <param name="value">The value to write.</param>
+        /// <param name="runtime">The transformation, whose current output it goes to.</param>
+        internal static void WriteValue(XPathValue value, XsltRuntime runtime)
+        {
             // Where the result is a sequence rather than markup, the value goes in as it is: this is the one
             // instruction that can contribute something other than nodes and text.
             if (runtime.Output.TryAppendValue(value))

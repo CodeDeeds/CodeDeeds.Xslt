@@ -3071,6 +3071,73 @@ namespace CodeDeeds.Xslt.Runtime
         }
 
         /// <summary>
+        /// Calls the function the caller named as the whole of the transformation, writing what it returns.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The arity is how many arguments were supplied, so a stylesheet declaring one function of a name
+        /// at two arities is asked for the one the call fits. A name with no function of that arity is
+        /// <c>XTDE0041</c>, and so is a function the package keeps to itself: what a caller outside the
+        /// package may start at is what the package said it offers, which is the rule a named template is
+        /// held to as well.
+        /// </para>
+        /// <para>
+        /// The arguments are converted to the types the declaration asks for by the call itself, exactly as
+        /// a call written in a stylesheet would be, so a value that will not convert raises the type error
+        /// conversion raises and not one of this entry point's own.
+        /// </para>
+        /// </remarks>
+        /// <param name="named">The function's name, as the caller wrote it.</param>
+        /// <param name="context">The transformation's context.</param>
+        private void InvokeInitialFunction(string named, ref DynamicContext context)
+        {
+            ExpandedName name = StylesheetParameters.ParseName(named);
+            IReadOnlyList<object?> supplied = m_options.FunctionArguments ?? Array.Empty<object?>();
+
+            if (!m_stylesheet.Functions.TryGetValue((name, supplied.Count), out UserFunction? function))
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTDE0041,
+                    $"The transformation was told to start at a function named '{named}' taking "
+                    + $"{supplied.Count} argument{(supplied.Count == 1 ? string.Empty : "s")}, and the "
+                    + "stylesheet declares none of that name and arity.");
+            }
+
+            if (function.Visibility is not (Visibility.Public or Visibility.Final))
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTDE0041,
+                    $"The function named '{named}' is not public, so it is not a way into this package. "
+                    + "Declare it visibility=\"public\" to make it an entry point.");
+            }
+
+            XPathValue[] arguments = new XPathValue[supplied.Count];
+
+            for (int i = 0; i < supplied.Count; i++)
+            {
+                arguments[i] = StylesheetParameters.Convert($"argument {i + 1}", supplied[i]);
+            }
+
+            // A function runs in temporary output state wherever it is called from (XSLT 3.0 §2.3.2), and
+            // that has to hold here too: what the body writes is the function's own result tree, and only
+            // the value it returns is the result of the transformation.
+            TemporaryDepth++;
+
+            XPathValue result;
+
+            try
+            {
+                result = InvokeFunction(function, arguments, ref context);
+            }
+            finally
+            {
+                TemporaryDepth--;
+            }
+
+            SequenceInstruction.WriteValue(result, this);
+        }
+
+        /// <summary>
         /// Runs the transformation, from wherever the caller said to start.
         /// </summary>
         /// <remarks>
@@ -3105,7 +3172,7 @@ namespace CodeDeeds.Xslt.Runtime
             // document is merely the global context item, handed over by the caller with nothing said about
             // it at all, and then every accumulator applies as it does to anything doc() reads. Before the
             // globals, because a global may be the first thing to ask.
-            if (HasSourceDocument && m_options.InitialTemplate is null)
+            if (HasSourceDocument && m_options.InitialTemplate is null && m_options.InitialFunction is null)
             {
                 MakeAvailable(
                     InputTree,
@@ -3168,6 +3235,16 @@ namespace CodeDeeds.Xslt.Runtime
                     XsltErrorCode.XTDE0047,
                     "The transformation was told to start at a named template and in a named mode, and "
                     + "XSLT 2.0 takes one way in or the other.");
+            }
+
+            // The third way in: a stylesheet function called with arguments the caller supplied, whose
+            // return value is the whole of the result. There is no context item inside a function, so there
+            // is nothing here for a pattern to be about and nothing for the body to read but its arguments.
+            if (m_options.InitialFunction is string calledName)
+            {
+                InvokeInitialFunction(calledName, ref context);
+                CheckPrincipalResult();
+                return;
             }
 
             if (m_options.InitialTemplate is string named)

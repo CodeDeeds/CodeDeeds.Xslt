@@ -131,14 +131,6 @@ namespace CodeDeeds.Xslt.Conformance
                 return new TestResult(Outcome.Skipped, "the test names several principal packages");
             }
 
-            // XSLT 3.0 has three ways in — a source document, a named template, a named function. The first
-            // two are entry points this engine offers; a test starting at a named function is skipped rather
-            // than approximated, which would answer a different question.
-            if (test.Element(Xslt30Catalog.Ns + "initial-function") is not null)
-            {
-                return new TestResult(Outcome.Skipped, "the test starts at a named function");
-            }
-
             Xslt30Environment? environment = ResolveEnvironment(testCase, testSet, out string? problem);
             if (problem is not null)
             {
@@ -211,8 +203,11 @@ namespace CodeDeeds.Xslt.Conformance
             // source document is exactly the error some tests are written to reach. One that brings its own
             // selection to apply them to is an initial match selection, which the engine takes as an
             // expression.
+            // And a named function is the third way in, which needs no source document and no mode: the
+            // value it returns is the whole result.
             bool named = test.Element(Xslt30Catalog.Ns + "initial-template") is not null
-                || test.Element(Xslt30Catalog.Ns + "initial-mode") is not null;
+                || test.Element(Xslt30Catalog.Ns + "initial-mode") is not null
+                || test.Element(Xslt30Catalog.Ns + "initial-function") is not null;
 
             if (source is null && !named && !startsItself && !expectsError)
             {
@@ -426,6 +421,8 @@ namespace CodeDeeds.Xslt.Conformance
 
                     InitialTemplate = EntryPoint(test, "initial-template"),
                     InitialMode = EntryPoint(test, "initial-mode"),
+                    InitialFunction = EntryPoint(test, "initial-function"),
+                    FunctionArguments = FunctionArgumentsOf(test),
 
                     // What templates are first applied to, where the test says: the initial-mode's own
                     // selection, or the environment's selection within the source document.
@@ -589,6 +586,29 @@ namespace CodeDeeds.Xslt.Conformance
             return uri is null ? name : $"{{{uri.NamespaceName}}}{name[(colon + 1)..]}";
         }
 
+
+        /// <summary>The arguments an initial-function entry point supplies, in order, or null for none.</summary>
+        /// <remarks>
+        /// Positional rather than named, a function having parameters in an order rather than by name, so
+        /// how many there are is also the arity the function is looked up by.
+        /// </remarks>
+        private IReadOnlyList<object?>? FunctionArgumentsOf(XElement test)
+        {
+            if (test.Element(Xslt30Catalog.Ns + "initial-function") is not XElement called)
+            {
+                return null;
+            }
+
+            List<object?> arguments = new();
+
+            foreach (XElement argument in called.Elements(Xslt30Catalog.Ns + "param"))
+            {
+                arguments.Add(Evaluate(argument));
+            }
+
+            return arguments;
+        }
+
         /// <summary>Reads one <c>param</c> declaration into the value the transformation binds it to.</summary>
         /// <remarks>
         /// The <c>select</c> is an XPath expression rather than a literal, so it is evaluated — by the same
@@ -618,6 +638,21 @@ namespace CodeDeeds.Xslt.Conformance
                 name = "{" + bound.NamespaceName + "}" + name[(colon + 1)..];
             }
 
+            parameters[name] = Evaluate(declaration);
+        }
+
+        /// <summary>Evaluates the <c>select</c> of a catalog declaration into the value it stands for.</summary>
+        /// <remarks>
+        /// Shared by the parameters a stylesheet is given and the arguments an initial-function call is
+        /// made with: both are XPath the catalog writes, evaluated against nothing.
+        /// </remarks>
+        private object? Evaluate(XElement declaration)
+        {
+            if ((string?)declaration.Attribute("select") is not string select)
+            {
+                return null;
+            }
+
             // A declared type is applied by constructing the value in it, which is what the engine would do
             // with a parameter it read itself: a test supplying 111 as an xs:string means the string.
             if ((string?)declaration.Attribute("as") is string declared
@@ -636,7 +671,7 @@ namespace CodeDeeds.Xslt.Conformance
                 staticContext.Names.BuildFingerprintMap(tree),
                 staticContext.Names);
 
-            parameters[name] = compiled.Evaluate(ref context);
+            return compiled.Evaluate(ref context);
         }
 
         /// <summary>Serves the suite's stylesheets and documents, addressed as URIs.</summary>

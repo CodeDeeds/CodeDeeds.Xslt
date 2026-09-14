@@ -497,6 +497,42 @@ namespace CodeDeeds.Xslt
         public string? InitialMatchSelection { get; init; }
 
         /// <summary>
+        /// Gets the name of a stylesheet function to call as the whole of the transformation, or
+        /// <see langword="null"/> to start in one of the other ways.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// XSLT 3.0's third way in, beside a source document and a named template. The function is called
+        /// with <see cref="FunctionArguments"/>, and what it returns is the result of the transformation.
+        /// There is no source document to match against and no context item inside the function, a function
+        /// having none of its own.
+        /// </para>
+        /// <para>
+        /// Written as the caller writes a parameter name: <c>local</c>, or <c>{uri}local</c> for a function
+        /// in a namespace. A stylesheet function is always in one, so the bare form names nothing. The
+        /// function must be public, a package's private function being no way into it, and the arity is the
+        /// number of arguments supplied: naming a function the stylesheet does not declare at that arity is
+        /// <c>XTDE0041</c>.
+        /// </para>
+        /// </remarks>
+        public string? InitialFunction { get; init; }
+
+        /// <summary>
+        /// Gets the arguments for <see cref="InitialFunction"/>, in order, or <see langword="null"/> for
+        /// none.
+        /// </summary>
+        /// <remarks>
+        /// Each takes the same kinds of value as <see cref="Parameters"/>: a string, a boolean, an integer
+        /// type, a <see cref="double"/>, <see cref="float"/> or <see cref="decimal"/>, an
+        /// <see cref="Model.XdmTree"/>, an <see cref="XPath.XPathValue"/>, or <see langword="null"/> for
+        /// the empty sequence. How many there are is the arity the function is looked up by, so supplying
+        /// the wrong number names a different function rather than mis-calling this one. Each is converted
+        /// to the type the declaration asks for as an ordinary call's argument is, and a value that will
+        /// not convert is the type error that conversion raises.
+        /// </remarks>
+        public IReadOnlyList<object?>? FunctionArguments { get; init; }
+
+        /// <summary>
         /// Returns a copy of these options with a different declaration setting.
         /// </summary>
         /// <param name="omitXmlDeclaration">The new value for <see cref="OmitXmlDeclaration"/>.</param>
