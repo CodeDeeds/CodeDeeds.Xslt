@@ -2743,7 +2743,10 @@ namespace CodeDeeds.Xslt.Compiler
             string kind)
         {
             string href = GetAttribute(element, "href")
-                ?? throw new XsltException($"An xsl:{kind} must have an href.");
+                ?? throw XsltErrors.Error(
+                    XsltErrorCode.XTSE0010,
+                    $"An xsl:{kind} must have an href. It is what says which module to read, and there is "
+                    + "nothing to read without it.");
 
             // A reference may name an element inside the document rather than the document itself, which
             // is how a stylesheet is embedded in something that is not one. The fragment is a bare name,
@@ -3133,7 +3136,8 @@ namespace CodeDeeds.Xslt.Compiler
 
                     if (ReadDeclarationFlag(child, "tunnel"))
                     {
-                        throw new XsltException(
+                        throw XsltErrors.Error(
+                            XsltErrorCode.XTSE0020,
                             $"The parameter '{parameterName}' of function "
                             + $"'{function.Name.LocalName}()' is declared tunnel=\"yes\". Only a template "
                             + "parameter can be a tunnel parameter; a function takes its arguments and "
@@ -4498,7 +4502,9 @@ namespace CodeDeeds.Xslt.Compiler
                 }
 
                 string character = GetAttribute(child, "character")
-                    ?? throw new XsltException("An xsl:output-character must have a 'character' attribute.");
+                    ?? throw XsltErrors.Error(
+                        XsltErrorCode.XTSE0010,
+                        "An xsl:output-character must have a 'character' attribute.");
 
                 string replacement = GetAttribute(child, "string")
                     ?? throw new XsltException("An xsl:output-character must have a 'string' attribute.");
@@ -10674,7 +10680,8 @@ namespace CodeDeeds.Xslt.Compiler
                     output.Add(CompileFallback(
                         element,
                         $"'xsl:{localName}' is not an instruction this engine implements. Give it an "
-                        + "xsl:fallback child to say what to do instead."));
+                        + "xsl:fallback child to say what to do instead.",
+                        XsltErrorCode.XTSE0010));
                     return;
             }
         }
@@ -12275,7 +12282,8 @@ namespace CodeDeeds.Xslt.Compiler
         private Expr RequireExpression(int element, string attributeName)
         {
             string text = GetAttribute(element, attributeName)
-                ?? throw new XsltException(
+                ?? throw XsltErrors.Error(
+                    XsltErrorCode.XTSE0010,
                     $"'xsl:{LocalNameOf(element)}' requires a '{attributeName}' attribute.");
 
             return ParseExpression(element, text);
@@ -12294,7 +12302,8 @@ namespace CodeDeeds.Xslt.Compiler
         private AttributeValueTemplate RequireAttributeValueTemplate(int element, string attributeName)
         {
             string text = GetAttribute(element, attributeName)
-                ?? throw new XsltException(
+                ?? throw XsltErrors.Error(
+                    XsltErrorCode.XTSE0010,
                     $"'xsl:{LocalNameOf(element)}' requires a '{attributeName}' attribute.");
 
             m_scopeElement = element;

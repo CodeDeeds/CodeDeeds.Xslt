@@ -151,5 +151,79 @@ namespace CodeDeeds.Xslt.UnitTests
             // And under 3.0 the placement is fine, so what is heard is that the module is not there.
             Assert.AreEqual("XTSE0165", Refuses(Late.Replace("\"2.0\"", "\"3.0\"", StringComparison.Ordinal)));
         }
+
+        [TestMethod]
+        public void ApplyingTemplatesToTheChildrenOfAnAtomicValueIsRefused()
+        {
+            // With no select, xsl:apply-templates processes the children of the context item. An atomic
+            // value has none, and reaching for them walked off the end of the node arrays.
+            string Walking(string body) =>
+                $"<xsl:stylesheet version=\"3.0\" {Xsl}><xsl:template match=\"/\">"
+                + "<xsl:for-each select=\"1 to 3\">" + body + "</xsl:for-each>"
+                + "</xsl:template></xsl:stylesheet>";
+
+            Assert.AreEqual("XTTE0510", Refuses(Walking("<xsl:apply-templates/>")));
+
+            // Sorting the children reaches them by a second route, and is held to the same rule.
+            Assert.AreEqual(
+                "XTTE0510",
+                Refuses(Walking(
+                    "<xsl:apply-templates><xsl:sort select=\".\"/></xsl:apply-templates>")));
+
+            // A node context item still works, which is what says the guard is about the kind of item and
+            // not about apply-templates having no select.
+            Assert.AreEqual(
+                "<out/>",
+                new Xslt(
+                    Sheet("<xsl:template match=\"doc\"><xsl:apply-templates/></xsl:template>"),
+                    new XsltOptions { OmitXmlDeclaration = true })
+                    .TransformXml("<doc/>"));
+        }
+
+        [TestMethod]
+        public void AMissingRequiredAttributeSaysWhichElementWantedIt()
+        {
+            Assert.AreEqual("XTSE0010", Refuses(Sheet("<xsl:include/>")));
+            Assert.AreEqual("XTSE0010", Refuses(Sheet("<xsl:import/>")));
+
+            Assert.AreEqual(
+                "XTSE0010",
+                Refuses(Sheet("<xsl:character-map name=\"m\"><xsl:output-character string=\"x\"/></xsl:character-map>")));
+
+        }
+
+        [TestMethod]
+        public void AnInstructionThisEngineHasNotGotIsRefusedWhenItIsReached()
+        {
+            // Under forwards-compatible processing a stylesheet may hold instructions from a later version,
+            // and each is an error only if reached without an xsl:fallback to stand in for it.
+            const string Later =
+                "<xsl:stylesheet version=\"22.0\" " + Xsl + ">"
+                + "<xsl:template match=\"/\"><out><xsl:banana/></out></xsl:template></xsl:stylesheet>";
+
+            Assert.AreEqual("XTSE0010", Refuses(Later));
+
+            // With an xsl:fallback it is not an error at all, and the fallback is what runs.
+            const string Guarded =
+                "<xsl:stylesheet version=\"22.0\" " + Xsl + ">"
+                + "<xsl:template match=\"/\"><out><xsl:banana><xsl:fallback>instead</xsl:fallback>"
+                + "</xsl:banana></out></xsl:template></xsl:stylesheet>";
+
+            Assert.AreEqual(
+                "<out>instead</out>",
+                new Xslt(Guarded, new XsltOptions { OmitXmlDeclaration = true }).TransformXml("<doc/>"));
+        }
+
+        [TestMethod]
+        public void ATunnelParameterOnAFunctionIsRefused()
+        {
+            // A function takes its arguments and nothing else, so tunnel="yes" on one of its parameters is
+            // a value the attribute may not take.
+            Assert.AreEqual(
+                "XTSE0020",
+                Refuses(Sheet(
+                    "<xsl:function name=\"f:x\" xmlns:f=\"urn:f\">"
+                    + "<xsl:param name=\"p\" tunnel=\"yes\"/><xsl:sequence select=\"$p\"/></xsl:function>")));
+        }
     }
 }

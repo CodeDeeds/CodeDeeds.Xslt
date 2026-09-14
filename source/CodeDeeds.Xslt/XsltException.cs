@@ -788,6 +788,12 @@ namespace CodeDeeds.Xslt
         /// <summary>The principal stylesheet module does not start with a stylesheet element.</summary>
         XTSE0150,
 
+        /// <summary>
+        /// An <c>xsl:apply-templates</c> with no <c>select</c> reached with a context item that is not a
+        /// node, and so has no children to process.
+        /// </summary>
+        XTTE0510,
+
         /// <summary>An <c>xsl:include</c> reaching a module that is already being read.</summary>
         XTSE0180,
 

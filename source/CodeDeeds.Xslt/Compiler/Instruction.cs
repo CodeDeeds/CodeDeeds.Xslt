@@ -1602,6 +1602,21 @@ namespace CodeDeeds.Xslt.Compiler
                 }
             }
 
+            // With no select the children of the context item are what is processed, so there has to be
+            // one and it has to be a node: an atomic value has no children to walk. Asked here rather
+            // than at each of the two ways of walking them, and before either reaches the tree with a
+            // node that is not there.
+            if (selected is null && context.Node < 0)
+            {
+                // No context item at all is its own error, which this asks for and reports.
+                context.RequireContextItem("xsl:apply-templates");
+
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTTE0510,
+                    "xsl:apply-templates with no select processes the children of the context item, and "
+                    + "the context item here is an atomic value rather than a node.");
+            }
+
             if (m_sortKeys.Length == 0)
             {
                 if (selected is null)

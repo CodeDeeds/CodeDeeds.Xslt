@@ -134,7 +134,7 @@ had gone. The engine now hands a result back as a tree — `TransformXmlToTree` 
 driver puts an assertion the serialized text answered no to that tree as well. The two are one result in
 two renderings, and one the engine satisfies in either it satisfies. The assertion's own static context
 also gets the environment's schemas, since `schema-element(E)` in an assertion is a question that cannot
-be read without them. That took the run to **8,204 of 8,280, 99.1%**, both backends, and the named-function entry point below to **8,223 of 8,299**, and the driver work after it to **8,345 of 8,430**, and the module-boundary fixes below to **8,352 of 8,430**, and the error codes after them to **8,440 of 8,518**.
+be read without them. That took the run to **8,204 of 8,280, 99.1%**, both backends, and the named-function entry point below to **8,223 of 8,299**, and the driver work after it to **8,345 of 8,430**, and the module-boundary fixes below to **8,352 of 8,430**, and the error codes after them to **8,449 of 8,527**.
 
 Of the 76 left, 15 fail in the headline run too and have nothing to do with schema awareness. Four name
 schema files the suite does not contain. The rest are small individual rules.
@@ -282,8 +282,18 @@ is a different question from what the library declared.
 carried no code. A code that is wrong is a code the engine chose for a reason, and the reason is what says
 which of the two is mistaken. Every fix above was found by reading that line.
 
-Eleven of the ninety-seven are left. Most are the suite naming two codes for one construct in two tests of
-different eras, which cannot be satisfied twice.
+**None of the ninety-seven are left**, in any of the three runs. The last nine came to four more sites and
+one defect. The defect: an `xsl:apply-templates` with no `select` reaches for the children of the context
+item, and where that item was an atomic value it walked off the end of the node arrays with an
+`IndexOutOfRangeException` rather than raising `XTTE0510`. It reached them by two routes, sorted and
+unsorted, and the guard is asked once before either. The four sites were a missing required attribute,
+which is `XTSE0010` wherever it is missing from; `tunnel="yes"` on a function parameter, which a function
+has no use for; and an instruction from a later version reached with no `xsl:fallback` to stand in for it.
+
+One test is worse off for it. `sequence-0132` wants `XTTE0570` for an `xsl:sequence` with content in both
+languages, and `sequence-0137` wants `XTSE0010` for the same thing in 2.0, where the `select` really was
+required. Three tests take the second reading and one takes the first, so the second is what the engine
+does and the first is recorded here.
 
 ## Reading the result
 
@@ -534,7 +544,7 @@ tree** for the substring a branch processes, there being no atomic context item 
 written; there is one now, and a path written in a branch no longer walks a tree that was never in the
 stylesheet.
 
-The largest clusters behind the current **99.4% of 5,615**, and no one cause dominates:
+The largest clusters behind the current **99.4% of 5,624**, and no one cause dominates:
 
 | | |
 |---|---|
@@ -552,7 +562,7 @@ The largest skip left is not a failure either: **6,518 are XSLT 3.0 tests**, rea
 
 ## What the 3.0 run says
 
-That opt-in run measures the XSLT 3.0 half at **7,880 of 7,916, 99.5%**, from 4,994 of 6,427 when it was first
+That opt-in run measures the XSLT 3.0 half at **7,889 of 7,925, 99.5%**, from 4,994 of 6,427 when it was first
 taken. It reads more tests than it did as well as passing more of them, which is the part worth reading twice:
 opening a feature the suite writes *around* stops whole files being skipped, so the denominator moves too — and
 the percentage can fall while the work goes forward, which is why the two numbers are always given together.
