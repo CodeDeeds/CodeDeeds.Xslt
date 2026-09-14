@@ -18,6 +18,22 @@ namespace CodeDeeds.Xslt.XPath
     /// same input give different answers on different machines. This engine already made that choice for
     /// <c>xsl:sort</c> without <c>lang</c>, and makes it again for the same reason.
     /// </para>
+    /// <para>
+    /// The year range is why <see cref="DateTime"/> is not stored outright either. XML Schema puts no bound
+    /// on the year: <c>-1999-05-31</c> and <c>654321-01-01</c> are both dates, and <see cref="DateTime"/>
+    /// begins at the common era and ends at 9999. What is stored instead is a <em>proxy</em> date whose year
+    /// stands in for the real one, together with the number of whole 400-year cycles between them. The
+    /// proleptic Gregorian calendar repeats exactly every 400 years — the leap rule does, and so does the
+    /// day of the week, 400 years being 146,097 days and 146,097 divisible by 7 — so the proxy has the real
+    /// value's month, day, time of day, day of week and day of year, and only its year is a stand-in. Every
+    /// reader of those fields can go on using <see cref="DateTime"/>; only the year has to be asked for.
+    /// </para>
+    /// <para>
+    /// Years are held <em>astronomically</em> — 0 is 1 BCE, −1 is 2 BCE — so that the timeline is continuous
+    /// and arithmetic across the era boundary is ordinary arithmetic. XML Schema 1.0 spells the same years
+    /// with no zero, 1 BCE being <c>-0001</c>, and that spelling is put on and taken off at the lexical
+    /// edge: <see cref="Year"/> and <see cref="ToString"/> answer in it, and nothing inside uses it.
+    /// </para>
     /// </remarks>
     public readonly struct XdmDateTime : IEquatable<XdmDateTime>
     {
@@ -26,10 +42,10 @@ namespace CodeDeeds.Xslt.XPath
         /// </summary>
         /// <remarks>
         /// Two ways of failing, and they are not the same complaint. <c>xs:date('2004-02-30')</c> names no
-        /// day and never will; <c>xs:date('-1999-05-31')</c> names one perfectly well and this engine
-        /// cannot hold it, <see cref="DateTime"/> starting at the common era. The first is a value outside
-        /// the type's lexical space, the second an overflow, and the specification gives them different
-        /// codes — <c>FORG0001</c> and <c>FODT0001</c> — precisely so a reader can tell a typo from a limit.
+        /// day and never will; <c>xs:date('-99999999999-05-31')</c> names one perfectly well and this engine
+        /// holds the year in an <see cref="int"/>. The first is a value outside the type's lexical space, the
+        /// second an overflow, and the specification gives them different codes — <c>FORG0001</c> and
+        /// <c>FODT0001</c> — precisely so a reader can tell a typo from a limit.
         /// </remarks>
         public enum Reading : byte
         {
@@ -43,18 +59,87 @@ namespace CodeDeeds.Xslt.XPath
             OutOfRange,
         }
 
+        /// <summary>A moment on the timeline, as a day and the tick within it.</summary>
+        /// <remarks>
+        /// Not a single count of ticks, which would overflow: the years this holds run to nine digits, and
+        /// that is more ticks than a <see cref="long"/> has. Kept apart, the day count needs twelve digits
+        /// and the tick within the day five.
+        /// </remarks>
+        internal readonly struct Moment : IComparable<Moment>, IEquatable<Moment>
+        {
+            internal Moment(long day, long tick)
+            {
+                Day = day;
+                Tick = tick;
+            }
+
+            /// <summary>The day, counted from 1970-01-01 in the proleptic Gregorian calendar.</summary>
+            internal long Day { get; }
+
+            /// <summary>The tick within that day, from zero to a day less one.</summary>
+            internal long Tick { get; }
+
+            /// <inheritdoc/>
+            public int CompareTo(Moment other)
+            {
+                int day = Day.CompareTo(other.Day);
+                return day != 0 ? day : Tick.CompareTo(other.Tick);
+            }
+
+            /// <inheritdoc/>
+            public bool Equals(Moment other) => Day == other.Day && Tick == other.Tick;
+
+            /// <inheritdoc/>
+            public override bool Equals(object? obj) => obj is Moment other && Equals(other);
+
+            /// <inheritdoc/>
+            public override int GetHashCode() => HashCode.Combine(Day, Tick);
+        }
+
         /// <summary>The timezone assumed for a value that carries none.</summary>
         public static readonly TimeSpan ImplicitTimezone = TimeSpan.Zero;
 
-        private XdmDateTime(DateTime value, TimeSpan? offset, XdmTypeCode type)
+        /// <summary>The largest year this engine holds, written without its sign.</summary>
+        /// <remarks>
+        /// Nine digits, which is inside what an <see cref="int"/> holds with room to spare for the cycle
+        /// arithmetic below. XML Schema puts no bound on the year at all, so there has to be one here, and
+        /// this is far past any year a document is going to carry.
+        /// </remarks>
+        public const int MaxYear = 999_999_999;
+
+        /// <summary>The whole of the proleptic Gregorian calendar's repetition, in years.</summary>
+        private const int Cycle = 400;
+
+        /// <summary>That same cycle in days, which is exactly how long 400 Gregorian years are.</summary>
+        private const long DaysPerCycle = 146_097L;
+
+        /// <summary>The first year of the window a proxy is moved into.</summary>
+        private const int ProxyFloor = 2000;
+
+        /// <summary>
+        /// The years a value is left standing in, its proxy being itself.
+        /// </summary>
+        /// <remarks>
+        /// Not the whole of what <see cref="DateTime"/> holds. A timezone reaches fourteen hours either way,
+        /// so a value at the very first or very last day of the range would push its own instant off the end
+        /// while being compared. Leaving a thousand years clear at each end costs nothing — almost every
+        /// date is inside it, and the ones that are not were being refused outright until now.
+        /// </remarks>
+        private const int SettledFloor = 1000;
+
+        /// <summary>The last year a value is left standing in.</summary>
+        private const int SettledCeiling = 8999;
+
+        private readonly DateTime m_proxy;
+        private readonly int m_cycles;
+
+        private XdmDateTime(DateTime proxy, int cycles, TimeSpan? offset, XdmTypeCode type)
         {
-            Value = value;
+            m_proxy = proxy;
+            m_cycles = cycles;
             Offset = offset;
             Type = type;
         }
-
-        /// <summary>Gets the local date and time, without reference to any timezone.</summary>
-        public DateTime Value { get; }
 
         /// <summary>Gets the timezone offset, or <see langword="null"/> when the value carries none.</summary>
         public TimeSpan? Offset { get; }
@@ -62,8 +147,30 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>Gets which of the three types this value is.</summary>
         public XdmTypeCode Type { get; }
 
+        /// <summary>
+        /// Gets the date and time whose month, day, time of day, day of week and day of year are this
+        /// value's own. Its <em>year</em> is a stand-in and means nothing; ask <see cref="Year"/> for that.
+        /// </summary>
+        internal DateTime Fields => m_proxy;
+
+        /// <summary>Gets the year as XML Schema 1.0 spells it, where −1 is 1 BCE and there is no zero.</summary>
+        public int Year => Spell(AstronomicalYear);
+
+        /// <summary>Gets the year counted continuously, where 0 is 1 BCE and −1 is 2 BCE.</summary>
+        private int AstronomicalYear => m_proxy.Year + (m_cycles * Cycle);
+
+        /// <summary>Gets the tick within the day, from zero to a day less one.</summary>
+        private long TickOfDay => m_proxy.Ticks % TimeSpan.TicksPerDay;
+
         /// <summary>Gets the instant this value denotes, using the implicit timezone if it carries none.</summary>
-        public DateTime Instant => Value - (Offset ?? ImplicitTimezone);
+        internal Moment Instant
+        {
+            get
+            {
+                long day = DaysFromCivil(AstronomicalYear, m_proxy.Month, m_proxy.Day);
+                return Normalize(day, TickOfDay - (Offset ?? ImplicitTimezone).Ticks);
+            }
+        }
 
         /// <summary>
         /// Returns this value seen from another timezone: the same instant, written differently.
@@ -74,18 +181,99 @@ namespace CodeDeeds.Xslt.XPath
             // A value that carries no timezone denotes no instant, so there is no instant to preserve: the
             // timezone is attached and the clock reading left alone. 2002-03-07 in −10:00 is
             // 2002-03-07−10:00 and not the previous day, which is what converting would have made of it.
-            return Offset is null
-                ? new XdmDateTime(Value, offset, Type)
-                : new XdmDateTime(Instant + offset, offset, Type);
+            if (Offset is null)
+            {
+                return new XdmDateTime(m_proxy, m_cycles, offset, Type);
+            }
+
+            Moment instant = Instant;
+            Moment moved = Normalize(instant.Day, instant.Tick + offset.Ticks);
+
+            // A value at the very edge of the range can be pushed over it by a timezone, which is an
+            // overflow in a date operation and not an argument this method would not take.
+            try
+            {
+                return At(moved, offset, Type);
+            }
+            catch (ArgumentOutOfRangeException error)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.FODT0001,
+                    $"Seeing '{this}' from a timezone of {offset} leaves the range this engine holds "
+                    + $"dates in, which runs to the year {MaxYear} either side of the common era.",
+                    error);
+            }
         }
 
         /// <summary>
-        /// Returns this value moved to another local time, keeping its type and timezone.
+        /// Returns this value moved by a number of months and a number of ticks, in that order.
         /// </summary>
-        /// <param name="value">The local date and time to move to.</param>
-        public XdmDateTime WithValue(DateTime value)
+        /// <remarks>
+        /// Months first and as months, because they are not all the same length: one month after 31 January
+        /// is 28 February, which no count of days would produce. A day past the end of the month it lands in
+        /// comes back to that month's last day, which is what the specification's own algorithm does.
+        /// </remarks>
+        /// <param name="months">The months to move by, which may be negative.</param>
+        /// <param name="ticks">The ticks to move by afterwards, which may be negative.</param>
+        internal XdmDateTime Moved(int months, long ticks)
         {
-            return new XdmDateTime(value, Offset, Type);
+            int year = AstronomicalYear;
+            int month = m_proxy.Month;
+            int day = m_proxy.Day;
+
+            if (months != 0)
+            {
+                long counted = ((long)year * 12) + (month - 1) + months;
+                long landed = FloorDiv(counted, 12);
+
+                if (landed < Spell(-MaxYear) || landed > MaxYear)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(months));
+                }
+
+                year = (int)landed;
+                month = (int)(counted - (landed * 12)) + 1;
+                day = Math.Min(day, DaysIn(year, month));
+            }
+
+            // The ticks are split into whole days and the remainder before being added, so that a duration
+            // of many years' worth of them cannot overflow the count it is added to.
+            long whole = FloorDiv(ticks, TimeSpan.TicksPerDay);
+            long rest = ticks - (whole * TimeSpan.TicksPerDay);
+
+            Moment moved = Normalize(DaysFromCivil(year, month, day) + whole, TickOfDay + rest);
+            return At(moved, Offset, Type);
+        }
+
+        /// <summary>A text that tells this value from every other, for a map key or a grouping key.</summary>
+        /// <remarks>
+        /// The day is carried beside the tick rather than folded into it. Two moments four hundred years
+        /// apart share a proxy, so a key taken from the proxy alone would put them in the same group.
+        /// A value with no timezone denotes no instant, so it is keyed by the clock it shows instead; the
+        /// prefix keeps the two kinds apart, one having an instant and the other not.
+        /// </remarks>
+        internal string Key
+        {
+            get
+            {
+                Moment moment = Offset is null
+                    ? new Moment(DaysFromCivil(AstronomicalYear, m_proxy.Month, m_proxy.Day), TickOfDay)
+                    : Instant;
+
+                return (Offset is null ? "-" : "+") + moment.Day + ":" + moment.Tick;
+            }
+        }
+
+        /// <summary>The seconds from one moment to another, which is what subtracting two of them gives.</summary>
+        /// <param name="from">The moment subtracted from.</param>
+        /// <param name="to">The moment subtracted.</param>
+        internal static decimal SecondsBetween(XdmDateTime from, XdmDateTime to)
+        {
+            Moment left = from.Instant;
+            Moment right = to.Instant;
+
+            return ((left.Day - right.Day) * 86_400m)
+                + ((left.Tick - right.Tick) / (decimal)TimeSpan.TicksPerSecond);
         }
 
         /// <summary>
@@ -100,14 +288,13 @@ namespace CodeDeeds.Xslt.XPath
         /// <see cref="XdmTypeCode.Time"/> or <see cref="XdmTypeCode.DateTime"/>.</param>
         public XdmDateTime As(XdmTypeCode type)
         {
-            DateTime value = type switch
+            if (type == XdmTypeCode.Time)
             {
-                XdmTypeCode.Date => Value.Date,
-                XdmTypeCode.Time => new DateTime(1972, 12, 31) + Value.TimeOfDay,
-                _ => Value,
-            };
+                return new XdmDateTime(new DateTime(1972, 12, 31).AddTicks(TickOfDay), 0, Offset, type);
+            }
 
-            return new XdmDateTime(value, Offset, type);
+            DateTime proxy = type == XdmTypeCode.Date ? m_proxy.Date : m_proxy;
+            return new XdmDateTime(proxy, m_cycles, Offset, type);
         }
 
         /// <summary>
@@ -119,7 +306,7 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         public XdmDateTime WithoutTimezone()
         {
-            return new XdmDateTime(Value, null, Type);
+            return new XdmDateTime(m_proxy, m_cycles, null, Type);
         }
 
         /// <summary>
@@ -155,13 +342,13 @@ namespace CodeDeeds.Xslt.XPath
             {
                 case XdmTypeCode.Date:
                 {
-                    Reading reading = ReadDate(span, out DateTime date);
+                    Reading reading = ReadDate(span, out int year, out int month, out int day);
                     if (reading != Reading.Value)
                     {
                         return reading;
                     }
 
-                    result = new XdmDateTime(date, offset, type);
+                    result = At(new Moment(DaysFromCivil(year, month, day), 0), offset, type);
                     return Reading.Value;
                 }
 
@@ -177,7 +364,7 @@ namespace CodeDeeds.Xslt.XPath
                     // no day to roll over into, so the hour comes back to zero where it stands. An
                     // xs:dateTime does have a day, and there 24:00:00 does move on to the next one.
                     result = new XdmDateTime(
-                        new DateTime(1972, 12, 31).AddTicks(time.Ticks % TimeSpan.TicksPerDay), offset, type);
+                        new DateTime(1972, 12, 31).AddTicks(time.Ticks % TimeSpan.TicksPerDay), 0, offset, type);
                     return Reading.Value;
                 }
 
@@ -189,7 +376,7 @@ namespace CodeDeeds.Xslt.XPath
                         return Reading.NotLexical;
                     }
 
-                    Reading reading = ReadDate(span[..t], out DateTime day);
+                    Reading reading = ReadDate(span[..t], out int year, out int month, out int day);
                     if (reading != Reading.Value)
                     {
                         return reading;
@@ -200,14 +387,17 @@ namespace CodeDeeds.Xslt.XPath
                         return Reading.NotLexical;
                     }
 
-                    // A day plus a time of day can pass the last moment DateTime holds, which the addition
-                    // would otherwise report as an argument being wrong rather than as the overflow it is.
-                    if (clock > DateTime.MaxValue - day)
+                    // 24:00:00 is the last day's own midnight written as the end of this one, so the day
+                    // rolls over. That can land on the first day of the year after the last one this holds,
+                    // which is the one way a well-formed dateTime still leaves the range.
+                    Moment moment = Normalize(DaysFromCivil(year, month, day), clock.Ticks);
+
+                    if (moment.Day > LastDay)
                     {
                         return Reading.OutOfRange;
                     }
 
-                    result = new XdmDateTime(day + clock, offset, type);
+                    result = At(moment, offset, type);
                     return Reading.Value;
                 }
             }
@@ -254,13 +444,15 @@ namespace CodeDeeds.Xslt.XPath
             return true;
         }
 
-        private static Reading ReadDate(ReadOnlySpan<char> span, out DateTime date)
+        /// <summary>Reads <c>YYYY-MM-DD</c>, answering the year counted continuously.</summary>
+        private static Reading ReadDate(ReadOnlySpan<char> span, out int year, out int month, out int day)
         {
-            date = default;
+            year = 0;
+            month = 0;
+            day = 0;
 
-            // A year before the common era is in the lexical space, and outside DateTime's range. The sign is
-            // taken off here so that the rest of the form is still checked: '-2004-13-01' names no month,
-            // whatever era it claims, and that is a different complaint from the era itself.
+            // The sign is taken off here so that the rest of the form is still checked: '-2004-13-01' names
+            // no month, whatever era it claims, and that is a different complaint from the era itself.
             bool negative = span.Length != 0 && span[0] == '-';
             if (negative)
             {
@@ -287,48 +479,45 @@ namespace CodeDeeds.Xslt.XPath
                 }
             }
 
-            if (!int.TryParse(span.Slice(firstDash + 1, 2), NumberStyles.None, CultureInfo.InvariantCulture, out int month)
-                || !int.TryParse(span.Slice(firstDash + 4, 2), NumberStyles.None, CultureInfo.InvariantCulture, out int day)
+            if (!int.TryParse(span.Slice(firstDash + 1, 2), NumberStyles.None, CultureInfo.InvariantCulture, out month)
+                || !int.TryParse(span.Slice(firstDash + 4, 2), NumberStyles.None, CultureInfo.InvariantCulture, out day)
                 || month is < 1 or > 12 || day < 1)
             {
                 return Reading.NotLexical;
             }
 
-            // A year of more digits than an int holds is still a year, and whether the day exists in it is
-            // the only thing left to decide. The leap rule turns on the year modulo 400, and 400 divides
-            // 10000, so the last four digits settle it however many there are.
-            if (!int.TryParse(years, NumberStyles.None, CultureInfo.InvariantCulture, out int year))
+            // A year of more digits than this holds is still a year, and whether the day exists in it is the
+            // only thing left to decide. The leap rule turns on the year modulo 400, and 400 divides 10000,
+            // so the last four digits settle it however many there are.
+            if (!int.TryParse(years, NumberStyles.None, CultureInfo.InvariantCulture, out int written)
+                || written > MaxYear)
             {
                 int tail = int.Parse(years[^4..], NumberStyles.None, CultureInfo.InvariantCulture);
-                return day > DaysIn(tail, month) ? Reading.NotLexical : Reading.OutOfRange;
+                int stand = negative ? Count(-tail) : tail;
+                return day > DaysIn(stand, month) ? Reading.NotLexical : Reading.OutOfRange;
             }
 
-            if (year == 0 || day > DaysIn(year, month))
+            // There is no year zero. XML Schema 1.0 counts 1 BCE as -0001, so 0000 names nothing at all.
+            if (written == 0)
             {
                 return Reading.NotLexical;
             }
 
-            if (negative || year > 9999)
-            {
-                return Reading.OutOfRange;
-            }
-
-            date = new DateTime(year, month, day);
-            return Reading.Value;
+            year = negative ? Count(-written) : written;
+            return day > DaysIn(year, month) ? Reading.NotLexical : Reading.Value;
         }
 
-        /// <summary>
-        /// The number of days in a month of a given year.
-        /// </summary>
+        /// <summary>The number of days in a month of a year counted continuously.</summary>
         /// <remarks>
         /// Its own arithmetic rather than <see cref="DateTime.DaysInMonth"/>, which refuses a year outside
-        /// the range it can hold — and a year outside that range is exactly the case this has to decide,
-        /// since whether the day exists says which of the two errors to raise.
+        /// the range it can hold — and years outside that range are most of what this has to decide about.
         /// </remarks>
         private static int DaysIn(int year, int month)
         {
             if (month == 2)
             {
+                // The remainder of a negative year is negative in C#, so the tests are written against zero
+                // rather than for equality with it: -400 is a leap year exactly as 400 is.
                 return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) ? 29 : 28;
             }
 
@@ -371,17 +560,113 @@ namespace CodeDeeds.Xslt.XPath
             return true;
         }
 
+        // ---- The calendar ------------------------------------------------------------------------------
+
+        /// <summary>The last day this holds, being the last day of the last year.</summary>
+        private static readonly long LastDay = DaysFromCivil(MaxYear, 12, 31);
+
+        /// <summary>The first day this holds, being the first day of the earliest year.</summary>
+        private static readonly long FirstDay = DaysFromCivil(Count(-MaxYear), 1, 1);
+
+        /// <summary>Turns a year counted continuously into the year XML Schema 1.0 spells, and back.</summary>
+        /// <remarks>
+        /// The two numberings agree from year 1 on and differ by one below it, XML Schema 1.0 having no year
+        /// zero: its −1 is 1 BCE, which counted continuously is 0. The mapping is its own inverse.
+        /// </remarks>
+        private static int Spell(int year) => year > 0 ? year : year - 1;
+
+        /// <summary>Turns the year XML Schema 1.0 spells into the year counted continuously.</summary>
+        private static int Count(int year) => year > 0 ? year : year + 1;
+
+        /// <summary>Divides, rounding towards negative infinity rather than towards zero.</summary>
+        private static long FloorDiv(long value, long divisor)
+        {
+            return (value >= 0 ? value : value - divisor + 1) / divisor;
+        }
+
+        /// <summary>Carries a tick count that has left its day into the day beside it.</summary>
+        private static Moment Normalize(long day, long tick)
+        {
+            long whole = FloorDiv(tick, TimeSpan.TicksPerDay);
+            return new Moment(day + whole, tick - (whole * TimeSpan.TicksPerDay));
+        }
+
+        /// <summary>
+        /// The day a date falls on, counted from 1970-01-01 in the proleptic Gregorian calendar.
+        /// </summary>
+        /// <remarks>
+        /// Howard Hinnant's algorithm, which shifts the year to start in March so that the leap day falls at
+        /// the end of it and the months before it keep fixed lengths. It is exact for every year an
+        /// <see cref="int"/> holds, which is the whole point of not going through <see cref="DateTime"/>.
+        /// </remarks>
+        private static long DaysFromCivil(int year, int month, int day)
+        {
+            long shifted = year - (month <= 2 ? 1L : 0L);
+            long era = FloorDiv(shifted, Cycle);
+            long yearOfEra = shifted - (era * Cycle);
+            long dayOfYear = (((153 * (month + (month > 2 ? -3 : 9))) + 2) / 5) + day - 1;
+            long dayOfEra = (yearOfEra * 365) + (yearOfEra / 4) - (yearOfEra / 100) + dayOfYear;
+
+            return (era * DaysPerCycle) + dayOfEra - 719_468L;
+        }
+
+        /// <summary>The date a day number falls on, which is the inverse of <see cref="DaysFromCivil"/>.</summary>
+        private static void CivilFromDays(long count, out int year, out int month, out int day)
+        {
+            long shifted = count + 719_468L;
+            long era = FloorDiv(shifted, DaysPerCycle);
+            long dayOfEra = shifted - (era * DaysPerCycle);
+            long yearOfEra = (dayOfEra - (dayOfEra / 1460) + (dayOfEra / 36524) - (dayOfEra / 146096)) / 365;
+            long dayOfYear = dayOfEra - ((365 * yearOfEra) + (yearOfEra / 4) - (yearOfEra / 100));
+            long marchMonth = ((5 * dayOfYear) + 2) / 153;
+
+            day = (int)(dayOfYear - (((153 * marchMonth) + 2) / 5) + 1);
+            month = (int)(marchMonth + (marchMonth < 10 ? 3 : -9));
+            year = (int)(yearOfEra + (era * Cycle) + (month <= 2 ? 1 : 0));
+        }
+
+        /// <summary>Builds a value at a moment, moving its year into the window a proxy stands in.</summary>
+        private static XdmDateTime At(Moment moment, TimeSpan? offset, XdmTypeCode type)
+        {
+            if (moment.Day < FirstDay || moment.Day > LastDay)
+            {
+                throw new ArgumentOutOfRangeException(nameof(moment));
+            }
+
+            CivilFromDays(moment.Day, out int year, out int month, out int day);
+
+            // A year already well inside what DateTime holds stands for itself, which is what almost every
+            // date does: the proxy is then the date, and nothing here has cost anything.
+            int cycles = year >= SettledFloor && year <= SettledCeiling
+                ? 0
+                : (int)FloorDiv(year - ProxyFloor, Cycle);
+
+            DateTime proxy = new DateTime(year - (cycles * Cycle), month, day).AddTicks(moment.Tick);
+            return new XdmDateTime(proxy, cycles, offset, type);
+        }
+
         /// <summary>Writes the canonical lexical form.</summary>
         public override string ToString()
         {
-            // The longest form is a dateTime with fractional seconds and an offset, at 33 characters, so this
-            // is written in one piece and never grows. Each part formats straight into the buffer rather than
-            // being rendered to a string and copied in.
+            // The longest form is a dateTime with a nine-digit year, fractional seconds and an offset, so
+            // this is written in one piece and never grows. Each part formats straight into the buffer
+            // rather than being rendered to a string and copied in.
             CharStringBuilder builder = new CharStringBuilder(stackalloc char[48]);
 
             if (Type != XdmTypeCode.Time)
             {
-                builder.Append(Value, "yyyy-MM-dd");
+                // The year is written from the value rather than by the proxy's own format, which would put
+                // the stand-in year on the page. Four digits at least, and its own sign.
+                int year = Year;
+
+                if (year < 0)
+                {
+                    builder.Append('-');
+                }
+
+                builder.Append(Math.Abs(year), "0000");
+                builder.Append('-');
+                builder.Append(m_proxy, "MM-dd");
             }
 
             if (Type == XdmTypeCode.DateTime)
@@ -391,11 +676,11 @@ namespace CodeDeeds.Xslt.XPath
 
             if (Type != XdmTypeCode.Date)
             {
-                builder.Append(Value, "HH:mm:ss");
+                builder.Append(m_proxy, "HH:mm:ss");
 
                 // Fractional seconds appear only when there are any, and never with trailing zeros. The
                 // format writes the point itself, there being no digit placeholder before it.
-                long fraction = Value.Ticks % TimeSpan.TicksPerSecond;
+                long fraction = m_proxy.Ticks % TimeSpan.TicksPerSecond;
                 if (fraction != 0)
                 {
                     builder.Append(fraction / (double)TimeSpan.TicksPerSecond, ".#######");
@@ -423,7 +708,7 @@ namespace CodeDeeds.Xslt.XPath
         public int CompareTo(XdmDateTime other) => Instant.CompareTo(other.Instant);
 
         /// <inheritdoc/>
-        public bool Equals(XdmDateTime other) => Instant == other.Instant && Type == other.Type;
+        public bool Equals(XdmDateTime other) => Instant.Equals(other.Instant) && Type == other.Type;
 
         /// <inheritdoc/>
         public override bool Equals(object? obj) => obj is XdmDateTime other && Equals(other);

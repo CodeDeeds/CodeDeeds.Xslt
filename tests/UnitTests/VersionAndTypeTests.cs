@@ -926,13 +926,12 @@ namespace CodeDeeds.Xslt.UnitTests
         [TestMethod]
         public void AMomentOutOfRangeIsAnOverflowRatherThanABadValue()
         {
-            // '2004-02-30' names no day and never will; '-1999-05-31' names one perfectly well and this
-            // engine cannot hold it. Different codes, so a limit is not read as a typo.
+            // '2004-02-30' names no day and never will; '1000000000-01-01' names one perfectly well and
+            // this engine holds the year in an int. Different codes, so a limit is not read as a typo.
             Assert.AreEqual("FORG0001", CodeOf("xs:date('2004-02-30')"));
             Assert.AreEqual("FORG0001", CodeOf("xs:date('02004-01-01')"));
-            Assert.AreEqual("FODT0001", CodeOf("xs:date('-1999-05-31')"));
-            Assert.AreEqual("FODT0001", CodeOf("xs:date('20000-01-01')"));
-            Assert.AreEqual("FODT0001", CodeOf("xs:dateTime('-0012-12-03T00:00:00-05:00')"));
+            Assert.AreEqual("FODT0001", CodeOf("xs:date('1000000000-01-01')"));
+            Assert.AreEqual("FODT0001", CodeOf("xs:date('-1000000000-01-01')"));
 
             // The rest of the form is still checked past the sign, so a bad month in a bad era is still a
             // bad month — and February keeps its length in a year too long to hold.
@@ -943,9 +942,9 @@ namespace CodeDeeds.Xslt.UnitTests
             // And moving a date off the end of the range is the same complaint, rather than the bare
             // ArgumentOutOfRangeException the framework raises about an argument it would not take.
             Assert.AreEqual(
-                "FODT0001", CodeOf("xs:date('9999-12-31') + xs:yearMonthDuration('P1Y')"));
+                "FODT0001", CodeOf("xs:date('999999999-12-31') + xs:yearMonthDuration('P1Y')"));
             Assert.AreEqual(
-                "FODT0001", CodeOf("xs:date('0001-01-01') - xs:dayTimeDuration('P1D')"));
+                "FODT0001", CodeOf("xs:date('-999999999-01-01') - xs:dayTimeDuration('P1D')"));
         }
 
         [TestMethod]

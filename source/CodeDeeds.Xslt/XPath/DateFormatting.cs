@@ -192,14 +192,20 @@ namespace CodeDeeds.Xslt.XPath
             ReadModifiers(marker[1..], specifier, out ReadOnlySpan<char> presentation,
                 out bool ordinal, out bool traditional, out bool presentationWritten, out int minimum, out int maximum);
 
-            DateTime instant = value.Value;
+            // Every field but the year: the proxy shares this value's month, day, time of day, day of
+            // week and day of year, and its year is a stand-in. The year is taken from the value.
+            DateTime instant = value.Fields;
+            int year = value.Year;
 
             switch (specifier)
             {
                 case 'Y':
                     Fit(
                         result,
-                        Number(YearWithin(instant.Year, presentation, maximum), presentation, ordinal, scratch, language),
+                        // The absolute value, which is what the specification asks the Y component
+                        // for: the era is a component of its own, and a year written with a sign would
+                        // also defeat the truncation to a number of digits that [Y,2-2] asks for.
+                        Number(YearWithin(Math.Abs(year), presentation, maximum), presentation, ordinal, scratch, language),
                         minimum,
                         maximum,
                         presentation);
@@ -280,7 +286,7 @@ namespace CodeDeeds.Xslt.XPath
                     return;
 
                 case 'E':
-                    result.Append(instant.Year > 0 ? names.AnnoDomini : names.BeforeChrist);
+                    result.Append(year > 0 ? names.AnnoDomini : names.BeforeChrist);
                     return;
 
                 case 'C':

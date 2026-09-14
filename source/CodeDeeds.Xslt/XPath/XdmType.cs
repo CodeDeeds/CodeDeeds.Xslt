@@ -615,7 +615,7 @@ namespace CodeDeeds.Xslt.XPath
                         XdmDateTime.Reading.OutOfRange => throw XsltErrors.Error(
                             XsltErrorCode.FODT0001,
                             $"'{lexical}' names a moment outside the range this engine holds dates in, "
-                            + "which is the common era up to the year 9999."),
+                            + $"which runs to the year {XdmDateTime.MaxYear} either side of the common era."),
 
                         _ => throw XsltErrors.Error(
                             XsltErrorCode.FORG0001, $"'{lexical}' is not a valid xs:{type.Name}."),
@@ -1019,9 +1019,9 @@ namespace CodeDeeds.Xslt.XPath
         /// </summary>
         private static XdmGregorian PartOf(XdmDateTime value, string name)
         {
-            int year = value.Value.Year;
-            int month = value.Value.Month;
-            int day = value.Value.Day;
+            int year = value.Year;
+            int month = value.Fields.Month;
+            int day = value.Fields.Day;
 
             return name switch
             {

@@ -1621,8 +1621,10 @@ namespace CodeDeeds.Xslt.XPath
                     $"'{date}' and '{time}' are in different timezones, so they name no single moment.");
             }
 
-            string lexical = date.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
-                + "T" + time.Value.ToString("HH:mm:ss.fffffff", CultureInfo.InvariantCulture)
+            // Written out and read back rather than assembled from parts, so that the year is spelled the
+            // one way it is spelled everywhere: a date before the common era carries its sign here too.
+            string lexical = date.WithoutTimezone().As(XdmTypeCode.Date)
+                + "T" + time.WithoutTimezone().As(XdmTypeCode.Time)
                 + Zone(date.Offset ?? time.Offset);
 
             return XdmDateTime.TryParse(lexical, XdmTypeCode.DateTime, out XdmDateTime combined)
@@ -1805,25 +1807,27 @@ namespace CodeDeeds.Xslt.XPath
             switch (component)
             {
                 case "year":
-                    return XPathValue.FromInteger(value.Value.Year);
+                    // The year as it is written, sign and all: year-from-dateTime of -1999-05-31 is
+                    // -1999, not the 1998 the timeline counts it as.
+                    return XPathValue.FromInteger(value.Year);
 
                 case "month":
-                    return XPathValue.FromInteger(value.Value.Month);
+                    return XPathValue.FromInteger(value.Fields.Month);
 
                 case "day":
-                    return XPathValue.FromInteger(value.Value.Day);
+                    return XPathValue.FromInteger(value.Fields.Day);
 
                 case "hours":
-                    return XPathValue.FromInteger(value.Value.Hour);
+                    return XPathValue.FromInteger(value.Fields.Hour);
 
                 case "minutes":
-                    return XPathValue.FromInteger(value.Value.Minute);
+                    return XPathValue.FromInteger(value.Fields.Minute);
 
                 case "seconds":
                 {
                     // Seconds are a decimal, since a time may carry a fraction of one.
-                    decimal seconds = value.Value.Second
-                        + ((decimal)(value.Value.Ticks % TimeSpan.TicksPerSecond) / TimeSpan.TicksPerSecond);
+                    decimal seconds = value.Fields.Second
+                        + ((decimal)(value.Fields.Ticks % TimeSpan.TicksPerSecond) / TimeSpan.TicksPerSecond);
 
                     return XPathValue.FromDecimal(seconds);
                 }

@@ -440,8 +440,8 @@ is the type's limit and `FORG0001`, while a value the type has and this engine c
 and gets an overflow code.
 
 `FODT0001` is a date or time whose form is good and whose value this engine cannot hold — `xs:date('2004-02-30')`
-names no day and never will, where `xs:date('-1999-05-31')` names one perfectly well and `System.DateTime`
-starts at the common era. The rest of the form is still checked past the sign, so a bad month in a bad era is
+names no day and never will, where `xs:date('1000000000-01-01')` names one perfectly well and the year is
+held in an `int`. The rest of the form is still checked past the sign, so a bad month in a bad era is
 still `FORG0001`, and February keeps its length in a year too long to hold. An out-of-range year is reported
 as one only where the rest of the text reads: `'99999999999999999999999999999-XX' cast as xs:gYearMonth` has
 a month that is no month, and naming the year's size would send a reader after the wrong half of it.
@@ -514,9 +514,9 @@ produces NaN and prints as one; 2.0 raises `FORG0001`, on the grounds that nothi
 of NaN either.
 
 Two ranges narrower than the specification's, both reported as such rather than passed off as bad values: a
-**year before the common era** or beyond 9999 is `FODT0001`, `System.DateTime` holding neither, and
-`xs:unsignedLong` above `long.MaxValue` is refused, being read through a signed 64-bit integer. An
-`xs:integer` is likewise 64 bits rather than unbounded, so `1000000000000000000000 to …` has no range.
+**year past 999,999,999** either side of the common era is `FODT0001`, and `xs:unsignedLong` above
+`long.MaxValue` is refused, being read through a signed 64-bit integer. An `xs:integer` is likewise 64
+bits rather than unbounded, so `1000000000000000000000 to …` has no range.
 
 Two consequences worth knowing. Under 2.0 a comparison no longer takes the node-list fast path, and the IL
 backend hands comparisons, arithmetic and negation to the interpreter, because which operation a pair of
@@ -763,10 +763,25 @@ constructors.
 The type errors and lexical spaces above are most of the distance from the 77.9% this said before them, and
 the casting table alone was 6 points of it. What remains, in order of size:
 
-**Negative years**, which `System.DateTime` does not reach: a date before the common era is refused where
-the suite asks for it to be held. That is 26 of the 158 failures — thirteen in `prod/CastExpr`, and the same
-thirteen asked the other way round in `prod/CastableExpr`, where `castable as` answers false because the cast
-throws.
+**Negative years** were the largest cluster here until the year stopped being a `System.DateTime`'s.
+A value is now held as a *proxy* date whose year stands in for the real one, the real year being a whole
+number of 400-year cycles away. The proleptic Gregorian calendar repeats exactly over 400 years — the
+leap rule does, and so does the day of the week, 146,097 days being divisible by seven — so the proxy
+carries the value's month, day, time of day, day of week and day of year, and only the year is asked for
+separately. Everything that reads those fields goes on reading a `DateTime`; what changed is the handful
+of places that read the year, compare two values, or move one by a duration.
+
+Inside, years are counted **continuously**: 0 is 1 BCE and −1 is 2 BCE, so the timeline has no gap and
+arithmetic across the era boundary is ordinary arithmetic. XML Schema 1.0 spells the same years with no
+zero, 1 BCE being `-0001`, and that spelling goes on and comes off at the lexical edge alone:
+`year-from-date(xs:date('-0002-06-01'))` is −2, and `xs:date('0001-01-01') - xs:date('-0001-12-31')` is
+one day rather than the year and a day a gap at zero would have made of it.
+
+One consequence worth naming, because it is a change and no test in either suite covers it: the leap rule
+applies to the year counted continuously and not to the digits written. `-0001-02-29` is a date, 1 BCE
+being year zero and zero divisible by 400; `-0004-02-29` is not, 4 BCE being year −3. That is the
+proleptic Gregorian reading of XML Schema 1.0's own convention, where reading the digits would have made
+4 BCE leap for looking like 4 CE.
 
 **`xs:integer` is sixty-four bits rather than unbounded**, which is what stops `1000000000000000000000 to …`
 being a range: 12 of `op/to`'s 14. The other two ask for a range of a million items, which is a second limit

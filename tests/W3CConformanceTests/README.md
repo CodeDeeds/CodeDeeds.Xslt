@@ -313,8 +313,8 @@ unrelated-looking reasons, while a reason shared across twenty files is nobody's
 
 ## The XPath run
 
-The 2.0 run stands at **14,053 of 14,177, 99.1%**, and the 3.1 run — `--31`, which takes in the tests marked
-`XP30+` and `XP31+` — at **17,429 of 17,599, 99.0%**. The second reads 3,422 more tests than the first and is
+The 2.0 run stands at **14,088 of 14,177, 99.4%**, and the 3.1 run — `--31`, which takes in the tests marked
+`XP30+` and `XP31+` — at **17,468 of 17,598, 99.3%**. The second reads 3,421 more tests than the first and is
 a tenth of a point behind it, which is the shape to expect: what it takes in is the newer half, and the
 newer half is where the work is.
 
@@ -322,19 +322,19 @@ newer half is where the work is.
 |---|---|---|
 | `math` | *3.0 and later* | 130 / 130, 100% |
 | `misc` | 31 / 31, 100% | 33 / 33, 100% |
-| `app` | 330 / 330, 100% | 772 / 777, 99.4% |
-| `prod` | 5,480 / 5,520, 99.3% | 5,906 / 5,949, 99.3% |
-| `fn` | 4,996 / 5,028, 99.4% | 6,974 / 7,034, 99.1% |
-| `op` | 3,147 / 3,195, 98.5% | 3,360 / 3,413, 98.4% |
+| `app` | 330 / 330, 100% | 774 / 777, 99.6% |
+| `prod` | 5,506 / 5,520, 99.7% | 5,932 / 5,949, 99.7% |
+| `fn` | 4,998 / 5,028, 99.4% | 6,978 / 7,033, 99.2% |
+| `op` | 3,154 / 3,195, 98.7% | 3,367 / 3,413, 98.7% |
 | `xs` | 69 / 73, 94.5% | 113 / 117, 96.6% |
 | `map` | *3.1* | 110 / 112, 98.2% |
 | `array` | *3.1* | 31 / 34, 91.2% |
 
-The failures cluster in few places. Casting is the largest on both runs — `prod/CastExpr` and
-`CastableExpr`, 26 between them on the 3.1 run — and nearly all of what is left there is dates before the
-common era, which `System.DateTime` does not reach. Then `op/to`, almost all of it the 64-bit `xs:integer`;
-and, on the 3.1 run only, `fn/parse-json`. The compatibility document keeps the account of what is behind
-each.
+The failures cluster in few places. `op/to` is the largest on both runs at 14, almost all of it the 64-bit
+`xs:integer`; then `fn/parse-json` on the 3.1 run only, and a scatter across the date and duration
+operators. Casting used to lead this list by some way, and dates before the common era were most of that;
+the year is no longer a `System.DateTime`'s, so both are gone. The compatibility document keeps the account
+of what is behind each.
 
 ### Which XML Schema version a test asks for
 

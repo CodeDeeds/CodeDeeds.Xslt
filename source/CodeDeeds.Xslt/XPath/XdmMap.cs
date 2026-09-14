@@ -296,11 +296,7 @@ namespace CodeDeeds.Xslt.XPath
 
             if (value.TypeCode is XdmTypeCode.Date or XdmTypeCode.Time or XdmTypeCode.DateTime)
             {
-                XdmDateTime moment = value.AsDateTime();
-
-                return moment.Offset is null
-                    ? (int)value.TypeCode + ":-" + moment.Value.Ticks
-                    : (int)value.TypeCode + ":+" + moment.Instant.Ticks;
+                return (int)value.TypeCode + ":" + value.AsDateTime().Key;
             }
 
             return (int)value.TypeCode + ":" + value.ToCanonicalString();

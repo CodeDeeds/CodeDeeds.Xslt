@@ -479,7 +479,7 @@ namespace CodeDeeds.Xslt.Compiler
 
                 case XdmTypeCode.DateTime or XdmTypeCode.Date or XdmTypeCode.Time:
                     return "d:" + ((int)key.TypeCode).ToString(System.Globalization.CultureInfo.InvariantCulture)
-                        + ":" + key.AsDateTime().Instant.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                        + ":" + key.AsDateTime().Key;
 
                 default:
                     return "t:" + ((int)key.TypeCode).ToString(System.Globalization.CultureInfo.InvariantCulture)

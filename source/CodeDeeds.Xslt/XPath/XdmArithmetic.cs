@@ -356,8 +356,7 @@ namespace CodeDeeds.Xslt.XPath
 
                 // The difference between two instants is a length of time, and never a number of months:
                 // months are not all the same length, so no whole number of them names the gap.
-                decimal seconds = (decimal)(left.AsDateTime().Instant - right.AsDateTime().Instant)
-                    .TotalSeconds;
+                decimal seconds = XdmDateTime.SecondsBetween(left.AsDateTime(), right.AsDateTime());
 
                 return XPathValue.FromDuration(
                     new XdmDuration(0, seconds, XdmTypeCode.DayTimeDuration));
@@ -561,9 +560,9 @@ namespace CodeDeeds.Xslt.XPath
         /// length: one month after 31 January is 28 February, which no count of days would produce.
         /// </para>
         /// <para>
-        /// A moment can be moved off the end of the range <see cref="DateTime"/> holds, and that is an
-        /// overflow in a date operation rather than an argument being wrong — which is all .NET can say
-        /// about it, and would reach the caller as a bare <see cref="ArgumentOutOfRangeException"/>.
+        /// A moment can be moved off the end of the range this engine holds, and that is an overflow in a
+        /// date operation rather than an argument being wrong — which is all the bare
+        /// <see cref="ArgumentOutOfRangeException"/> reaching the caller would say about it.
         /// </para>
         /// </remarks>
         private static XPathValue Shift(XdmDateTime value, XdmDuration duration, bool subtract)
@@ -575,18 +574,16 @@ namespace CodeDeeds.Xslt.XPath
                 // The seconds are moved as ticks rather than through AddSeconds, which takes a double:
                 // 446400.3 is not a double, and the 4464002999999 ticks it truncates to would put
                 // 00:12:00Z plus P5DT4H0M0.3S at 04:12:00.2999999Z rather than at the tenth it names.
-                DateTime moved = value.Value.AddMonths(sign * duration.Months);
-                moved = moved.AddTicks(
-                    (long)decimal.Round(sign * duration.Seconds * TimeSpan.TicksPerSecond));
-
-                return XPathValue.FromDateTime(value.WithValue(moved));
+                return XPathValue.FromDateTime(value.Moved(
+                    sign * duration.Months,
+                    (long)decimal.Round(sign * duration.Seconds * TimeSpan.TicksPerSecond)));
             }
             catch (Exception error) when (error is ArgumentOutOfRangeException or OverflowException)
             {
                 throw XsltErrors.Error(
                     XsltErrorCode.FODT0001,
                     $"Moving '{value}' by '{duration}' leaves the range this engine holds dates in, which "
-                    + "is the common era up to the year 9999.",
+                    + $"runs to the year {XdmDateTime.MaxYear} either side of the common era.",
                     error);
             }
         }
