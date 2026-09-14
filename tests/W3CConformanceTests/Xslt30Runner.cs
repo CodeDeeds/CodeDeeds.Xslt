@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Xml.Linq;
+using CodeDeeds.Xslt.Model;
 
 namespace CodeDeeds.Xslt.Conformance
 {
@@ -27,6 +28,24 @@ namespace CodeDeeds.Xslt.Conformance
 
         /// <summary>Why the test could not be presented, where something the driver cannot offer got in the way.</summary>
         public string? Unsupported { get; init; }
+
+        /// <summary>
+        /// The principal result as a tree, for an assertion that asks about it as a document rather than
+        /// as text; null where the run has no schemas in scope and the question cannot arise.
+        /// </summary>
+        /// <remarks>
+        /// A type annotation is in the tree and not in the text, so an assertion such as
+        /// <c>not(/* instance of element(*, xs:untyped))</c> cannot be answered from serialized output at
+        /// all: everything parsed back out of XML is untyped. Asked for only when an assertion wants it,
+        /// and it costs a second run of the transformation, which is why it is offered rather than kept.
+        /// </remarks>
+        public Func<XdmTree?>? Tree { get; init; }
+
+        /// <summary>
+        /// The schemas the environment declared, for an assertion that names one of their declarations:
+        /// schema-element(E) in an assertion is a question the assertion cannot ask without them.
+        /// </summary>
+        public System.Xml.Schema.XmlSchemaSet? Schemas { get; init; }
     }
 
     /// <summary>
@@ -283,6 +302,7 @@ namespace CodeDeeds.Xslt.Conformance
         {
             ResultCollector results = new ResultCollector();
             StringWriter output = new StringWriter();
+            Xslt? stylesheet = null;
 
             try
             {
@@ -419,7 +439,7 @@ namespace CodeDeeds.Xslt.Conformance
                 };
 
                 // The bytes, so that a stylesheet declaring itself ISO-8859-1 is read as one.
-                Xslt stylesheet = new Xslt(File.OpenRead(stylesheetPath), options);
+                stylesheet = new Xslt(File.OpenRead(stylesheetPath), options);
 
                 if (compileOnly)
                 {
@@ -465,12 +485,37 @@ namespace CodeDeeds.Xslt.Conformance
                 };
             }
 
+            // Offered rather than taken: a schema-aware run is the only one where the result can carry
+            // annotations, and the second transformation it costs is paid only by an assertion that asks.
+            Xslt compiled = stylesheet!;
+
             return new Transformation
             {
                 Result = output.ToString(),
                 ResultDocuments = results.Documents,
                 Directory = directory,
+                Tree = m_schemaAware && !compileOnly ? () => RunAgainIntoATree(compiled, source) : null,
+                Schemas = m_schemaAware ? EnvironmentSchemas(environment, directory) : null,
             };
+        }
+
+
+        /// <summary>
+        /// Runs the transformation a second time into a tree, for an assertion that asks about the result
+        /// as a document rather than as text.
+        /// </summary>
+        private static XdmTree? RunAgainIntoATree(Xslt stylesheet, string? source)
+        {
+            try
+            {
+                return source is null ? stylesheet.TransformToTree() : stylesheet.TransformXmlToTree(source);
+            }
+            catch (Exception)
+            {
+                // The first run produced a result, so this one should too; where it does not, the
+                // assertion falls back to the serialized text rather than the test failing on the driver.
+                return null;
+            }
         }
 
         /// <summary>

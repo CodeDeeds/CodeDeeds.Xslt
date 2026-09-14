@@ -255,6 +255,144 @@ namespace CodeDeeds.Xslt
         }
 
         /// <summary>
+        /// Transforms an XML document held in a string, giving the result as a tree rather than as
+        /// serialized text.
+        /// </summary>
+        /// <param name="xmlInput">The XML to transform.</param>
+        /// <returns>The document node of the result.</returns>
+        /// <remarks>
+        /// <para>
+        /// For a caller who wants to read the result, or to transform it again, rather than to write it
+        /// out. Serializing a result and parsing it back is lossy as well as slow: what a schema-aware
+        /// transformation validated carries the types validation settled on, and those are in the tree and
+        /// not in the text. A tree handed back here keeps them, and <see cref="TransformToTree(XdmTree)"/>
+        /// takes it again without a round trip through XML.
+        /// </para>
+        /// <para>
+        /// Nothing is serialized, so <c>xsl:output</c> is not consulted: the result is what the
+        /// transformation produced, with atomic values written into it as their string values, exactly as
+        /// the content of an <c>xsl:variable</c> becomes a tree. An <c>xsl:result-document</c> is a second
+        /// result and goes where it always goes, through
+        /// <see cref="XsltOptions.ResultResolver"/>.
+        /// </para>
+        /// </remarks>
+        public XdmTree TransformXmlToTree(string xmlInput)
+        {
+            ArgumentNullException.ThrowIfNull(xmlInput);
+            return RunToTree(ParseXmlText(xmlInput), hasSource: true, release: true);
+        }
+
+        /// <summary>
+        /// Transforms an XML document read from a reader, giving the result as a tree rather than as
+        /// serialized text.
+        /// </summary>
+        /// <param name="xmlInput">Where to read the XML from.</param>
+        /// <returns>The document node of the result.</returns>
+        public XdmTree TransformXmlToTree(TextReader xmlInput)
+        {
+            ArgumentNullException.ThrowIfNull(xmlInput);
+            return RunToTree(
+                XdmTreeBuilder.FromXmlPooled(
+                    xmlInput, m_stylesheet.Whitespace, m_options.EntityResolver, m_options.InputUri, InputValidation),
+                hasSource: true,
+                release: true);
+        }
+
+        /// <summary>
+        /// Transforms an XML document read from a stream, giving the result as a tree rather than as
+        /// serialized text.
+        /// </summary>
+        /// <param name="xmlInput">Where to read the XML from.</param>
+        /// <returns>The document node of the result.</returns>
+        public XdmTree TransformXmlToTree(Stream xmlInput)
+        {
+            ArgumentNullException.ThrowIfNull(xmlInput);
+            return RunToTree(
+                XdmTreeBuilder.FromXmlPooled(
+                    xmlInput, m_stylesheet.Whitespace, m_options.EntityResolver, m_options.InputUri, InputValidation),
+                hasSource: true,
+                release: true);
+        }
+
+        /// <summary>
+        /// Runs the stylesheet with no document to transform, starting at the template
+        /// <see cref="XsltOptions.InitialTemplate"/> names, and gives the result as a tree.
+        /// </summary>
+        /// <returns>The document node of the result.</returns>
+        /// <exception cref="XsltException">
+        /// No initial template was named, or the stylesheet declares no template of that name.
+        /// </exception>
+        public XdmTree TransformToTree()
+        {
+            return RunToTree(XdmTreeBuilder.Empty(), hasSource: false, release: true);
+        }
+
+        /// <summary>
+        /// Transforms a tree the caller already has, giving the result as a tree: one step of a chain of
+        /// transformations, with no serializing between them.
+        /// </summary>
+        /// <param name="input">The document to transform, which is left as it was.</param>
+        /// <returns>The document node of the result.</returns>
+        /// <remarks>
+        /// The tree is read and not altered, so one document may be transformed by several stylesheets, and
+        /// the annotations a validated tree carries are what this transformation sees — which is the point
+        /// of chaining without a round trip through text.
+        /// </remarks>
+        public XdmTree TransformToTree(XdmTree input)
+        {
+            ArgumentNullException.ThrowIfNull(input);
+            return RunToTree(input, hasSource: true, release: false);
+        }
+
+        /// <summary>Transforms a tree the caller already has, giving the result as serialized text.</summary>
+        /// <param name="input">The document to transform, which is left as it was.</param>
+        /// <returns>The result, serialized as <c>xsl:output</c> asks.</returns>
+        public string Transform(XdmTree input)
+        {
+            ArgumentNullException.ThrowIfNull(input);
+
+            using PooledStringWriter writer = new PooledStringWriter(4096);
+            TransformCore(input, writer, m_stylesheet.OutputSettings.With(m_options.OmitXmlDeclaration), hasSource: true);
+            return writer.Finish();
+        }
+
+        /// <summary>
+        /// Runs the transformation into a tree rather than into a writer.
+        /// </summary>
+        /// <param name="input">The document to transform.</param>
+        /// <param name="hasSource">Whether there is a source document, or the run starts at a named template.</param>
+        /// <param name="release">
+        /// Whether the input's storage may go back to the pool it came from, which it may when this
+        /// transformation parsed it and must not when the caller handed it over.
+        /// </param>
+        private XdmTree RunToTree(XdmTree input, bool hasSource, bool release)
+        {
+            try
+            {
+                ResultTreeBuilder output = new ResultTreeBuilder
+                {
+                    StandsForFinalOutput = true,
+                    BaseUri = m_options.InputUri,
+                };
+
+                XsltRuntime runtime = new XsltRuntime(m_stylesheet, input, output, m_options, hasSource)
+                {
+                    MessageWriter = m_options.MessageWriter,
+                };
+
+                runtime.Run();
+                return output.Finish();
+            }
+            finally
+            {
+                if (release)
+                {
+                    input.ReleaseStorage();
+                }
+            }
+        }
+
+        /// <summary>
         /// Parses XML held in a string, letting the tree size its storage from the text rather than grow
         /// into it.
         /// </summary>
@@ -444,8 +582,18 @@ namespace CodeDeeds.Xslt
             Transform(input, writer, settings);
         }
 
-        private void Transform(XdmTree input, TextWriter writer)
+        /// <summary>Transforms a tree the caller already has, writing the result.</summary>
+        /// <param name="input">The document to transform.</param>
+        /// <param name="writer">Where to write the result.</param>
+        /// <remarks>
+        /// The other end of <see cref="TransformXmlToTree(string)"/>: a tree that came out of one
+        /// transformation, or that the caller built, written out without being parsed from text first.
+        /// </remarks>
+        public void Transform(XdmTree input, TextWriter writer)
         {
+            ArgumentNullException.ThrowIfNull(input);
+            ArgumentNullException.ThrowIfNull(writer);
+
             Transform(input, writer, m_stylesheet.OutputSettings.With(m_options.OmitXmlDeclaration));
         }
 

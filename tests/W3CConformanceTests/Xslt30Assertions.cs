@@ -174,6 +174,7 @@ namespace CodeDeeds.Xslt.Conformance
             }
 
             XdmTree? tree = Parse(outcome.Result);
+
             if (tree is null)
             {
                 return Skip("the result is not well-formed XML, so an XPath assertion cannot be put to it");
@@ -184,7 +185,14 @@ namespace CodeDeeds.Xslt.Conformance
 
             // The catalog states 3.0 whichever subset is being run: the assertion is the suite's language,
             // not the stylesheet's, and reading it should not depend on which tests were selected.
-            XPathStaticContext staticContext = new XPathStaticContext { Version = XsltVersion.V30 };
+            // The environment's schemas, where the run has any: an assertion may name a declaration out
+            // of them, as validation-1601 asks whether the result is a document-node(schema-element(doc)),
+            // and without them the question is unreadable rather than false.
+            XPathStaticContext staticContext = new XPathStaticContext
+            {
+                Version = XsltVersion.V30,
+                Schemas = outcome.Schemas,
+            };
 
             foreach (XAttribute attribute in InScopeNamespaces(assertion))
             {
@@ -208,7 +216,16 @@ namespace CodeDeeds.Xslt.Conformance
                     Globals = new[] { XPathValue.FromNode(tree, XdmTree.RootNode) },
                 };
 
-                return compiled.Evaluate(ref context).ToBoolean()
+                if (compiled.Evaluate(ref context).ToBoolean())
+                {
+                    return Pass();
+                }
+
+                // Serialized output carries no type annotations, so an assertion about them is answered
+                // no by any reparse however the transformation went. Where the run can offer the result
+                // as the transformation left it, the question is put again to that. The two are the same
+                // result in two renderings, and one the engine satisfies in either it satisfies.
+                return AskTheResultTree(compiled, staticContext, outcome)
                     ? Pass()
                     : Fail($"assertion is false: {Flat(assertion.Value)}");
             }
@@ -220,6 +237,37 @@ namespace CodeDeeds.Xslt.Conformance
             }
         }
 
+
+        /// <summary>
+        /// Puts an assertion that the serialized result answered no to the result as a tree, which is
+        /// what carries the type annotations a schema-aware transformation settled.
+        /// </summary>
+        private static bool AskTheResultTree(Expr compiled, XPathStaticContext staticContext, Transformation outcome)
+        {
+            if (outcome.Tree?.Invoke() is not XdmTree tree)
+            {
+                return false;
+            }
+
+            tree.DocumentUri = outcome.ResultUri;
+
+            try
+            {
+                DynamicContext context = new DynamicContext(
+                    tree, XdmTree.RootNode, staticContext.Names.BuildFingerprintMap(tree), staticContext.Names)
+                {
+                    Globals = new[] { XPathValue.FromNode(tree, XdmTree.RootNode) },
+                };
+
+                return compiled.Evaluate(ref context).ToBoolean();
+            }
+            catch (XsltException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>Compares the result with the XML the test says it should be.</summary>
         private static TestResult CheckXml(XElement assertion, Transformation outcome)
         {
             if (outcome.Error is not null)

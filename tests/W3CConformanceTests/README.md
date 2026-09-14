@@ -127,10 +127,17 @@ a schema that is reached and is not a schema is `XTSE0220` rather than `XTSE0165
 failure is ordinary invalidity rather than the ID constraint's `XTTE1555`, and a document node validated
 against a named type is still held to its own shape.
 
-Of the 82 left, 15 fail in the headline run too and have nothing to do with schema awareness. Four name
-schema files the suite does not contain. Six assert that the result *document* carries type annotations,
-which this driver cannot answer: it hands the engine's serialized output to a fresh parse, and
-serialized XML carries no annotations. The rest are small individual rules.
+Of the 82 left, six asserted that the result *document* carries type annotations, which the driver could
+not answer: it handed the engine's serialized output to a fresh parse, and serialized XML carries no
+annotations, so `not(/* instance of element(*, xs:untyped))` was answered no however the transformation
+had gone. The engine now hands a result back as a tree — `TransformXmlToTree` and its siblings — and the
+driver puts an assertion the serialized text answered no to that tree as well. The two are one result in
+two renderings, and one the engine satisfies in either it satisfies. The assertion's own static context
+also gets the environment's schemas, since `schema-element(E)` in an assertion is a question that cannot
+be read without them. That took the run to **8,204 of 8,280, 99.1%**, both backends.
+
+Of the 76 left, 15 fail in the headline run too and have nothing to do with schema awareness. Four name
+schema files the suite does not contain. The rest are small individual rules.
 
 ## When the driver is behind the engine
 
