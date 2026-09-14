@@ -104,6 +104,26 @@ namespace CodeDeeds.Xslt.Compiler
         /// </remarks>
         public int ImportPrecedence { get; init; }
 
+        /// <summary>
+        /// The lowest precedence the module this template came from imported, which with
+        /// <see cref="ImportPrecedence"/> bounds what an <c>xsl:apply-imports</c> in its body reaches.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A rule overrides the rules its own module imported, and those alone: XSLT says
+        /// <c>xsl:apply-imports</c> processes the node with the rules that were imported into the module
+        /// containing the rule, which is not the same as every rule of lower precedence. A module
+        /// importing two others gives them both a lower precedence than its own, and neither of them has
+        /// imported the other, so an <c>xsl:apply-imports</c> in one must not reach the other.
+        /// </para>
+        /// <para>
+        /// A range of precedences says it because precedences are handed out depth-first: what a module
+        /// imported has the numbers between this and its own. Zero for a module that imported nothing,
+        /// where the range is empty and an <c>xsl:apply-imports</c> falls straight to the built-in rule.
+        /// </para>
+        /// </remarks>
+        public int ImportFloor { get; init; }
+
         /// <summary>The number of variable slots the template's frame requires.</summary>
         public int FrameSize { get; set; }
 
@@ -352,7 +372,8 @@ namespace CodeDeeds.Xslt.Compiler
             int mode,
             ref DynamicContext context,
             TemplateRule? after = null,
-            int maximumPrecedence = int.MaxValue)
+            int maximumPrecedence = int.MaxValue,
+            int minimumPrecedence = int.MinValue)
         {
             if (!m_byMode.TryGetValue(mode, out List<TemplateRule>? generic))
             {
@@ -364,7 +385,8 @@ namespace CodeDeeds.Xslt.Compiler
 
             foreach (TemplateRule rule in generic)
             {
-                if (rule.Template.ImportPrecedence >= maximumPrecedence)
+                if (rule.Template.ImportPrecedence >= maximumPrecedence
+                    || rule.Template.ImportPrecedence < minimumPrecedence)
                 {
                     continue;
                 }
@@ -416,9 +438,14 @@ namespace CodeDeeds.Xslt.Compiler
             return after.Template.ExplicitPriority is null || !ofTheSameTemplate;
         }
 
-        public TemplateRule? Find(int node, int mode, ref DynamicContext context, int maximumPrecedence)
+        public TemplateRule? Find(
+            int node,
+            int mode,
+            ref DynamicContext context,
+            int maximumPrecedence,
+            int minimumPrecedence = int.MinValue)
         {
-            return FindRule(node, mode, ref context, maximumPrecedence);
+            return FindRule(node, mode, ref context, maximumPrecedence, after: null, minimumPrecedence);
         }
 
         /// <summary>
@@ -464,7 +491,8 @@ namespace CodeDeeds.Xslt.Compiler
             int mode,
             ref DynamicContext context,
             int maximumPrecedence,
-            TemplateRule? after = null)
+            TemplateRule? after = null,
+            int minimumPrecedence = int.MinValue)
         {
             bool skipping = after is not null;
             bool passed = false;
@@ -493,7 +521,8 @@ namespace CodeDeeds.Xslt.Compiler
 
                 TemplateRule rule = takeNamed ? named![namedIndex++] : generic![genericIndex++];
 
-                if (rule.Template.ImportPrecedence >= maximumPrecedence)
+                if (rule.Template.ImportPrecedence >= maximumPrecedence
+                    || rule.Template.ImportPrecedence < minimumPrecedence)
                 {
                     continue;
                 }

@@ -17,13 +17,13 @@ Conformance as last measured, on 14 September 2026, against the W3C suites (see 
 
 | Suite | Result |
 | --- | --- |
-| XSLT 3.0 test suite, 3.0 processor | 7,785 of 7,828, 99.5% |
-| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,494 of 5,533, 99.3% |
+| XSLT 3.0 test suite, 3.0 processor | 7,792 of 7,828, 99.5% |
+| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,500 of 5,533, 99.4% |
 | QT3 (XPath), 3.1 | 98.9% of 17,615 |
 | QT3 (XPath), 2.0 | 99.0% of 14,188 |
 
 The 2,900 streaming tests are skipped by design. The 686 schema-aware tests are read only by the driver's
-opt-in `--schema` run, which stands at 8,345 of 8,430 (99.0%), the same on both backends; the figures
+opt-in `--schema` run, which stands at 8,352 of 8,430 (99.1%), the same on both backends; the figures
 above are the run without it.
 
 ## Not implemented, and not planned
@@ -53,6 +53,7 @@ above are the run without it.
 | Feature | Supported | Not supported |
 | --- | --- | --- |
 | Forwards-compatible processing | Instructions. A stylesheet claiming a version later than the processor may hold instructions the engine has never heard of; each falls back when reached, and is an error only if reached without an `xsl:fallback`. | Expression syntax from a later version. Every expression is parsed when the stylesheet is compiled, so one that is not XPath 3.1 is rejected even if never evaluated. |
+| Embedded stylesheet modules | An `xsl:import` or `xsl:include` may name a module by a fragment identifier, `href="doc.xml#name"`, which is how a stylesheet is carried in a document that is something else. The identifier is an attribute the document type declared as an ID, so a document with no declaration carries none. | A fragment written as anything but a bare name, which is `XTRE1160`. The `<?xml-stylesheet?>` processing instruction is not read, so a document saying which stylesheet transforms it says it to nobody here. |
 | Packages | `xsl:package`, `xsl:use-package`, `xsl:override`, `xsl:accept`, `xsl:expose`, visibility, `xsl:original`, version ranges on `package-version`, and the override signature check (`XTSE3070`). | A package used by two others that each override it differently, and re-exposing through `xsl:expose` a component a package accepted rather than declared. |
 | Number words (`xsl:number`, `format-integer`) | Cardinal and ordinal words in English, German, French, Spanish, Portuguese (Brazil, and Portugal as `pt-PT`), Italian, Norwegian (Bokmål, and Nynorsk as `nn`), Swedish and Danish, with the feminine of a Romance ordinal on request. Numbering by any Unicode decimal-digit family, Latin letters and Roman numerals. | Other languages fall back to English. Other numbering sequences, such as circled digits or Greek letters, fall back to decimal digits. |
 | Date and time names (`format-date` and relatives) | Month, day, era and am/pm names in the same languages; the Gregorian calendar as `AD` or `ISO`. Conventional abbreviations for English only; other languages are cut to the width asked for. | Other languages get English with the `[Language: en]` prefix the specification prescribes; other calendars get `[Calendar: AD]`. |

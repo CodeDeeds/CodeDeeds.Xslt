@@ -101,6 +101,10 @@ namespace CodeDeeds.Xslt.Runtime
         private UserFunction? m_tailFunction;
         private XPathValue[]? m_tailArguments;
         private int m_currentPrecedence = int.MaxValue;
+
+        // The lowest precedence the running rule may override, which is the lowest its own module
+        // imported. Below the whole stylesheet while no rule is running, so that nothing is excluded.
+        private int m_currentFloor = int.MinValue;
         private int m_currentMode = CompiledStylesheet.DefaultMode;
 
         /// <summary>The template now running, which xsl:next-match starts its search after.</summary>
@@ -1600,6 +1604,25 @@ namespace CodeDeeds.Xslt.Runtime
                 KeyDefinition.Identities(
                     value, key.Composite, identities, rule.BackwardsCompatible, KeyCollation(key.Index));
 
+                // A key some 1.0 module declared is filed by string value as well, so that a lookup
+                // written in 1.0 finds what a 2.0 declaration filed by value. Where the two spellings
+                // agree, which is every string value and every value of a key no 1.0 module declared,
+                // the second filing adds nothing and is dropped.
+                if (key.FilesByStringAsWell && !rule.BackwardsCompatible)
+                {
+                    int typed = identities.Count;
+                    KeyDefinition.Identities(
+                        value, key.Composite, identities, asStrings: true, KeyCollation(key.Index));
+
+                    for (int i = identities.Count - 1; i >= typed; i--)
+                    {
+                        if (identities.IndexOf(identities[i]) < typed)
+                        {
+                            identities.RemoveAt(i);
+                        }
+                    }
+                }
+
                 foreach (string identity in identities)
                 {
                     Add(index, identity, node);
@@ -2155,7 +2178,8 @@ namespace CodeDeeds.Xslt.Runtime
                         m_currentMode,
                         ref context,
                         after: null,
-                        m_currentPrecedence),
+                        m_currentPrecedence,
+                        m_currentFloor),
                     parameters,
                     ref context);
 
@@ -2163,7 +2187,7 @@ namespace CodeDeeds.Xslt.Runtime
             }
 
             TemplateRule? rule = IndexFor(context.Tree).Find(
-                context.Node, m_currentMode, ref context, m_currentPrecedence);
+                context.Node, m_currentMode, ref context, m_currentPrecedence, m_currentFloor);
 
             if (rule is null)
             {
@@ -2283,6 +2307,7 @@ namespace CodeDeeds.Xslt.Runtime
             // xsl:apply-imports needs to know which module the running template came from, and which mode it
             // is running in, neither of which is otherwise recoverable once execution is under way.
             int callerPrecedence = m_currentPrecedence;
+            int callerFloor = m_currentFloor;
             int callerMode = m_currentMode;
             TemplateRule? callerRule = m_currentRule;
             ParameterValue[] callerTunnel = m_tunnel;
@@ -2292,6 +2317,7 @@ namespace CodeDeeds.Xslt.Runtime
             if (asRule is not null)
             {
                 m_currentPrecedence = template.ImportPrecedence;
+                m_currentFloor = template.ImportFloor;
                 m_currentRule = asRule;
             }
 
@@ -2422,6 +2448,7 @@ namespace CodeDeeds.Xslt.Runtime
             finally
             {
                 m_currentPrecedence = callerPrecedence;
+                m_currentFloor = callerFloor;
                 m_currentMode = callerMode;
                 m_currentRule = callerRule;
                 m_tunnel = callerTunnel;

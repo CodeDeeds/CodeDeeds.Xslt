@@ -297,6 +297,12 @@ namespace CodeDeeds.Xslt.Compiler
         private int m_nextPrecedence;
 
         /// <summary>
+        /// The lowest precedence the module being read imported, which with its own precedence bounds
+        /// what an xsl:apply-imports written in it may reach.
+        /// </summary>
+        private int m_importFloor;
+
+        /// <summary>
         /// The schema components in scope, or null for a processor that is not schema-aware. Made with the
         /// caller's schemas, and grown by every xsl:import-schema.
         /// </summary>
@@ -1616,9 +1622,48 @@ namespace CodeDeeds.Xslt.Compiler
         /// matching <c>/</c> whose body is that element, which is how it is compiled here.
         /// </remarks>
         /// <param name="simplified">On return, whether the document element is a literal result element.</param>
-        private int FindStylesheetElement(out bool simplified)
+        private int FindStylesheetElement(out bool simplified) => FindStylesheetElement(-1, out simplified);
+
+        /// <summary>
+        /// Locates a module outermost element, starting at a given element rather than at the document.
+        /// </summary>
+        /// <param name="from">
+        /// The element the module starts at, for a reference that named one by a fragment identifier, or
+        /// -1 to take the document element as every ordinary reference does.
+        /// </param>
+        /// <param name="simplified">On return, whether that element is a literal result element.</param>
+        private int FindStylesheetElement(int from, out bool simplified)
         {
             simplified = false;
+
+            if (from >= 0)
+            {
+                // An embedded stylesheet: the module is an element inside a document that is something
+                // else, and what is around it is none of the stylesheet business. It is held to the same
+                // rules as a document element would be, since it is one as far as the module goes.
+                if (!IsXsltElement(from, out string embedded))
+                {
+                    if (GetXsltAttribute(from, "version") is not null)
+                    {
+                        simplified = true;
+                        return from;
+                    }
+
+                    throw new XsltException(
+                        $"The element a reference named by its identifier is '{LocalNameOf(from)}', but a "
+                        + "stylesheet module must start with xsl:stylesheet or xsl:transform, or be a "
+                        + "literal result element carrying an xsl:version attribute.");
+                }
+
+                if (embedded is not ("stylesheet" or "transform" or "package"))
+                {
+                    throw new XsltException(
+                        $"The element a reference named by its identifier is 'xsl:{embedded}', which is "
+                        + "not a stylesheet module.");
+                }
+
+                return from;
+            }
 
             // Deliberately not skipping what use-when excludes. On the stylesheet element itself the
             // attribute cannot remove the element — there would then be no stylesheet to have written it —
@@ -1689,10 +1734,17 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="tree">The module to read.</param>
         /// <param name="uri">The module's identity, or <see langword="null"/> for the supplied stylesheet.</param>
         /// <param name="loading">The modules currently being read, used to catch a reference cycle.</param>
-        private void LoadModule(XdmTree tree, string? uri, HashSet<string> loading)
+        private void LoadModule(XdmTree tree, string? uri, HashSet<string> loading, int from = -1)
         {
             List<(ModuleElement Source, string? Uri)> topLevel = new();
-            GatherTopLevel(tree, uri, topLevel, loading);
+            GatherTopLevel(tree, uri, topLevel, loading, from);
+
+            // The first precedence the imports of this module will be given. Precedences are handed out
+            // depth-first, and imports are followed before the importing module takes its own, so what a
+            // module imported -- directly or through those imports -- is exactly the precedences from
+            // here up to its own. That range is what an xsl:apply-imports inside it may reach: the rules
+            // it may override are the ones it imported, and not every rule that happens to be beneath it.
+            int floor = m_nextPrecedence;
 
             // Every module of a package, the included ones too, is compiled as part of that package. A body
             // compiled later has to know whose it is, and this is where that is known.
@@ -1779,6 +1831,8 @@ namespace CodeDeeds.Xslt.Compiler
             }
 
             int precedence = m_nextPrecedence++;
+            int outerFloor = m_importFloor;
+            m_importFloor = floor;
 
             foreach ((ModuleElement source, string? _) in topLevel)
             {
@@ -1795,6 +1849,8 @@ namespace CodeDeeds.Xslt.Compiler
 
                 DeclareTopLevelElement(source, precedence);
             }
+
+            m_importFloor = outerFloor;
         }
 
         /// <summary>
@@ -1840,12 +1896,13 @@ namespace CodeDeeds.Xslt.Compiler
             XdmTree tree,
             string? uri,
             List<(ModuleElement Source, string? Uri)> topLevel,
-            HashSet<string> loading)
+            HashSet<string> loading,
+            int from = -1)
         {
             m_tree = tree;
             m_hasShadowAttributes |= HasShadowAttributes(tree);
 
-            int stylesheetElement = FindStylesheetElement(out bool simplified);
+            int stylesheetElement = FindStylesheetElement(from, out bool simplified);
 
             if (m_stylesheetBaseUri is null)
             {
@@ -1933,10 +1990,11 @@ namespace CodeDeeds.Xslt.Compiler
                 {
                     m_scopeElement = child;
                     ValidateXsltElement(child, localName, XsltPlacement.Declaration);
-                    (XdmTree included, string includedUri) = ResolveModule(child, uri, loading, "include");
+                    (XdmTree included, string includedUri, int includedRoot) =
+                        ResolveModule(child, uri, loading, "include");
 
                     loading.Add(includedUri);
-                    GatherTopLevel(included, includedUri, topLevel, loading);
+                    GatherTopLevel(included, includedUri, topLevel, loading, includedRoot);
                     loading.Remove(includedUri);
 
                     m_tree = tree;
@@ -2253,7 +2311,12 @@ namespace CodeDeeds.Xslt.Compiler
         /// finished, which is the one comparison a declaration ever needs to make.
         /// </para>
         /// </remarks>
-        private void SettleStaticsOf(XdmTree tree, string? uri, HashSet<string> loading, XdmTree? includedIn)
+        private void SettleStaticsOf(
+            XdmTree tree,
+            string? uri,
+            HashSet<string> loading,
+            XdmTree? includedIn,
+            int from = -1)
         {
             XdmTree outer = m_tree;
             int scope = m_scopeElement;
@@ -2270,7 +2333,7 @@ namespace CodeDeeds.Xslt.Compiler
 
             try
             {
-                int root = FindStylesheetElement(out bool simplified);
+                int root = FindStylesheetElement(from, out bool simplified);
 
                 if (simplified || ExcludedByUseWhen(root))
                 {
@@ -2287,10 +2350,12 @@ namespace CodeDeeds.Xslt.Compiler
                     if (localName is "import" or "include")
                     {
                         m_scopeElement = child;
-                        (XdmTree module, string moduleUri) = ResolveModule(child, uri, loading, localName);
+                        (XdmTree module, string moduleUri, int moduleRoot) =
+                            ResolveModule(child, uri, loading, localName);
 
                         loading.Add(moduleUri);
-                        SettleStaticsOf(module, moduleUri, loading, localName == "include" ? tree : null);
+                        SettleStaticsOf(
+                            module, moduleUri, loading, localName == "include" ? tree : null, moduleRoot);
                         loading.Remove(moduleUri);
 
                         if (localName == "import")
@@ -2401,14 +2466,15 @@ namespace CodeDeeds.Xslt.Compiler
 
         private void LoadReferencedModule(int element, string? baseUri, HashSet<string> loading, string kind)
         {
-            (XdmTree imported, string importedUri) = ResolveModule(element, baseUri, loading, kind);
+            (XdmTree imported, string importedUri, int importedRoot) =
+                ResolveModule(element, baseUri, loading, kind);
 
             // What an xsl:import or xsl:include brings in is a stylesheet module. A package is not one: it
             // is a unit of its own, reached through xsl:use-package, and importing it would make its
             // declarations this package's at some precedence, which is not what a package is for.
             XdmTree outer = m_tree;
             m_tree = imported;
-            int outermost = FindStylesheetElement(out bool simplified);
+            int outermost = FindStylesheetElement(importedRoot, out bool simplified);
             bool isPackage = !simplified && IsXsltElement(outermost, out string root) && root == "package";
             m_tree = outer;
 
@@ -2426,7 +2492,7 @@ namespace CodeDeeds.Xslt.Compiler
 
             try
             {
-                LoadModule(imported, importedUri, loading);
+                LoadModule(imported, importedUri, loading, importedRoot);
             }
             finally
             {
@@ -2623,7 +2689,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// Resolves an <c>href</c> to a parsed module, refusing when no resolver was configured and when a
         /// reference would form a cycle.
         /// </summary>
-        private (XdmTree Tree, string Uri) ResolveModule(
+        private (XdmTree Tree, string Uri, int Root) ResolveModule(
             int element,
             string? baseUri,
             HashSet<string> loading,
@@ -2631,6 +2697,24 @@ namespace CodeDeeds.Xslt.Compiler
         {
             string href = GetAttribute(element, "href")
                 ?? throw new XsltException($"An xsl:{kind} must have an href.");
+
+            // A reference may name an element inside the document rather than the document itself, which
+            // is how a stylesheet is embedded in something that is not one. The fragment is a bare name,
+            // the identifier of the element to start at; the document is fetched by what is in front of it.
+            int hash = href.IndexOf('#', StringComparison.Ordinal);
+            string? fragment = hash < 0 ? null : href[(hash + 1)..];
+
+            if (fragment is not null)
+            {
+                if (!PackageVersion.IsNcName(fragment))
+                {
+                    throw new XsltException(
+                        $"An xsl:{kind} names a fragment of '{href[..hash]}' by a form this engine does "
+                        + "not follow: only a bare name, which names the element with that identifier.");
+                }
+
+                href = href[..hash];
+            }
 
             // What the reference resolves against is the base URI of the element that wrote it, not the
             // module as a whole: an xml:base above it moves it, and so does having been read out of an
@@ -2649,9 +2733,9 @@ namespace CodeDeeds.Xslt.Compiler
             // resolver reading from the network would otherwise fetch each module twice. The reference as
             // written, with what it resolves against, names one resource — a resolver answers the same
             // identity for the same stylesheet every time, which is what ResolvedResource asks of it.
-            string reference = string.Concat(baseUri, "\n", href);
+            string reference = string.Concat(baseUri, "\n", href, "\n", fragment);
 
-            if (m_references.TryGetValue(reference, out (XdmTree Tree, string Uri) known))
+            if (m_references.TryGetValue(reference, out (XdmTree Tree, string Uri, int Root) known))
             {
                 RequireNotBeingRead(loading, known.Uri, href);
                 return known;
@@ -2672,7 +2756,7 @@ namespace CodeDeeds.Xslt.Compiler
                     m_moduleCache[resolved.Uri] = tree;
                 }
 
-                known = (tree, resolved.Uri);
+                known = (tree, resolved.Uri, fragment is null ? -1 : NamedElement(tree, fragment, href, kind));
             }
             finally
             {
@@ -2681,6 +2765,29 @@ namespace CodeDeeds.Xslt.Compiler
 
             m_references[reference] = known;
             return known;
+        }
+
+
+        /// <summary>The element of a document carrying an identifier, for a reference that named one.</summary>
+        /// <remarks>
+        /// An identifier is an attribute the document type declared as an ID, so a document with no
+        /// declaration has no identifiers and nothing to find. That is why the suite embeds a stylesheet
+        /// under an internal subset saying which attribute is the ID.
+        /// </remarks>
+        /// <param name="tree">The document read.</param>
+        /// <param name="fragment">The identifier asked for.</param>
+        /// <param name="href">The reference as written, for the message.</param>
+        /// <param name="kind">Whether it was an import or an include, for the message.</param>
+        private static int NamedElement(XdmTree tree, string fragment, string href, string kind)
+        {
+            if (IdExpr.BuildIndex(tree).TryGetValue(fragment, out int element))
+            {
+                return element;
+            }
+
+            throw new XsltException(
+                $"An xsl:{kind} names '{fragment}' in '{href}', and nothing in that document carries "
+                + "that identifier.");
         }
 
         /// <summary>Refuses a reference to a module that is still being read above it, which is a cycle.</summary>
@@ -2699,7 +2806,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// <summary>
         /// What each reference resolved to, by the reference as written together with its base URI.
         /// </summary>
-        private readonly Dictionary<string, (XdmTree Tree, string Uri)> m_references = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, (XdmTree Tree, string Uri, int Root)> m_references = new(StringComparer.Ordinal);
 
         /// <summary>
         /// Records one top-level declaration, without compiling any bodies yet, so that later references to it
@@ -3038,6 +3145,7 @@ namespace CodeDeeds.Xslt.Compiler
             Template template = new Template(m_pendingTemplates.Count, patterns, null, null)
             {
                 ImportPrecedence = precedence,
+                ImportFloor = m_importFloor,
             };
 
             m_rules.Add(new TemplateRule(
@@ -3088,6 +3196,7 @@ namespace CodeDeeds.Xslt.Compiler
                 m_pendingTemplates.Count, Array.Empty<Pattern>(), templateName, priority)
             {
                 ImportPrecedence = precedence,
+                ImportFloor = m_importFloor,
                 Visibility = ReadVisibility(element),
                 ResultType = ReadDeclaredType(element),
             };
@@ -8406,8 +8515,18 @@ namespace CodeDeeds.Xslt.Compiler
                     continue;
                 }
 
-                (string attributePrefix, string attributeUri) = ApplyNamespaceAlias(
-                    names.GetPrefix(attributeNameCode), names.GetNamespaceUri(attributeFingerprint));
+                // An attribute written with no prefix is in no namespace, and there is nothing there to
+                // alias. An element written with no prefix is in the default namespace, which is a
+                // namespace an alias may name, so the two are not the same case: aliasing the default
+                // namespace moves <stylesheet version="1.0"/> to xsl:stylesheet and leaves the version
+                // attribute where it was written, which is what a stylesheet writing out a stylesheet
+                // means (W3C bug 30397).
+                string writtenPrefix = names.GetPrefix(attributeNameCode);
+                string writtenUri = names.GetNamespaceUri(attributeFingerprint);
+
+                (string attributePrefix, string attributeUri) = writtenUri.Length == 0
+                    ? (writtenPrefix, writtenUri)
+                    : ApplyNamespaceAlias(writtenPrefix, writtenUri);
 
                 attributes.Add(new LiteralAttribute(
                     attributePrefix,

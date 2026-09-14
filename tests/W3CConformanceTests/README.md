@@ -134,7 +134,7 @@ had gone. The engine now hands a result back as a tree — `TransformXmlToTree` 
 driver puts an assertion the serialized text answered no to that tree as well. The two are one result in
 two renderings, and one the engine satisfies in either it satisfies. The assertion's own static context
 also gets the environment's schemas, since `schema-element(E)` in an assertion is a question that cannot
-be read without them. That took the run to **8,204 of 8,280, 99.1%**, both backends, and the named-function entry point below to **8,223 of 8,299**, and the driver work after it to **8,345 of 8,430**.
+be read without them. That took the run to **8,204 of 8,280, 99.1%**, both backends, and the named-function entry point below to **8,223 of 8,299**, and the driver work after it to **8,345 of 8,430**, and the module-boundary fixes below to **8,352 of 8,430**.
 
 Of the 76 left, 15 fail in the headline run too and have nothing to do with schema awareness. Four name
 schema files the suite does not contain. The rest are small individual rules.
@@ -195,7 +195,8 @@ skipping 132 tests between them. Each turned out to be smaller than it looked.
 **A test naming several stylesheets** was 85 of them. It names one to run and the rest as modules it
 imports or includes, and those are files beside it that the suite resolver already serves by URI. All the
 driver had to settle was which to compile: the one the catalog does not mark `role="secondary"`. Of the 85,
-80 pass. The five that do not are five real gaps, and three more were found and fixed on the way there: an
+80 pass at once, and the five that did not are five real gaps, taken below. Three more were found and
+fixed on the way there: an
 `xsl:import` inside an external entity resolved against the module rather than against the entity it was
 read from, `doctype-system=""` wrote a document type declaration where erratum E31 says it takes one back,
 and `xsl:strip-space` and `xsl:preserve-space` were ranked by specificity without ranking by import
@@ -212,6 +213,41 @@ same assertions the catalog uses for the result, so the driver keeps each messag
 result's place. That found the messages themselves being flattened: a message is a document node built from
 the instruction's content, and an `xsl:message` writing an element means the element. They are serialized
 now, as every other processor presents them.
+
+## Where one module ends and another begins
+
+Running the tests that name several stylesheets left five failures, and they had one thing in common: each
+was about what a module may see of another module. None of them can arise in a stylesheet of one file,
+which is why they had gone unnoticed, and each was its own rule.
+
+**`xsl:apply-imports` reached too far.** The rules it considers are the ones imported into the module
+containing the rule that wrote it, and that is not the same as every rule of lower precedence. A module
+importing two others gives both a lower precedence than its own, and neither of them imported the other,
+so a rule in one must not override a rule in the other. Precedences are handed out depth-first, so what a
+module imported is the contiguous range from its first import to its own precedence; a rule now carries
+the bottom of that range as well as its own precedence, and the search is bounded at both ends.
+
+**`xsl:namespace-alias` moved attributes it should have left.** Aliasing the default namespace moves a
+literal result element written with no prefix, the default namespace being one an element can be in. An
+attribute written with no prefix is in no namespace at all, so there is nothing there to move: a
+stylesheet writing out a stylesheet means `version="1.0"` and not `xsl:version="1.0"`.
+
+**One key declared by a 1.0 module and a 2.0 module could only answer one of them.** The 1.0 declaration
+files a value as the string it spells and the 2.0 declaration files it as what it is, and a lookup asks
+the key one question. Which declaration answers depended on how it asked, and both ways of asking are
+entitled to an answer over the whole key. A key any 1.0 module declared is now filed both ways; the second
+filing costs nothing wherever the two spellings agree, which is every string value and every value of a
+key no 1.0 module declared.
+
+**A module could not be found inside a document that is not one.** An `xsl:import` or `xsl:include` may
+name an element by a fragment identifier rather than naming the document, which is how a stylesheet is
+carried in something else. The identifier is an attribute the document type declared as an ID, so the
+document says which attribute that is, and the module is compiled from that element rather than from the
+document element.
+
+Seven tests in all, the five and two that came with them: an `xsl:import` written after the templates it
+imports over, and a second `namespace-alias` case. The suites reach **7,792 of 7,828** at 3.0 on both
+backends, **5,500 of 5,533** at 2.0, and **8,352 of 8,430** schema-aware.
 
 ## Reading the result
 
@@ -462,7 +498,7 @@ tree** for the substring a branch processes, there being no atomic context item 
 written; there is one now, and a path written in a branch no longer walks a tree that was never in the
 stylesheet.
 
-The largest clusters behind the current **99.3% of 5,533**, and no one cause dominates:
+The largest clusters behind the current **99.4% of 5,533**, and no one cause dominates:
 
 | | |
 |---|---|
@@ -480,7 +516,7 @@ The largest skip left is not a failure either: **6,518 are XSLT 3.0 tests**, rea
 
 ## What the 3.0 run says
 
-That opt-in run measures the XSLT 3.0 half at **7,785 of 7,828, 99.5%**, from 4,994 of 6,427 when it was first
+That opt-in run measures the XSLT 3.0 half at **7,792 of 7,828, 99.5%**, from 4,994 of 6,427 when it was first
 taken. It reads more tests than it did as well as passing more of them, which is the part worth reading twice:
 opening a feature the suite writes *around* stops whole files being skipped, so the denominator moves too — and
 the percentage can fall while the work goes forward, which is why the two numbers are always given together.

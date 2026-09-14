@@ -92,6 +92,26 @@ namespace CodeDeeds.Xslt.Compiler
         public string? CollationUri { get; set; }
 
         /// <summary>
+        /// Whether any declaration of the key is in backwards-compatible mode, which makes every
+        /// declaration of it file its nodes under the string value as well as under the typed one.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Several modules may declare one key, and a 1.0 module and a 2.0 module may declare the same
+        /// one. The 1.0 declaration files a value as the string it spells and the 2.0 declaration files
+        /// it as what it is, so a lookup asking one question of the key would find one declaration and
+        /// not the other. Which it finds depends on how it asked: a lookup written in 1.0 asks by string
+        /// and one written in 2.0 asks by value, and both are entitled to an answer over the whole key.
+        /// </para>
+        /// <para>
+        /// So a key that any 1.0 module declared is filed both ways, and each kind of lookup finds what
+        /// it asked for. The second filing costs nothing where it would say the same thing as the first,
+        /// which is every value of a key no 1.0 module declared and every string value of any key.
+        /// </para>
+        /// </remarks>
+        public bool FilesByStringAsWell => Rules.Exists(rule => rule.BackwardsCompatible);
+
+        /// <summary>
         /// The identity a key value is filed and found under: what two values that are equal under
         /// <c>eq</c> share, and two that are not do not.
         /// </summary>

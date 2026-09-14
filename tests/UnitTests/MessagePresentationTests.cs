@@ -46,7 +46,7 @@ namespace CodeDeeds.Xslt.UnitTests
             IReadOnlyList<string> written = Messages(
                 "<xsl:message>first</xsl:message><xsl:message><x/></xsl:message><xsl:message>third</xsl:message>");
 
-            Assert.AreEqual(3, written.Count);
+            Assert.HasCount(3, written);
             Assert.AreEqual("first", written[0]);
             Assert.AreEqual("<x/>", written[1]);
             Assert.AreEqual("third", written[2]);
