@@ -45,6 +45,7 @@ above are the run without it.
 | Dates and times | Years 1 to 9999 of the common era. A negative year, or a year of five digits, is `FODT0001`. |
 | Recursion | A template or function call 2,000 levels deep, or one about to exhaust the stack, is refused as an error. A call in tail position is a loop and does not count. |
 | Entity expansion | Capped at ten million characters. |
+| Schema types in use | 65,534 at once, across the whole process. A value has room for a small number and not for a reference, so each type that annotates one is given a number out of a table that every stylesheet shares. The number is given back when the schema that defined the type is dropped, and stylesheets that share one `XmlSchemaSet` share its numbers, so the limit is on how many distinct types are in use at once rather than on how many have ever been read. |
 | Regular expressions | The XPath regular expression language, with `(?:…)` from 3.0. Lookaround, atomic groups, named groups, inline options and comments are refused as `FORX0002`, as the specification requires, even though .NET would read them. |
 
 ## Partly implemented

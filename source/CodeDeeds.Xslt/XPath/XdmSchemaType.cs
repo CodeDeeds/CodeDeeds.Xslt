@@ -117,8 +117,9 @@ namespace CodeDeeds.Xslt.XPath
     /// A value of a user-defined atomic type is held as its nearest built-in ancestor — an integer, a
     /// string, a date — and carries the type beside it, read by the type tests and by nothing else. Each
     /// type that annotates a value is given a small number for the purpose, since the value has room for a
-    /// number and not for a reference; the number is handed out on first use and kept for the life of the
-    /// process.
+    /// number and not for a reference. The number is handed out on first use and given back when the schema
+    /// that defined the type is dropped, so a process that compiles many schemas over its life does not run
+    /// out of numbers or hold every schema it ever read.
     /// </para>
     /// </remarks>
     internal sealed class XdmSchemaType
@@ -130,7 +131,8 @@ namespace CodeDeeds.Xslt.XPath
         // The types that have annotated a value or a node, by number. Read without a lock on every node
         // test over a typed tree, so the table is replaced rather than grown in place: a reader holding
         // the old one still finds every number it could have been handed.
-        private static XdmSchemaType?[] s_registered = new XdmSchemaType?[64];
+        private static WeakReference<XdmSchemaType>?[] s_registered = new WeakReference<XdmSchemaType>?[64];
+        private static readonly Queue<int> s_freed = new();
         private static int s_registeredCount = 1;
 
         private static XdmSchemaType? s_idType;
@@ -282,6 +284,20 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>
         /// The number a value annotated with this type carries, handed out on first use.
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A value has room for a number and not for a reference, so the table below is what turns the one
+        /// back into the other. It holds each type weakly: a schema set that has been dropped takes its
+        /// types with it, and the numbers they held are handed out again. Nothing that could still be
+        /// carrying such a number is alive by then — a value or an annotated tree is reachable only from a
+        /// transformation, which holds the compiled stylesheet, which holds the components that made the
+        /// wrapper, so the wrapper cannot be collected while a carrier of its number exists.
+        /// </para>
+        /// <para>
+        /// Sweeping is done only when the table is full, before it would otherwise grow, which keeps the
+        /// cost off the ordinary path: a run that annotates with a few hundred types never sweeps at all.
+        /// </para>
+        /// </remarks>
         /// <exception cref="XsltException">More types have annotated values than the number can tell apart.</exception>
         public ushort Id
         {
@@ -293,28 +309,63 @@ namespace CodeDeeds.Xslt.XPath
                     {
                         if (m_id == 0)
                         {
-                            if (s_registeredCount >= ushort.MaxValue)
-                            {
-                                throw new XsltException(
-                                    "More than 65,534 schema types have annotated values or nodes in this "
-                                    + "process, which is more than an annotation can tell apart.");
-                            }
-
-                            if (s_registeredCount == s_registered.Length)
-                            {
-                                XdmSchemaType?[] grown = new XdmSchemaType?[s_registered.Length * 2];
-                                Array.Copy(s_registered, grown, s_registered.Length);
-                                Volatile.Write(ref s_registered, grown);
-                            }
-
-                            s_registered[s_registeredCount] = this;
-                            m_id = (ushort)s_registeredCount;
-                            s_registeredCount++;
+                            m_id = Register(this);
                         }
                     }
                 }
 
                 return m_id;
+            }
+        }
+
+        /// <summary>Gives a type a number, reclaiming one from a collected type before taking a new one.</summary>
+        private static ushort Register(XdmSchemaType type)
+        {
+            if (s_freed.Count == 0 && s_registeredCount == s_registered.Length)
+            {
+                Sweep();
+            }
+
+            if (s_freed.Count != 0)
+            {
+                int reused = s_freed.Dequeue();
+                s_registered[reused] = new WeakReference<XdmSchemaType>(type);
+                return (ushort)reused;
+            }
+
+            if (s_registeredCount >= ushort.MaxValue)
+            {
+                throw new XsltException(
+                    "More than 65,534 schema types are annotating values or nodes in this process at once, "
+                    + "which is more than an annotation can tell apart. Sharing one XmlSchemaSet across the "
+                    + "stylesheets that use it keeps a schema's types to one set of numbers.");
+            }
+
+            if (s_registeredCount == s_registered.Length)
+            {
+                WeakReference<XdmSchemaType>?[] grown =
+                    new WeakReference<XdmSchemaType>?[Math.Min(s_registered.Length * 2, ushort.MaxValue)];
+
+                Array.Copy(s_registered, grown, s_registered.Length);
+                Volatile.Write(ref s_registered, grown);
+            }
+
+            s_registered[s_registeredCount] = new WeakReference<XdmSchemaType>(type);
+            return (ushort)s_registeredCount++;
+        }
+
+        /// <summary>Collects the numbers of types nothing holds any more. Called under the lock.</summary>
+        private static void Sweep()
+        {
+            WeakReference<XdmSchemaType>?[] table = s_registered;
+
+            for (int i = 1; i < s_registeredCount; i++)
+            {
+                if (table[i] is WeakReference<XdmSchemaType> entry && !entry.TryGetTarget(out _))
+                {
+                    table[i] = null;
+                    s_freed.Enqueue(i);
+                }
             }
         }
 
@@ -326,8 +377,12 @@ namespace CodeDeeds.Xslt.XPath
                 return null;
             }
 
-            XdmSchemaType?[] table = Volatile.Read(ref s_registered);
-            return id < table.Length ? table[id] : null;
+            WeakReference<XdmSchemaType>?[] table = Volatile.Read(ref s_registered);
+
+            return id < table.Length && table[id] is WeakReference<XdmSchemaType> entry
+                && entry.TryGetTarget(out XdmSchemaType? type)
+                ? type
+                : null;
         }
 
         /// <summary>

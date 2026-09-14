@@ -88,6 +88,10 @@ namespace CodeDeeds.Xslt.Model
         // allocated by the first annotation, so that a tree nothing validates pays nothing.
         private ushort[]? m_nodeType;
         private ushort[]? m_attributeType;
+
+        // What settled the annotations above, kept so the tree can keep it: the numbers in those arrays
+        // are read back through a table that holds each type weakly.
+        private object? m_schemaAnchor;
         private HashSet<int>? m_nilled;
 
         /// <summary>How many elements are open, the document node itself not counting as one.</summary>
@@ -1682,6 +1686,7 @@ namespace CodeDeeds.Xslt.Model
                 NodeTypes = m_nodeType,
                 AttributeTypes = m_attributeType,
                 NilledNodes = m_nilled,
+                SchemaAnchor = m_schemaAnchor,
                 IdElements = m_idElements,
                 IdrefElements = m_idrefElements,
             };
@@ -1715,6 +1720,8 @@ namespace CodeDeeds.Xslt.Model
         /// <returns>Whether the element's type admits elements and no text.</returns>
         private bool AnnotateElement(XmlReader reader, TreeValidation validation)
         {
+            m_schemaAnchor ??= validation;
+
             System.Xml.Schema.IXmlSchemaInfo? info = reader.SchemaInfo;
 
             if (info is null)

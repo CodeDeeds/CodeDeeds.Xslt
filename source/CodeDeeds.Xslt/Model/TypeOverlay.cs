@@ -16,6 +16,20 @@ namespace CodeDeeds.Xslt.Model
         private readonly Dictionary<int, ushort> m_types = new();
         private HashSet<int>? m_nilled;
 
+        /// <summary>Initializes an overlay over the components whose types it will record.</summary>
+        /// <param name="schemas">What holds those types, so a tree made from this overlay can hold it too.</param>
+        public TypeOverlay(object? schemas = null)
+        {
+            Schemas = schemas;
+        }
+
+        /// <summary>
+        /// What holds the types the numbers below stand for. A number is not a reference and the table
+        /// it is read back through holds each type weakly, so a tree carrying these annotations keeps
+        /// this alongside them.
+        /// </summary>
+        public object? Schemas { get; }
+
         /// <summary>Records the type a node was validated as; 0 records nothing.</summary>
         /// <param name="node">The node, an element or an attribute.</param>
         /// <param name="typeId">The type's number, from <c>XdmSchemaType.Id</c>.</param>

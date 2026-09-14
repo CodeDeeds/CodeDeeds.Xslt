@@ -300,6 +300,18 @@ namespace CodeDeeds.Xslt.Model
         }
 
         /// <summary>
+        /// What holds the schema the annotations above were settled against, so that the types their
+        /// numbers stand for outlive nothing this tree still needs; set by whatever validated it.
+        /// </summary>
+        /// <remarks>
+        /// A number is not a reference, and the table it is read back through holds each type weakly so
+        /// that a schema set nothing wants any more can be collected along with the numbers it spent.
+        /// This is the tree saying it still wants one. Null on every tree nothing validated, which is
+        /// almost all of them.
+        /// </remarks>
+        internal object? SchemaAnchor { get; init; }
+
+        /// <summary>
         /// Whether any node of this tree carries a type annotation, which only a validated tree does.
         /// </summary>
         /// <remarks>
@@ -394,11 +406,11 @@ namespace CodeDeeds.Xslt.Model
                 (nilled ??= new HashSet<int>()).Add(node);
             }
 
-            return Sibling(nodeTypes, attributeTypes, nilled);
+            return Sibling(nodeTypes, attributeTypes, nilled, types.Schemas);
         }
 
         /// <summary>A second tree over the same node arrays, carrying the annotations given and nothing else.</summary>
-        private XdmTree Sibling(ushort[]? nodeTypes, ushort[]? attributeTypes, HashSet<int>? nilled)
+        private XdmTree Sibling(ushort[]? nodeTypes, ushort[]? attributeTypes, HashSet<int>? nilled, object? anchor = null)
         {
             lock (m_namespaceNodeLock)
             {
@@ -438,6 +450,7 @@ namespace CodeDeeds.Xslt.Model
                     NodeTypes = nodeTypes,
                     AttributeTypes = attributeTypes,
                     NilledNodes = nilled,
+                    SchemaAnchor = anchor ?? SchemaAnchor,
                 };
             }
         }

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Xml;
 using System.Xml.Schema;
@@ -34,10 +35,32 @@ namespace CodeDeeds.Xslt.Compiler
         // once, wrapping the types a validated document turns out to hold, and two transformations must
         // not wrap one definition twice.
         private readonly object m_lock = new();
-        private readonly Dictionary<XmlSchemaType, XdmSchemaType> m_wrapped = new(ReferenceEqualityComparer.Instance);
         private readonly Dictionary<XmlQualifiedName, XdmSchemaDeclaration?> m_elements = new();
         private readonly Dictionary<XmlQualifiedName, XdmSchemaDeclaration?> m_attributes = new();
         private bool m_compiled;
+
+        /// <summary>
+        /// The wrapper for each compiled type, shared by every set of components in the process and held
+        /// only as long as the definition itself is.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A wrapper is a pure reading of its definition, so two stylesheets compiled over one
+        /// <see cref="XmlSchemaSet"/> should see one wrapper rather than two. Each wrapper that annotates a
+        /// value is given a number out of a table with room for 65,534, and a per-stylesheet cache spent a
+        /// fresh set of numbers on every compile — the same schema, compiled a few hundred times, would
+        /// exhaust them. Sharing by the identity of the definition spends them once.
+        /// </para>
+        /// <para>
+        /// Weak in its keys, so dropping a schema set drops its definitions, their wrappers and the numbers
+        /// they held. A caller who hands the same set to every stylesheet pays for its types once; one who
+        /// builds a set per compile pays again each time, and gets the memory back.
+        /// </para>
+        /// </remarks>
+        private static readonly ConditionalWeakTable<XmlSchemaType, XdmSchemaType> s_wrapped = new();
+
+        /// <summary>Guards <see cref="s_wrapped"/>, which is shared and written under recursion.</summary>
+        private static readonly object s_wrapLock = new();
 
         /// <summary>Initializes the components with what the caller supplied, if anything.</summary>
         /// <param name="supplied">Schemas the caller had already loaded, or null.</param>
@@ -353,9 +376,9 @@ namespace CodeDeeds.Xslt.Compiler
                 return builtIn;
             }
 
-            lock (m_lock)
+            lock (s_wrapLock)
             {
-                if (m_wrapped.TryGetValue(definition, out XdmSchemaType? known))
+                if (s_wrapped.TryGetValue(definition, out XdmSchemaType? known))
                 {
                     return known;
                 }
@@ -422,7 +445,7 @@ namespace CodeDeeds.Xslt.Compiler
                     SimpleContent = simpleContent,
                 };
 
-                m_wrapped[definition] = wrapped;
+                s_wrapped.AddOrUpdate(definition, wrapped);
                 return wrapped;
             }
         }

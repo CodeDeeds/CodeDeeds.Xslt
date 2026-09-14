@@ -115,7 +115,7 @@ namespace CodeDeeds.Xslt.Compiler
         public TypeOverlay ValidateElement(XdmTree tree, bool strict)
         {
             int element = FirstElement(tree);
-            return element < 0 ? new TypeOverlay() : ValidateFrom(tree, element, strict, identityConstraints: false);
+            return element < 0 ? new TypeOverlay(m_schemas) : ValidateFrom(tree, element, strict, identityConstraints: false);
         }
 
         /// <summary>
@@ -131,7 +131,7 @@ namespace CodeDeeds.Xslt.Compiler
             if (type is not null)
             {
                 return type.Definition is null
-                    ? new TypeOverlay()
+                    ? new TypeOverlay(m_schemas)
                     : Run(tree, element, type.Definition, strict: true, XsltErrorCode.XTTE1540, XsltErrorCode.XTTE1540, identityConstraints: false);
             }
 
@@ -155,7 +155,7 @@ namespace CodeDeeds.Xslt.Compiler
                     throw TreeValidation.Undeclared(uri, local);
                 }
 
-                return new TypeOverlay();
+                return new TypeOverlay(m_schemas);
             }
 
             return Run(tree, element, partial: null, strict, XsltErrorCode.XTTE1510, XsltErrorCode.XTTE1515, identityConstraints);
@@ -174,7 +174,7 @@ namespace CodeDeeds.Xslt.Compiler
 
             if (element < 0 || type.Definition is null)
             {
-                return new TypeOverlay();
+                return new TypeOverlay(m_schemas);
             }
 
             return Run(
@@ -246,7 +246,7 @@ namespace CodeDeeds.Xslt.Compiler
             XsltErrorCode laxInvalid,
             bool identityConstraints)
         {
-            TypeOverlay overlay = new TypeOverlay();
+            TypeOverlay overlay = new TypeOverlay(m_schemas);
             List<(bool Id, string Message)> problems = new();
 
             XmlNamespaceManager namespaces = new XmlNamespaceManager(m_set.NameTable);

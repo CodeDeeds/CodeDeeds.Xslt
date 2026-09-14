@@ -710,5 +710,141 @@ namespace CodeDeeds.Xslt.UnitTests
                     + "<xsl:template match=\"/\"><e xsl:validation=\"strict\"/></xsl:template></xsl:stylesheet>",
                     backend => Options(backend, schemaAware: false)));
         }
+
+        /// <summary>A schema in a namespace no other test uses, so its type numbers can be counted exactly.</summary>
+        private const string CountedSchema =
+            "<xs:schema targetNamespace=\"urn:counted\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+            + " xmlns:c=\"urn:counted\" elementFormDefault=\"qualified\">"
+            + "<xs:simpleType name=\"weight\"><xs:restriction base=\"xs:int\">"
+            + "<xs:minInclusive value=\"0\"/></xs:restriction></xs:simpleType>"
+            + "<xs:complexType name=\"boxType\"><xs:sequence>"
+            + "<xs:element name=\"label\" type=\"xs:string\"/></xs:sequence>"
+            + "<xs:attribute name=\"weight\" type=\"c:weight\"/></xs:complexType>"
+            + "<xs:element name=\"box\" type=\"c:boxType\"/>"
+            + "</xs:schema>";
+
+        [TestMethod]
+        public void TheTypeNumbersAreSpentOncePerSchemaAndGivenBack()
+        {
+            // Each type that annotates a value carries a number out of a table with room for 65,534, and the
+            // table is the whole process's. A stylesheet compiled again over the same schema must not spend a
+            // second set: a server compiling one stylesheet per request would otherwise exhaust them, and
+            // would hold every schema it had ever read for as long as it ran.
+            Assert.AreEqual(0, TypeNumbersHeldFor("urn:counted"), "no other test has used this namespace");
+
+            // The compiles happen in a frame of their own, so that the schema is out of reach by the time
+            // the last count is taken rather than held by a local nothing reads again.
+            (int afterTen, int afterTwenty) = SpendNumbersOverOneSchema();
+
+            Assert.IsGreaterThan(0, afterTen, "the compiles annotated with the schema's own types");
+
+            Assert.AreEqual(
+                afterTen,
+                afterTwenty,
+                "ten further compiles over the same schema spent no further numbers");
+
+            // And the numbers come back once the schema does not exist any more, which is what keeps a long
+            // run from filling the table with schemas nothing is using. The built-in types keep theirs,
+            // being made once and shared for the life of the process.
+            Assert.AreEqual(
+                0,
+                TypeNumbersHeldFor("urn:counted"),
+                "dropping the schema gave the numbers of its types back");
+        }
+
+        /// <summary>
+        /// Compiles one stylesheet twenty times over a single caller-supplied schema, counting the numbers
+        /// its types hold after ten and after twenty.
+        /// </summary>
+        private static (int AfterTen, int AfterTwenty) SpendNumbersOverOneSchema()
+        {
+            XmlSchemaSet shared = new XmlSchemaSet();
+            shared.Add(XmlSchema.Read(new StringReader(CountedSchema), null)!);
+            shared.Compile();
+
+            // The schema comes from the caller rather than an inline xsl:import-schema, so every compile
+            // reads the same compiled definitions and should see the same wrappers over them.
+            const string Sheet =
+                "<xsl:stylesheet version=\"3.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\""
+                + " xmlns:c=\"urn:counted\"><xsl:template match=\"/\"><out>"
+                + "<xsl:value-of select=\"/c:box/@weight + 1\"/>"
+                + "<xsl:value-of select=\"/c:box/@weight instance of attribute(*, c:weight)\"/>"
+                + "</out></xsl:template></xsl:stylesheet>";
+
+            const string Input = "<box xmlns=\"urn:counted\" weight=\"3\"><label>a</label></box>";
+
+            for (int i = 0; i < 10; i++)
+            {
+                new Xslt(Sheet, Options(XsltBackend.Interpreted, schemas: shared, validation: XsltValidation.Strict))
+                    .TransformXml(Input);
+            }
+
+            int afterTen = TypeNumbersHeldFor("urn:counted");
+
+            for (int i = 0; i < 10; i++)
+            {
+                new Xslt(Sheet, Options(XsltBackend.Interpreted, schemas: shared, validation: XsltValidation.Strict))
+                    .TransformXml(Input);
+            }
+
+            int afterTwenty = TypeNumbersHeldFor("urn:counted");
+
+            // Both counts are about a schema that is still in use, so it must not be collected before the
+            // second one is taken.
+            GC.KeepAlive(shared);
+            return (afterTen, afterTwenty);
+        }
+
+        /// <summary>
+        /// How many type numbers stand for a type of one namespace that still exists, read from the table
+        /// itself after a collection so that what has been dropped has actually gone.
+        /// </summary>
+        private static int TypeNumbersHeldFor(string namespaceUri)
+        {
+            // Several passes, because what is being asked about is a chain of weak links: dropping a schema
+            // set frees its definitions, freeing them clears the entries keyed on them, and only then do the
+            // wrappers those entries held become collectable.
+            for (int pass = 0; pass < 4; pass++)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+
+            GC.Collect();
+
+            Array table = (Array)typeof(Xslt).Assembly
+                .GetType("CodeDeeds.Xslt.XPath.XdmSchemaType")!
+                .GetField("s_registered", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!
+                .GetValue(null)!;
+
+            int held = 0;
+
+            foreach (object? entry in table)
+            {
+                if (entry is null)
+                {
+                    continue;
+                }
+
+                object?[] target = new object?[1];
+
+                if (!(bool)entry.GetType().GetMethod("TryGetTarget")!.Invoke(entry, target)!)
+                {
+                    continue;
+                }
+
+                object type = target[0]!;
+
+                if (string.Equals(
+                    (string?)type.GetType().GetProperty("NamespaceUri")!.GetValue(type),
+                    namespaceUri,
+                    StringComparison.Ordinal))
+                {
+                    held++;
+                }
+            }
+
+            return held;
+        }
     }
 }

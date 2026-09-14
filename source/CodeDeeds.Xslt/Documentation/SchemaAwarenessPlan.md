@@ -392,10 +392,20 @@ feed it.
   `HasTypeAnnotations` read in front of each fast path and nothing else.
 - **`XPathValue` shape.** Settled in phase 1: a two-byte type number in the struct's padding rather
   than a reference, so nothing grew. The number is handed out from a process-wide registry, which a
-  node annotation reads without a lock; the registry holds every type that has annotated a value or a
-  node for the life of the process, so a process compiling schema-aware stylesheets without end grows
-  it without end, and 65,534 is the ceiling. A stylesheet's types are registered once per compile, not
-  per document, so an ordinary process never approaches it.
+  node annotation reads without a lock. **Closed.** The registry held every type that had ever
+  annotated a value for the life of the process, so a process compiling schema-aware stylesheets
+  without end grew it without end towards the 65,534 ceiling, holding every schema it had ever read
+  along the way. Measured at about three numbers a compile for a schema of five types, which is a few
+  hundred compiles of a real schema before the ceiling. Two changes close it. The wrapper for a
+  compiled type is now shared by every set of components in the process, keyed weakly on the definition
+  itself, so stylesheets that share one `XmlSchemaSet` share its numbers and a repeated compile spends
+  none. And the registry holds each type weakly, sweeping for numbers to hand out again only when the
+  table would otherwise grow, so a schema nothing is using any more takes its numbers with it. The
+  ceiling is now on how many distinct types are in use at once rather than on how many have ever been
+  read. What makes reuse safe is that nothing can be carrying a number whose type has been collected: a
+  value or an annotated tree is reachable only from a transformation, which holds the compiled
+  stylesheet, which holds the components that made the wrapper — and a tree carries a reference to that
+  alongside its annotations, so the rule holds for a tree handed out on its own if one ever is.
 - **Which documents are validated.** `InputValidation` is one setting for the whole transformation,
   where the suite declares validation per source: an environment validating its principal source
   strictly and reading an unvalidated secondary one through `doc()` is judged wrong by two tests
