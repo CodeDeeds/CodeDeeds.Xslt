@@ -822,15 +822,32 @@ namespace CodeDeeds.Xslt.XPath
                         : XPathComparison.General(other, set, m_operator, m_version, Comparing);
                 }
 
+                bool typed = tree.HasTypeAnnotations;
+
                 for (int i = 0; i < nodes.Count; i++)
                 {
-                    XPathValue atom = XPathValue.FromUntypedAtomic(tree.StringValueOf(nodes[i]));
+                    // In a validated tree a node's typed value is what its type says, and may be several
+                    // values, each of which is asked; in any other it is the text, untyped.
+                    XPathValue atom = typed
+                        ? XdmSequence.TypedValueOf(tree, nodes[i])
+                        : XPathValue.FromUntypedAtomic(tree.StringValueOf(nodes[i]));
 
-                    bool holds = nodesOnLeft
-                        ? XdmComparison.Pair(atom, other, m_operator, Comparing)
-                        : XdmComparison.Pair(other, atom, m_operator, Comparing);
+                    if (atom.Kind == XPathValueKind.Sequence)
+                    {
+                        XdmSequence several = atom.AsSequence();
 
-                    if (holds)
+                        for (int j = 0; j < several.Count; j++)
+                        {
+                            if (Holds(several[j], other, nodesOnLeft))
+                            {
+                                return true;
+                            }
+                        }
+
+                        continue;
+                    }
+
+                    if (Holds(atom, other, nodesOnLeft))
                     {
                         return true;
                     }
@@ -842,6 +859,14 @@ namespace CodeDeeds.Xslt.XPath
             {
                 NodeListPool.Return(nodes);
             }
+        }
+
+        /// <summary>Whether one atomized node compares as asked against the other operand.</summary>
+        private bool Holds(XPathValue atom, XPathValue other, bool nodesOnLeft)
+        {
+            return nodesOnLeft
+                ? XdmComparison.Pair(atom, other, m_operator, Comparing)
+                : XdmComparison.Pair(other, atom, m_operator, Comparing);
         }
 
         internal override void Emit(EmitContext context)

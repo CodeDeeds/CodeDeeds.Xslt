@@ -23,7 +23,7 @@ namespace CodeDeeds.Xslt.Conformance
         /// <summary>Whether the tests listed in full are the skipped ones rather than the failed ones.</summary>
         public static bool ListSkips { get; set; }
 
-        public static int Run(string[] args, XsltVersion version, XsltBackend backend)
+        public static int Run(string[] args, XsltVersion version, XsltBackend backend, bool schemaAware = false)
         {
             string? root = Locate(args.Length > 0 ? args[0] : null);
 
@@ -42,7 +42,7 @@ namespace CodeDeeds.Xslt.Conformance
             }
 
             Xslt30Catalog catalog = Xslt30Catalog.Load(root);
-            Xslt30Runner runner = new Xslt30Runner(catalog, version, backend);
+            Xslt30Runner runner = new Xslt30Runner(catalog, version, backend, schemaAware);
 
             int passed = 0;
             int failed = 0;

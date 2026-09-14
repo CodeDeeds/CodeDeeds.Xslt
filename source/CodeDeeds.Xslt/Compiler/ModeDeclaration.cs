@@ -45,8 +45,14 @@ namespace CodeDeeds.Xslt.Compiler
     /// Whether two rules of one precedence and priority both matching a node is <c>XTDE0540</c> rather than
     /// the later one winning, which is <c>on-multiple-match="fail"</c>.
     /// </param>
+    /// <param name="Typed">
+    /// What the mode says of the nodes templates are applied to in it: true for <c>typed="yes"</c>,
+    /// <c>strict</c> or <c>lax</c>, which admit typed nodes alone (<c>XTTE3100</c>); false for
+    /// <c>typed="no"</c>, which admits untyped nodes alone (<c>XTTE3110</c>); null for
+    /// <c>unspecified</c> or nothing said, which admits both.
+    /// </param>
     internal readonly record struct ModeDeclaration(
-        OnNoMatch OnNoMatch, bool WarnOnNoMatch, bool FailOnMultipleMatch = false, bool Typed = false)
+        OnNoMatch OnNoMatch, bool WarnOnNoMatch, bool FailOnMultipleMatch = false, bool? Typed = null)
     {
         /// <summary>The rules a mode follows when the stylesheet says nothing about it.</summary>
         public static ModeDeclaration Default => new ModeDeclaration(OnNoMatch.TextOnlyCopy, false);

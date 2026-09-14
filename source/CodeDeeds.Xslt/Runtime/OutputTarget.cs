@@ -92,6 +92,50 @@ namespace CodeDeeds.Xslt.Runtime
         public abstract void WriteAttribute(string prefix, string namespaceUri, string localName, string value);
 
         /// <summary>
+        /// Adds an attribute carrying the type validation settled on, which a target building a tree
+        /// records and a target writing text has no use for.
+        /// </summary>
+        /// <param name="prefix">The prefix, or an empty string.</param>
+        /// <param name="namespaceUri">The namespace URI, or an empty string.</param>
+        /// <param name="localName">The local part of the name.</param>
+        /// <param name="value">The attribute's value.</param>
+        /// <param name="typeId">The type's number, from <c>XdmSchemaType.Id</c>, or 0 for untyped.</param>
+        internal virtual void WriteAttribute(string prefix, string namespaceUri, string localName, string value, ushort typeId)
+        {
+            WriteAttribute(prefix, namespaceUri, localName, value);
+
+            if (typeId != 0)
+            {
+                AnnotateAttribute(typeId);
+            }
+        }
+
+        /// <summary>
+        /// Annotates the element most recently started with the type validation settled on it, and
+        /// whether it is nilled. Nothing, for a target that writes text rather than building a tree.
+        /// </summary>
+        /// <param name="typeId">The type's number, from <c>XdmSchemaType.Id</c>, or 0 for untyped.</param>
+        /// <param name="nilled">Whether the element is nilled.</param>
+        internal virtual void AnnotateElement(ushort typeId, bool nilled)
+        {
+        }
+
+        /// <summary>Annotates the attribute most recently written with the type validation settled on it.</summary>
+        /// <param name="typeId">The type's number, from <c>XdmSchemaType.Id</c>, or 0 for untyped.</param>
+        internal virtual void AnnotateAttribute(ushort typeId)
+        {
+        }
+
+        /// <summary>
+        /// Marks the element most recently started as one whose content is untyped, which is what
+        /// <c>validation="strip"</c> asks: whatever annotations are written inside it, until it ends, are
+        /// dropped (XSLT 3.0 §27.4).
+        /// </summary>
+        internal virtual void StripContent()
+        {
+        }
+
+        /// <summary>
         /// Declares a namespace on the element currently being started.
         /// </summary>
         /// <remarks>
@@ -392,6 +436,54 @@ namespace CodeDeeds.Xslt.Runtime
         }
 
         /// <inheritdoc/>
+        internal override void WriteAttribute(string prefix, string namespaceUri, string localName, string value, ushort typeId)
+        {
+            if (m_depth != 0 || typeId == 0)
+            {
+                base.WriteAttribute(prefix, namespaceUri, localName, value, typeId);
+                return;
+            }
+
+            // A parentless attribute is a tree of its own, annotated before the tree is finished.
+            FlushText();
+
+            XdmTreeBuilder builder = new XdmTreeBuilder();
+            int node = builder.AddParentlessAttribute(prefix, namespaceUri, localName, value);
+            builder.AnnotateLastAttribute(typeId);
+            m_items.Add(XPath.XPathValue.FromNode(builder.Finish(), node));
+        }
+
+        /// <summary>The depth of the element whose content is being stripped of annotations, or -1.</summary>
+        private int m_stripDepth = -1;
+
+        /// <inheritdoc/>
+        internal override void AnnotateElement(ushort typeId, bool nilled)
+        {
+            if (m_depth > 0 && m_stripDepth < 0)
+            {
+                m_builder!.AnnotateElement(typeId, nilled);
+            }
+        }
+
+        /// <inheritdoc/>
+        internal override void AnnotateAttribute(ushort typeId)
+        {
+            if (m_depth > 0 && m_stripDepth < 0)
+            {
+                m_builder!.AnnotateLastAttribute(typeId);
+            }
+        }
+
+        /// <inheritdoc/>
+        internal override void StripContent()
+        {
+            if (m_depth > 0 && m_stripDepth < 0)
+            {
+                m_stripDepth = m_depth;
+            }
+        }
+
+        /// <inheritdoc/>
         public override void WriteNamespaceDeclaration(string prefix, string namespaceUri)
         {
             if (m_depth != 0)
@@ -412,6 +504,11 @@ namespace CodeDeeds.Xslt.Runtime
         /// <inheritdoc/>
         public override void EndElement()
         {
+            if (m_depth == m_stripDepth)
+            {
+                m_stripDepth = -1;
+            }
+
             m_builder!.EndElement();
 
             if (--m_depth == 0)
@@ -736,7 +833,42 @@ namespace CodeDeeds.Xslt.Runtime
         /// <inheritdoc/>
         public override void EndElement()
         {
+            if (m_builder.OpenElementDepth == m_stripDepth)
+            {
+                m_stripDepth = -1;
+            }
+
             m_builder.EndElement();
+        }
+
+        /// <summary>The depth of the element whose content is being stripped of annotations, or -1.</summary>
+        private int m_stripDepth = -1;
+
+        /// <inheritdoc/>
+        internal override void AnnotateElement(ushort typeId, bool nilled)
+        {
+            if (m_stripDepth < 0 && m_builder.OpenElementDepth > 0)
+            {
+                m_builder.AnnotateElement(typeId, nilled);
+            }
+        }
+
+        /// <inheritdoc/>
+        internal override void AnnotateAttribute(ushort typeId)
+        {
+            if (m_stripDepth < 0)
+            {
+                m_builder.AnnotateLastAttribute(typeId);
+            }
+        }
+
+        /// <inheritdoc/>
+        internal override void StripContent()
+        {
+            if (m_stripDepth < 0 && m_builder.OpenElementDepth > 0)
+            {
+                m_stripDepth = m_builder.OpenElementDepth;
+            }
         }
 
         /// <inheritdoc/>

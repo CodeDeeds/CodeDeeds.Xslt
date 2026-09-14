@@ -210,6 +210,39 @@ namespace CodeDeeds.Xslt.Compiler
         /// <summary>The keys declared by <c>xsl:key</c>, indexed by <see cref="KeyDefinition.Index"/>.</summary>
         public IReadOnlyList<KeyDefinition> Keys { get; }
 
+        /// <summary>
+        /// The schema components in scope, or null where the stylesheet was compiled by a processor that
+        /// is not schema-aware. What an expression compiled while the transformation runs, an
+        /// <c>xsl:evaluate</c> target or the caller's initial match selection, resolves type names in.
+        /// </summary>
+        public SchemaComponents? Schemas { get; init; }
+
+        /// <summary>
+        /// Whether the stylesheet declares <c>input-type-annotations="strip"</c>, so that the documents
+        /// it reads are read untyped whether or not they were validated.
+        /// </summary>
+        public bool StripInputTypeAnnotations { get; init; }
+
+        /// <summary>
+        /// What the documents a transformation reads are validated against under a caller's options, or
+        /// null where they are read as they are: the caller asked for no validation, or the stylesheet
+        /// has no schemas to validate against.
+        /// </summary>
+        /// <param name="options">The transformation's options.</param>
+        internal Model.TreeValidation? InputValidationFor(XsltOptions options)
+        {
+            if (options.InputValidation is not (XsltValidation.Strict or XsltValidation.Lax) || Schemas is null)
+            {
+                return null;
+            }
+
+            return new Model.TreeValidation(
+                Schemas.ValidatingSet,
+                strict: options.InputValidation == XsltValidation.Strict,
+                Schemas.TypeIdOf,
+                annotate: !StripInputTypeAnnotations);
+        }
+
         /// <summary>The serialization options requested by <c>xsl:output</c>.</summary>
         public OutputSettings OutputSettings { get; }
 

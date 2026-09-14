@@ -168,8 +168,9 @@ namespace CodeDeeds.Xslt.XPath
         /// Reduces items to the atomic values they stand for, which is what <c>fn:data</c> does.
         /// </summary>
         /// <remarks>
-        /// A node contributes its string-value as <c>xs:untypedAtomic</c>, this engine carrying no type
-        /// annotations. An <b>array</b> contributes the atomization of its members, which is why the count
+        /// A node contributes its typed value: its string-value as <c>xs:untypedAtomic</c> in a tree
+        /// nothing validated, and what its annotation says in a validated one, which may be several values
+        /// or none. An <b>array</b> contributes the atomization of its members, which is why the count
         /// can change: XPath 3.1 made an array atomizable where 3.0 refused it, so <c>sum([1, 2, 3])</c> is
         /// six and <c>sum([[1, 2], [3, 4]])</c> is ten. A map and a function have no typed value at all.
         /// </remarks>
@@ -247,25 +248,145 @@ namespace CodeDeeds.Xslt.XPath
         /// The typed value of a node, which in a tree nothing validated is its string content.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// An <c>xs:untypedAtomic</c> for an element, an attribute, a text node and a document node, and an
         /// <c>xs:string</c> for a comment, a processing instruction and a namespace node (XDM §5). The
         /// three that answer <c>xs:string</c> are the ones whose content was never a candidate for
         /// validation: there is nothing a schema could have said about the text of a comment, so the type
         /// it has is the type it always has, and <c>data()</c> of one is a string wherever it is read.
+        /// </para>
+        /// <para>
+        /// In a validated tree an element or attribute annotated with a type gives what the type says its
+        /// text is: one value, several for a list type, none for a nilled element or an empty complex
+        /// type, and <c>FOTY0012</c> for a type that holds elements and no text. So the answer may be a
+        /// sequence, which every caller that wants one value has to look for.
+        /// </para>
         /// </remarks>
         /// <param name="node">The node to atomize.</param>
         internal static XPathValue TypedValueOf(XPathValue node)
         {
-            string text = StringValueOf(node);
+            if (node.Kind == XPathValueKind.Node)
+            {
+                return TypedValueOf(node.NodeTree, node.NodeId);
+            }
 
-            Model.NodeKind kind = node.Kind == XPathValueKind.Node
-                ? node.NodeTree.KindOf(node.NodeId)
-                : node.AsNodeSet().Tree.KindOf(node.AsNodeSet()[0]);
+            NodeSet set = node.AsNodeSet();
+            return TypedValueOf(set.TreeAt(0), set[0]);
+        }
 
-            return kind is Model.NodeKind.Comment or Model.NodeKind.ProcessingInstruction
-                or Model.NodeKind.Namespace
-                ? XPathValue.FromString(text)
-                : XPathValue.FromUntypedAtomic(text);
+        /// <summary>The typed value of a node of a tree; see <see cref="TypedValueOf(XPathValue)"/>.</summary>
+        /// <param name="tree">The tree.</param>
+        /// <param name="node">The node.</param>
+        internal static XPathValue TypedValueOf(Model.XdmTree tree, int node)
+        {
+            Model.NodeKind kind = tree.KindOf(node);
+
+            switch (kind)
+            {
+                case Model.NodeKind.Comment:
+                case Model.NodeKind.ProcessingInstruction:
+                case Model.NodeKind.Namespace:
+                    return XPathValue.FromString(tree.StringValueOf(node));
+
+                case Model.NodeKind.Element:
+                case Model.NodeKind.Attribute:
+                    if (tree.HasTypeAnnotations)
+                    {
+                        if (kind == Model.NodeKind.Element && tree.IsNilled(node))
+                        {
+                            return XPathValue.FromSequence(Empty);
+                        }
+
+                        if (tree.TypeAnnotationOf(node) is XdmSchemaType type)
+                        {
+                            return type.TypedValue(
+                                tree.StringValueOf(node),
+                                type.UsesQNames ? NamespacesAt(tree, node) : null);
+                        }
+                    }
+
+                    break;
+            }
+
+            return XPathValue.FromUntypedAtomic(tree.StringValueOf(node));
+        }
+
+        /// <summary>
+        /// The typed value of a node where one value is wanted: the value, or the empty sequence where the
+        /// node's typed value is empty.
+        /// </summary>
+        /// <param name="node">The node.</param>
+        /// <param name="what">What wants the value, for the message.</param>
+        /// <exception cref="XsltException"><c>XPTY0004</c> where the typed value is several values.</exception>
+        internal static XPathValue TypedValueAsOne(XPathValue node, string what)
+        {
+            XPathValue typed = TypedValueOf(node);
+
+            if (typed.Kind != XPathValueKind.Sequence)
+            {
+                return typed;
+            }
+
+            XdmSequence several = typed.AsSequence();
+
+            return several.Count switch
+            {
+                0 => typed,
+                1 => several[0],
+                _ => throw XsltErrors.Error(
+                    XsltErrorCode.XPTY0004,
+                    $"{what} takes one value, and the node's typed value is {several.Count} values: its "
+                    + "type is a list type."),
+            };
+        }
+
+        /// <summary>Adds the typed value of a node, one value or several, to a list of atomic values.</summary>
+        /// <param name="tree">The tree.</param>
+        /// <param name="node">The node.</param>
+        /// <param name="into">Where the values go.</param>
+        internal static void AtomizeNodeInto(Model.XdmTree tree, int node, List<XPathValue> into)
+        {
+            if (!tree.HasTypeAnnotations)
+            {
+                Model.NodeKind kind = tree.KindOf(node);
+                string text = tree.StringValueOf(node);
+
+                into.Add(kind is Model.NodeKind.Comment or Model.NodeKind.ProcessingInstruction or Model.NodeKind.Namespace
+                    ? XPathValue.FromString(text)
+                    : XPathValue.FromUntypedAtomic(text));
+                return;
+            }
+
+            XPathValue typed = TypedValueOf(tree, node);
+
+            if (typed.Kind == XPathValueKind.Sequence)
+            {
+                XdmSequence several = typed.AsSequence();
+                for (int i = 0; i < several.Count; i++)
+                {
+                    into.Add(several[i]);
+                }
+            }
+            else
+            {
+                into.Add(typed);
+            }
+        }
+
+        /// <summary>The namespaces in scope at a node, for a typed value that is a name.</summary>
+        private static IReadOnlyDictionary<string, string> NamespacesAt(Model.XdmTree tree, int node)
+        {
+            Dictionary<string, string> namespaces = new(StringComparer.Ordinal)
+            {
+                ["xml"] = Model.XdmTree.XmlNamespaceUri,
+            };
+
+            foreach ((string prefix, string uri) in tree.InScopeNamespacesOf(node))
+            {
+                namespaces[prefix] = uri;
+            }
+
+            return namespaces;
         }
 
         private static void AtomizeInto(XPathValue item, List<XPathValue> into)
@@ -273,7 +394,7 @@ namespace CodeDeeds.Xslt.XPath
             switch (item.Kind)
             {
                 case XPathValueKind.Node:
-                    into.Add(TypedValueOf(item));
+                    AtomizeNodeInto(item.NodeTree, item.NodeId, into);
                     return;
 
                 case XPathValueKind.NodeSet:
@@ -283,7 +404,7 @@ namespace CodeDeeds.Xslt.XPath
                     NodeSet nodes = item.AsNodeSet();
                     for (int i = 0; i < nodes.Count; i++)
                     {
-                        into.Add(TypedValueOf(XPathValue.FromNode(nodes.TreeAt(i), nodes[i])));
+                        AtomizeNodeInto(nodes.TreeAt(i), nodes[i], into);
                     }
 
                     return;
@@ -432,8 +553,9 @@ namespace CodeDeeds.Xslt.XPath
         public static string SimpleContent(XPathValue value, string separator)
         {
             // One node, or none, is what xsl:value-of select="name" gives, once per element written, and
-            // its string value is the whole answer: there is nothing to merge, atomize or join, and the
-            // three lists the general way builds for it are three lists per element.
+            // in a tree nothing validated its string value is the whole answer: there is nothing to
+            // merge, atomize or join, and the three lists the general way builds for it are three lists
+            // per element. A validated node's typed value may read differently, and may be several.
             switch (value.Kind)
             {
                 case XPathValueKind.NodeSet:
@@ -444,7 +566,7 @@ namespace CodeDeeds.Xslt.XPath
                         return string.Empty;
                     }
 
-                    if (nodes.Count == 1)
+                    if (nodes.Count == 1 && !nodes.TreeAt(0).HasTypeAnnotations)
                     {
                         return nodes.TreeAt(0).StringValueOf(nodes[0]);
                     }
@@ -453,7 +575,12 @@ namespace CodeDeeds.Xslt.XPath
                 }
 
                 case XPathValueKind.Node:
-                    return value.NodeTree.StringValueOf(value.NodeId);
+                    if (!value.NodeTree.HasTypeAnnotations)
+                    {
+                        return value.NodeTree.StringValueOf(value.NodeId);
+                    }
+
+                    break;
 
                 case XPathValueKind.String:
                 case XPathValueKind.Number:
@@ -793,6 +920,38 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
+        /// The typed value of one node for a value comparison: false where it is empty, which makes the
+        /// comparison empty, and <c>XPTY0004</c> where it is several values.
+        /// </summary>
+        private static bool TryTypedValueToOne(Model.XdmTree tree, int node, out XPathValue single)
+        {
+            if (!tree.HasTypeAnnotations)
+            {
+                single = XPathValue.FromUntypedAtomic(tree.StringValueOf(node));
+                return true;
+            }
+
+            XPathValue typed = XdmSequence.TypedValueOf(tree, node);
+
+            if (typed.Kind != XPathValueKind.Sequence)
+            {
+                single = typed;
+                return true;
+            }
+
+            XdmSequence several = typed.AsSequence();
+
+            if (several.Count > 1)
+            {
+                throw XsltErrors.Error(XsltErrorCode.XPTY0004,
+                    $"A value comparison needs one value on each side, and the node's typed value is {several.Count} values.");
+            }
+
+            single = several.Count == 1 ? several[0] : default;
+            return several.Count == 1;
+        }
+
+        /// <summary>
         /// Reduces an operand to the single atomic value a value comparison needs.
         /// </summary>
         /// <returns><see langword="false"/> when the operand is empty, which makes the whole comparison empty.</returns>
@@ -833,13 +992,11 @@ namespace CodeDeeds.Xslt.XPath
                             $"A value comparison needs one value on each side, but was given {nodes.Count}.");
                     }
 
-                    single = XPathValue.FromUntypedAtomic(nodes.TreeAt(0).StringValueOf(nodes[0]));
-                    return true;
+                    return TryTypedValueToOne(nodes.TreeAt(0), nodes[0], out single);
                 }
 
                 case XPathValueKind.Node:
-                    single = XPathValue.FromUntypedAtomic(XdmSequence.StringValueOf(value));
-                    return true;
+                    return TryTypedValueToOne(value.NodeTree, value.NodeId, out single);
 
                 case XPathValueKind.Map:
                 case XPathValueKind.Function:

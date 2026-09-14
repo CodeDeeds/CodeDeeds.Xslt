@@ -86,6 +86,9 @@ namespace CodeDeeds.Xslt.Runtime
         /// </remarks>
         private Dictionary<(string? Reference, string? Base), IReadOnlyList<string>>? m_collections;
         private readonly XsltOptions m_options;
+
+        /// <summary>What the documents read are validated against, or null where they are read as they are.</summary>
+        private readonly TreeValidation? m_inputValidation;
         private int m_callDepth;
 
         /// <summary>Whether the processor claims XSLT 3.0, which decides the codes a later specification renamed.</summary>
@@ -159,8 +162,17 @@ namespace CodeDeeds.Xslt.Runtime
             Output = output;
             PrincipalOutput = output;
             CurrentOutputUri = options.BaseOutputUri;
-            InputTree = inputTree;
             HasSourceDocument = hasSourceDocument;
+
+            // A stylesheet that strips input annotations reads every document untyped, the one it was
+            // handed included, whatever the caller validated it as.
+            if (stylesheet.StripInputTypeAnnotations)
+            {
+                inputTree = inputTree.WithoutTypeAnnotations();
+            }
+
+            InputTree = inputTree;
+            m_inputValidation = stylesheet.InputValidationFor(options);
 
             if (hasSourceDocument && options.InputUri is string inputUri)
             {
@@ -174,7 +186,7 @@ namespace CodeDeeds.Xslt.Runtime
 
             foreach (ModeDeclaration rules in stylesheet.ModeRules.Values)
             {
-                m_hasTypedModes |= rules.Typed;
+                m_hasTypedModes |= rules.Typed is not null;
             }
 
             int[] map = stylesheet.Names.BuildFingerprintMap(inputTree);
@@ -794,13 +806,18 @@ namespace CodeDeeds.Xslt.Runtime
             XdmTree tree;
             try
             {
-                tree = XdmTreeBuilder.FromXml(
-                    resolved.Reader,
-                    null,
-                    m_stylesheet.WhitespaceIn(package),
-                    false,
-                    m_options.EntityResolver,
-                    resolved.Uri);
+                // Validated as the caller asked, against the stylesheet's schemas, so that a document
+                // reached through document() is as typed as the input is.
+                tree = m_inputValidation is TreeValidation validation
+                    ? XdmTreeBuilder.FromXmlValidated(
+                        resolved.Reader, m_stylesheet.WhitespaceIn(package), m_options.EntityResolver, resolved.Uri, validation)
+                    : XdmTreeBuilder.FromXml(
+                        resolved.Reader,
+                        null,
+                        m_stylesheet.WhitespaceIn(package),
+                        false,
+                        m_options.EntityResolver,
+                        resolved.Uri);
             }
             catch (System.Xml.XmlException exception)
             {
@@ -971,6 +988,9 @@ namespace CodeDeeds.Xslt.Runtime
 
         /// <summary>The caller's collations, if any were supplied.</summary>
         internal IXsltCollationResolver? CollationResolver => m_options.CollationResolver;
+
+        /// <summary>The schema components the stylesheet was compiled with, or null for none.</summary>
+        internal SchemaComponents? Schemas => m_stylesheet.Schemas;
 
         /// <summary>
         /// The collation a key files its values under, or <see langword="null"/> for the code point one,
@@ -3289,23 +3309,40 @@ namespace CodeDeeds.Xslt.Runtime
             return supplied.ToArray();
         }
 
-        /// <summary>Whether any mode is declared typed, which is the only case the check below can fail.</summary>
+        /// <summary>Whether any mode says what it admits, which is the only case the check below can fail.</summary>
         private readonly bool m_hasTypedModes;
 
         /// <summary>
-        /// Refuses an element or attribute in a mode declared <c>typed="yes"</c>: this engine reads no schema,
-        /// so every node it holds is untyped, and a typed mode takes none of them (§6.6.2).
+        /// Refuses an element or attribute a mode does not admit (§6.6.2): an untyped one in a mode declared
+        /// <c>typed="yes"</c> or <c>strict</c>, and a typed one in a mode declared <c>typed="no"</c>. A node
+        /// is typed where validation annotated it with a type; one of a tree nothing validated, or one
+        /// validation found no declaration for, is untyped.
         /// </summary>
         private void RequireTyped(int node, int mode, ref DynamicContext context)
         {
-            if (m_stylesheet.ModeRules.TryGetValue(mode, out ModeDeclaration rules)
-                && rules.Typed
-                && context.Tree.KindOf(node) is NodeKind.Element or NodeKind.Attribute)
+            if (!m_stylesheet.ModeRules.TryGetValue(mode, out ModeDeclaration rules)
+                || rules.Typed is not bool wantsTyped
+                || context.Tree.KindOf(node) is not (NodeKind.Element or NodeKind.Attribute))
+            {
+                return;
+            }
+
+            bool typed = context.Tree.HasTypeAnnotations && context.Tree.TypeIdOf(node) != 0;
+
+            if (wantsTyped && !typed)
             {
                 throw XsltErrors.Error(
                     XsltErrorCode.XTTE3100,
                     $"Templates were applied to {Describe(context.Tree, node)} in a mode declared typed, and "
-                    + "the node is untyped — as every node is here, this engine validating nothing.");
+                    + "the node is untyped: nothing validated it, or no declaration was found for it.");
+            }
+
+            if (!wantsTyped && typed)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTTE3110,
+                    $"Templates were applied to {Describe(context.Tree, node)} in a mode declared "
+                    + "typed=\"no\", and the node carries a type annotation.");
             }
         }
 
@@ -3338,7 +3375,8 @@ namespace CodeDeeds.Xslt.Runtime
                 // default-collation to have been declared at. The caller's own collations, though, since
                 // the caller wrote it.
                 Collation.CodepointUri,
-                m_options.CollationResolver);
+                m_options.CollationResolver,
+                m_stylesheet.Schemas);
 
             Expr compiled;
 

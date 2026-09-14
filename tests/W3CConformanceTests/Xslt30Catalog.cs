@@ -71,6 +71,12 @@ namespace CodeDeeds.Xslt.Conformance
         /// <summary>An expression selecting, within the source document, what templates are first applied to.</summary>
         public string? SourceSelect { get; private init; }
 
+        /// <summary>
+        /// Whether the catalog asks for a source to be validated strictly against the environment's
+        /// schemas, which is what makes its nodes typed.
+        /// </summary>
+        public bool ValidatesSources { get; private init; }
+
         /// <summary>A stylesheet the environment supplies, where the test case names none itself.</summary>
         public string? StylesheetFile { get; private init; }
 
@@ -99,6 +105,13 @@ namespace CodeDeeds.Xslt.Conformance
         /// </remarks>
         public List<(string? Uri, List<string> Files)> Collections { get; } = new();
 
+        /// <summary>
+        /// The schemas the environment declares, as files relative to the test-set's directory, with the
+        /// role the catalog gives each: what the source references, what the stylesheet imports, or a
+        /// secondary one the others include.
+        /// </summary>
+        public List<(string File, string? Role)> Schemas { get; } = new();
+
         /// <summary>Why this environment is beyond the driver, or null if it is usable.</summary>
         public string? Unsupported { get; private init; }
 
@@ -107,11 +120,33 @@ namespace CodeDeeds.Xslt.Conformance
             XNamespace ns = element.Name.Namespace;
 
             // A collation an environment declares is one the engine provides or the driver does, through
-            // SuiteCollations, which every transformation is given; nothing to arrange per environment.
+            // SuiteCollations, which every transformation is given; nothing to arrange per environment. A
+            // schema is recorded for the runner, which decides by whether the run is schema-aware.
             string? unsupported =
-                element.Element(ns + "schema") is not null ? "environment declares a schema"
-                : element.Element(ns + "resource") is not null ? "environment declares a resource"
+                element.Element(ns + "resource") is not null ? "environment declares a resource"
                 : null;
+
+            List<(string, string?)> schemas = new();
+
+            foreach (XElement schema in element.Elements(ns + "schema"))
+            {
+                if ((string?)schema.Attribute("xsd-version") == "1.1")
+                {
+                    unsupported ??= "environment declares an XSD 1.1 schema";
+                }
+
+                if ((string?)schema.Attribute("file") is string file)
+                {
+                    // A few schemas use XSD 1.1 without the catalog saying so; an assertion is the tell,
+                    // and a schema that will not load is a test that cannot be judged.
+                    if (NeedsXsd11(element, file))
+                    {
+                        unsupported ??= "environment declares an XSD 1.1 schema";
+                    }
+
+                    schemas.Add((file, (string?)schema.Attribute("role")));
+                }
+            }
 
             List<(string?, List<string>)> collections = new();
 
@@ -141,9 +176,14 @@ namespace CodeDeeds.Xslt.Conformance
             string? sourceFile = null;
             string? sourceContent = null;
             string? sourceSelect = null;
+            bool validates = false;
 
             foreach (XElement source in element.Elements(ns + "source"))
             {
+                // Strict validation is asked for per source; a transformation validates every document
+                // it reads or none, so one asking is every one being validated.
+                validates |= (string?)source.Attribute("validation") == "strict";
+
                 if ((string?)source.Attribute("role") != ".")
                 {
                     // A source with no role is a document the stylesheet reaches through document(), which
@@ -168,12 +208,14 @@ namespace CodeDeeds.Xslt.Conformance
                 SourceContent = sourceContent,
                 SourceBaseUri = sourceContent is null || element.BaseUri.Length == 0 ? null : element.BaseUri,
                 SourceSelect = sourceSelect,
+                ValidatesSources = validates,
                 StylesheetFile = (string?)element.Element(ns + "stylesheet")?.Attribute("file"),
                 Unsupported = unsupported,
             };
 
             environment.Parameters.AddRange(element.Elements(ns + "param"));
             environment.Collections.AddRange(collections);
+            environment.Schemas.AddRange(schemas);
 
             foreach (XElement package in element.Elements(ns + "package"))
             {
@@ -185,6 +227,26 @@ namespace CodeDeeds.Xslt.Conformance
             }
 
             return environment;
+        }
+
+        /// <summary>Whether a schema file uses XSD 1.1's assertions, which .NET's schema implementation has not.</summary>
+        private static bool NeedsXsd11(XElement element, string file)
+        {
+            if (element.BaseUri.Length == 0 || !Uri.TryCreate(element.BaseUri, UriKind.Absolute, out Uri? catalog) || !catalog.IsFile)
+            {
+                return false;
+            }
+
+            string path = Path.Combine(Path.GetDirectoryName(catalog.LocalPath)!, file);
+
+            try
+            {
+                return File.Exists(path) && File.ReadAllText(path).Contains(":assert", StringComparison.Ordinal);
+            }
+            catch (IOException)
+            {
+                return false;
+            }
         }
     }
 }

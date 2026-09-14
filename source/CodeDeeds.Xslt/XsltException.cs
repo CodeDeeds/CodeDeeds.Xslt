@@ -667,6 +667,60 @@ namespace CodeDeeds.Xslt
         /// <summary>Two <c>xsl:key</c> declarations of one name naming different collations.</summary>
         XTSE1220,
 
+        /// <summary>An <c>xsl:import-schema</c> with both a <c>schema-location</c> and an inline schema.</summary>
+        XTSE0215,
+
+        /// <summary>The imported schemas do not make a valid schema together.</summary>
+        XTSE0220,
+
+        /// <summary>
+        /// One stylesheet module says <c>input-type-annotations="strip"</c> and another
+        /// <c>"preserve"</c>.
+        /// </summary>
+        XTSE0265,
+
+        /// <summary>
+        /// Strict validation found the document invalid: the element's content, an attribute's value or
+        /// an identity constraint is not what its declaration allows.
+        /// </summary>
+        XTTE1510,
+
+        /// <summary>Strict validation of an element that has no top-level declaration to validate against.</summary>
+        XTTE1512,
+
+        /// <summary>Lax validation found the document invalid, where a declaration was found for it.</summary>
+        XTTE1515,
+
+        /// <summary>Both a <c>type</c> and a <c>validation</c> attribute on one instruction or literal result element.</summary>
+        XTSE1505,
+
+        /// <summary>A <c>type</c> attribute that is not a QName, or names a type not among the schema components in scope.</summary>
+        XTSE1520,
+
+        /// <summary>A <c>type</c> naming a complex type where what is validated is an attribute.</summary>
+        XTTE1535,
+
+        /// <summary>Validation against the type a <c>type</c> attribute names found the element or attribute invalid.</summary>
+        XTTE1540,
+
+        /// <summary>An attribute validated against a type derived from <c>xs:QName</c> or <c>xs:NOTATION</c>.</summary>
+        XTTE1545,
+
+        /// <summary>A document node validated whose children are not one element with comments and processing instructions.</summary>
+        XTTE1550,
+
+        /// <summary>A document node validated whose ID, IDREF or identity constraints are not satisfied.</summary>
+        XTTE1555,
+
+        /// <summary>
+        /// A template rule in a mode declared <c>typed="strict"</c> whose pattern starts with an element
+        /// name the schemas in scope declare no top-level element of.
+        /// </summary>
+        XTSE3105,
+
+        /// <summary>Templates applied in a mode declared <c>typed="no"</c> to a node that carries a type annotation.</summary>
+        XTTE3110,
+
         /// <summary>A <c>regex</c> on <c>xsl:analyze-string</c> that is not a regular expression.</summary>
         XTDE1140,
 
@@ -874,6 +928,11 @@ namespace CodeDeeds.Xslt
 
         /// <summary>A replacement string that is not one <c>fn:replace</c> allows.</summary>
         FORX0004,
+
+        /// <summary>
+        /// Atomizing an element whose type has element-only content, which has no typed value to give.
+        /// </summary>
+        FOTY0012,
 
         /// <summary>Atomizing a function item, which has no typed value to give.</summary>
         FOTY0013,

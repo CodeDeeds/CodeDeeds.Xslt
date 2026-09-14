@@ -202,21 +202,47 @@ namespace CodeDeeds.Xslt.Compiler
 
             string? baseUri = m_baseUri is not null ? m_baseUri.Evaluate(ref context).Trim() : m_staticBaseUri;
 
+            // The imported schemas' types are in scope for the target only where schema-aware is yes; the
+            // default is no, as the specification has it. A target that names a schema type where they are
+            // not is XTDE3160, and not the XPST0051 an unknown type usually gets.
+            bool schemaAware = false;
+
             if (m_schemaAware is not null)
             {
-                // Read for its spelling and nothing else: there is no schema here for "yes" to bring in, so
-                // the in-scope types are the built-in ones either way.
                 string said = m_schemaAware.Evaluate(ref context).Trim();
 
-                if (said is not ("yes" or "true" or "1" or "no" or "false" or "0"))
+                schemaAware = said switch
                 {
-                    throw XsltErrors.Error(
+                    "yes" or "true" or "1" => true,
+                    "no" or "false" or "0" => false,
+                    _ => throw XsltErrors.Error(
                         XsltErrorCode.XTDE0030,
-                        $"'{said}' is not one of the values 'schema-aware' may take: yes, no, true, false, 1, 0.");
-                }
+                        $"'{said}' is not one of the values 'schema-aware' may take: yes, no, true, false, 1, 0."),
+                };
             }
 
-            Expr compiled = Compile(target, baseUri, namespaces, defaultNamespace, names, runtime.CollationResolver);
+            Compiler.SchemaComponents? schemas = schemaAware ? runtime.Schemas : null;
+            Expr compiled;
+
+            try
+            {
+                compiled = Compile(
+                    target, baseUri, namespaces, defaultNamespace, names, runtime.CollationResolver, schemas);
+            }
+            catch (XsltException failed)
+                when (!schemaAware
+                    && runtime.Schemas is not null
+                    && failed.Code is "XPST0051" or "XPST0008"
+                    && CompilesWithSchemas(target, baseUri, namespaces, defaultNamespace, names, runtime))
+            {
+                // The target named a schema type or declaration, which is in scope only with schema-aware
+                // yes; naming one here is the error the specification gives that.
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTDE3160,
+                    "The xsl:evaluate has schema-aware=\"no\", and its target names a type or declaration "
+                    + "the imported schemas define, which is in scope only where schema-aware is yes.",
+                    failed);
+            }
 
             // The target's own dynamic context: the focus context-item says, or none; the parameters and no
             // other variable; and none of what XSLT adds — no current node, no current group, nothing a
@@ -304,6 +330,26 @@ namespace CodeDeeds.Xslt.Compiler
             }
         }
 
+        /// <summary>Whether the target would compile with the imported schemas in scope, which tells a use of a schema type from a genuinely unknown one.</summary>
+        private bool CompilesWithSchemas(
+            string target,
+            string? baseUri,
+            Dictionary<string, string> namespaces,
+            string defaultNamespace,
+            List<ExpandedName> parameters,
+            XsltRuntime runtime)
+        {
+            try
+            {
+                Compile(target, baseUri, namespaces, defaultNamespace, parameters, runtime.CollationResolver, runtime.Schemas);
+                return true;
+            }
+            catch (XsltException)
+            {
+                return false;
+            }
+        }
+
         private static XPathValue RequireOneNode(XPathValue value)
         {
             List<XPathValue> items = XdmSequence.Items(value);
@@ -328,9 +374,14 @@ namespace CodeDeeds.Xslt.Compiler
             Dictionary<string, string> namespaces,
             string defaultNamespace,
             List<ExpandedName> parameters,
-            IXsltCollationResolver? collations)
+            IXsltCollationResolver? collations,
+            SchemaComponents? schemas)
         {
-            StringBuilder key = new StringBuilder(target).Append('\n').Append(baseUri).Append('\n').Append(defaultNamespace);
+            // The schemas are part of what the target compiles against: the same expression is a different
+            // expression with the imported types in scope and without, so the two are cached apart.
+            StringBuilder key = new StringBuilder(target)
+                .Append('\n').Append(baseUri).Append('\n').Append(defaultNamespace)
+                .Append('\n').Append(schemas is null ? '0' : '1');
 
             foreach (KeyValuePair<string, string> binding in namespaces.OrderBy(pair => pair.Key, StringComparer.Ordinal))
             {
@@ -362,7 +413,8 @@ namespace CodeDeeds.Xslt.Compiler
                 m_functions,
                 m_decimalFormats,
                 m_defaultCollation,
-                collations);
+                collations,
+                schemas);
 
             Expr compiled;
 
@@ -416,7 +468,7 @@ namespace CodeDeeds.Xslt.Compiler
     /// one-argument <c>resolve-uri()</c> is given its second argument.
     /// </para>
     /// </remarks>
-    internal sealed class DynamicStaticContext : IXPathStaticContext
+    internal sealed class DynamicStaticContext : IXPathStaticContext, ISchemaTypeProvider
     {
         private readonly XsltVersion m_version;
         private readonly Dictionary<string, string> m_namespaces;
@@ -437,10 +489,12 @@ namespace CodeDeeds.Xslt.Compiler
             IReadOnlyDictionary<(ExpandedName Name, int Arity), UserFunction> functions,
             IReadOnlyDictionary<ExpandedName, DecimalFormat> decimalFormats,
             string defaultCollation,
-            IXsltCollationResolver? collations)
+            IXsltCollationResolver? collations,
+            SchemaComponents? schemas = null)
         {
             DefaultCollation = defaultCollation;
             CollationResolver = collations;
+            m_schemas = schemas;
             Names = names;
             m_version = version;
             m_namespaces = namespaces;
@@ -470,6 +524,27 @@ namespace CodeDeeds.Xslt.Compiler
         /// <inheritdoc/>
         /// <remarks>The caller's, as everywhere: the transformation running the instruction has them.</remarks>
         public IXsltCollationResolver? CollationResolver { get; }
+
+        private readonly SchemaComponents? m_schemas;
+
+        /// <inheritdoc/>
+        /// <remarks>The stylesheet's, so that a target expression names the types the stylesheet imported.</remarks>
+        public XdmSchemaType? ResolveSchemaType(string namespaceUri, string localName)
+        {
+            return m_schemas?.FindType(namespaceUri, localName);
+        }
+
+        /// <inheritdoc/>
+        public XdmSchemaDeclaration? ResolveElementDeclaration(string namespaceUri, string localName)
+        {
+            return m_schemas?.FindElement(namespaceUri, localName);
+        }
+
+        /// <inheritdoc/>
+        public XdmSchemaDeclaration? ResolveAttributeDeclaration(string namespaceUri, string localName)
+        {
+            return m_schemas?.FindAttribute(namespaceUri, localName);
+        }
 
         /// <inheritdoc/>
         public XsltVersion Version => m_version;

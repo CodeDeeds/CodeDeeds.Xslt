@@ -82,6 +82,15 @@ namespace CodeDeeds.Xslt.Model
         internal int[] DeclaredIdrefAttributes { get; set; } = Array.Empty<int>();
 
         /// <summary>
+        /// The elements a schema typed as an ID, in a tree read with its annotations stripped; null
+        /// where none was, or where the annotations are there to ask.
+        /// </summary>
+        internal HashSet<int>? IdElements { get; init; }
+
+        /// <summary>The elements a schema typed as a reference to an ID, in the same form.</summary>
+        internal HashSet<int>? IdrefElements { get; init; }
+
+        /// <summary>
         /// The base URI of each node parsed out of an external entity, where it differs from its parent's;
         /// null where no node was. Nothing under such a node has a base of its own unless it says so.
         /// </summary>
@@ -140,6 +149,13 @@ namespace CodeDeeds.Xslt.Model
         // Where each node starts in the text it was parsed from, or null where that was not recorded.
         private readonly int[]? m_line;
         private readonly int[]? m_column;
+
+        // The type each element and each attribute was validated as, by the number XdmSchemaType hands
+        // out, with 0 for none, and the elements that are nilled; all null for a tree nothing validated,
+        // which is what every tree was until schema awareness and what most still are.
+        private ushort[]? m_nodeType;
+        private ushort[]? m_attributeType;
+        private HashSet<int>? m_nilled;
 
         internal XdmTree(
             NameTable nameTable,
@@ -252,11 +268,177 @@ namespace CodeDeeds.Xslt.Model
             Give(ref m_namespaceCount);
             Give(ref m_namespaceScope);
 
+            // Not pooled, being rare; dropped so that nothing reads them after the nodes are gone.
+            m_nodeType = null;
+            m_attributeType = null;
+            m_nilled = null;
+
             static void Give<T>(ref T[] array)
             {
                 T[] given = array;
                 array = Array.Empty<T>();
                 System.Buffers.ArrayPool<T>.Shared.Return(given, clearArray: !typeof(T).IsValueType);
+            }
+        }
+
+        /// <summary>The type each element was validated as, by number; set by the builder.</summary>
+        internal ushort[]? NodeTypes
+        {
+            init => m_nodeType = value;
+        }
+
+        /// <summary>The type each attribute was validated as, by number; set by the builder.</summary>
+        internal ushort[]? AttributeTypes
+        {
+            init => m_attributeType = value;
+        }
+
+        /// <summary>The elements validation found nilled; set by the builder.</summary>
+        internal HashSet<int>? NilledNodes
+        {
+            init => m_nilled = value;
+        }
+
+        /// <summary>
+        /// Whether any node of this tree carries a type annotation, which only a validated tree does.
+        /// </summary>
+        /// <remarks>
+        /// The question every typed path asks first, so that a tree nothing validated — every tree, until
+        /// a caller asks for validation — takes the path it always took and pays nothing for the option.
+        /// </remarks>
+        internal bool HasTypeAnnotations => m_nodeType is not null || m_attributeType is not null;
+
+        /// <summary>
+        /// The number of the type a node was validated as, or 0 for a node that carries no annotation:
+        /// every node of an unvalidated tree, every node that is not an element or an attribute, and an
+        /// element or attribute validation found no declaration for.
+        /// </summary>
+        /// <param name="nodeId">The node.</param>
+        internal ushort TypeIdOf(int nodeId)
+        {
+            if (IsAttribute(nodeId))
+            {
+                int index = nodeId - AttributeIdBase;
+                return m_attributeType is ushort[] attributes && index < attributes.Length ? attributes[index] : (ushort)0;
+            }
+
+            return m_nodeType is ushort[] nodes && nodeId < nodes.Length ? nodes[nodeId] : (ushort)0;
+        }
+
+        /// <summary>
+        /// The type a node was validated as, or null for the annotation the data model gives an
+        /// unvalidated node: <c>xs:untyped</c> for an element, <c>xs:untypedAtomic</c> for an attribute.
+        /// </summary>
+        /// <param name="nodeId">The node.</param>
+        internal XPath.XdmSchemaType? TypeAnnotationOf(int nodeId)
+        {
+            return XPath.XdmSchemaType.ById(TypeIdOf(nodeId));
+        }
+
+        /// <summary>Whether an element was validated as nilled: <c>xsi:nil="true"</c> under a nillable declaration.</summary>
+        /// <param name="nodeId">The node.</param>
+        internal bool IsNilled(int nodeId)
+        {
+            return m_nilled is not null && !IsAttribute(nodeId) && m_nilled.Contains(nodeId);
+        }
+
+        /// <summary>
+        /// This tree without its type annotations, which is what <c>input-type-annotations="strip"</c>
+        /// asks for: the same nodes, every element <c>xs:untyped</c> and every attribute
+        /// <c>xs:untypedAtomic</c> and nothing nilled.
+        /// </summary>
+        /// <remarks>
+        /// The tree itself where it carries none. Otherwise a second tree over the same node arrays,
+        /// since a tree is immutable and may be in use elsewhere with its annotations; the attribute
+        /// arrays are copied, being the ones a tree appends namespace nodes to on demand, and the rest
+        /// are shared.
+        /// </remarks>
+        internal XdmTree WithoutTypeAnnotations()
+        {
+            if (!HasTypeAnnotations && m_nilled is null)
+            {
+                return this;
+            }
+
+            return Sibling(null, null, null);
+        }
+
+        /// <summary>
+        /// This tree with the annotations validation settled, in place of whatever it carried: what an
+        /// <c>xsl:document</c> with <c>validation="strict"</c> produces from the tree its content built.
+        /// </summary>
+        /// <param name="types">What validation settled, by node.</param>
+        internal XdmTree WithTypeAnnotations(TypeOverlay types)
+        {
+            ushort[]? nodeTypes = null;
+            ushort[]? attributeTypes = null;
+
+            foreach ((int node, ushort typeId) in types.Types)
+            {
+                if (IsAttribute(node))
+                {
+                    attributeTypes ??= new ushort[Math.Max(m_attributeEntryCount, 1)];
+                    attributeTypes[node - AttributeIdBase] = typeId;
+                }
+                else
+                {
+                    nodeTypes ??= new ushort[NodeCount];
+                    nodeTypes[node] = typeId;
+                }
+            }
+
+            HashSet<int>? nilled = null;
+
+            foreach (int node in types.Nilled)
+            {
+                (nilled ??= new HashSet<int>()).Add(node);
+            }
+
+            return Sibling(nodeTypes, attributeTypes, nilled);
+        }
+
+        /// <summary>A second tree over the same node arrays, carrying the annotations given and nothing else.</summary>
+        private XdmTree Sibling(ushort[]? nodeTypes, ushort[]? attributeTypes, HashSet<int>? nilled)
+        {
+            lock (m_namespaceNodeLock)
+            {
+                return new XdmTree(
+                    NameTable,
+                    NodeCount,
+                    m_kind,
+                    m_nameCode,
+                    m_parent,
+                    m_firstChild,
+                    m_next,
+                    m_subtreeEnd,
+                    m_depth,
+                    m_value,
+                    m_attrStart,
+                    m_attrCount,
+                    m_namespaceStart,
+                    m_namespaceCount,
+                    m_attributeEntryCount,
+                    (int[])m_attributeNameCode.Clone(),
+                    (string[])m_attributeValue.Clone(),
+                    (int[])m_attributeOwner.Clone(),
+                    m_namespacePrefix,
+                    m_namespaceUri,
+                    m_line,
+                    m_column,
+                    m_attributeEntryCount - AttributeNodeCount)
+                {
+                    DocumentUri = DocumentUri,
+                    BaseUri = BaseUri,
+                    UnparsedEntities = UnparsedEntities,
+                    DeclaredIdAttributes = DeclaredIdAttributes,
+                    DeclaredIdrefAttributes = DeclaredIdrefAttributes,
+                    EntityBases = EntityBases,
+                    CopiedFrom = CopiedFrom,
+                    RawText = RawText,
+                    NodeTypes = nodeTypes,
+                    AttributeTypes = attributeTypes,
+                    NilledNodes = nilled,
+                };
             }
         }
 
@@ -420,18 +602,62 @@ namespace CodeDeeds.Xslt.Model
                 return true;
             }
 
+            // Or one a schema typed so, which validation annotated it with.
+            if (m_attributeType is not null && TypeAnnotationOf(nodeId) is { IsIdType: true })
+            {
+                return true;
+            }
+
             int fingerprint = FingerprintOf(nodeId);
             return NameTable.GetLocalName(fingerprint) == "id"
                 && NameTable.GetNamespaceUri(fingerprint) == XmlNamespaceUri;
         }
 
-        /// <summary>Whether a node is an attribute the document's type declaration typed as IDREF or IDREFS.</summary>
+        /// <summary>
+        /// Whether a node is an attribute the document's type declaration typed as IDREF or IDREFS, or a
+        /// schema did.
+        /// </summary>
         /// <param name="nodeId">The node.</param>
         public bool IsIdrefAttribute(int nodeId)
         {
-            return IsAttribute(nodeId)
-                && nodeId - AttributeIdBase < AttributeNodeCount
-                && Array.BinarySearch(DeclaredIdrefAttributes, nodeId - AttributeIdBase) >= 0;
+            if (!IsAttribute(nodeId) || nodeId - AttributeIdBase >= AttributeNodeCount)
+            {
+                return false;
+            }
+
+            return Array.BinarySearch(DeclaredIdrefAttributes, nodeId - AttributeIdBase) >= 0
+                || (m_attributeType is not null && TypeAnnotationOf(nodeId) is { IsIdrefType: true });
+        }
+
+        /// <summary>
+        /// Whether an element's typed value is an ID, or a reference to one: an element a schema gave a
+        /// simple type of <c>xs:ID</c>, <c>xs:IDREF</c> or <c>xs:IDREFS</c>, or a type restricting one.
+        /// </summary>
+        /// <param name="nodeId">The node.</param>
+        /// <param name="reference">Whether to ask about IDREF rather than ID.</param>
+        internal bool IsIdTypedElement(int nodeId, bool reference)
+        {
+            if (IsAttribute(nodeId) || m_kind[nodeId] != NodeKind.Element)
+            {
+                return false;
+            }
+
+            // A tree read with its annotations stripped keeps which elements were IDs and references.
+            if (m_nodeType is null)
+            {
+                HashSet<int>? kept = reference ? IdrefElements : IdElements;
+                return kept is not null && kept.Contains(nodeId);
+            }
+
+            XPath.XdmSchemaType? type = TypeAnnotationOf(nodeId);
+
+            // A complex type with simple content holds its text as the simple type does.
+            if (type is { Variety: XPath.XdmSchemaVariety.Complex })
+            {
+                type = type.Content == System.Xml.Schema.XmlSchemaContentType.TextOnly ? type.SimpleContent : null;
+            }
+
+            return type is not null && (reference ? type.IsIdrefType : type.IsIdType);
         }
 
         /// <summary>

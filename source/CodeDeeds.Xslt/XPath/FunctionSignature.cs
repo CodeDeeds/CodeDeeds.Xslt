@@ -199,6 +199,25 @@ namespace CodeDeeds.Xslt.XPath
                     XPathValue item = XPathValue.FromNode(nodes.TreeAt(i), nodes[i]);
                     converted[i] = ConvertItem(item, function, position);
                     anyChanged |= !Same(converted[i], item);
+
+                    // A typed node's value may be several values or none, which the sequence cannot hold
+                    // as one item: the conversions so far, and the rest, are gathered the general way.
+                    if (converted[i].Kind == XPathValueKind.Sequence)
+                    {
+                        List<XPathValue> gathered = new List<XPathValue>(converted.Length);
+
+                        for (int j = 0; j <= i; j++)
+                        {
+                            gathered.Add(converted[j]);
+                        }
+
+                        for (int j = i + 1; j < converted.Length; j++)
+                        {
+                            gathered.Add(ConvertItem(XPathValue.FromNode(nodes.TreeAt(j), nodes[j]), function, position));
+                        }
+
+                        return XdmSequence.Concatenate(gathered);
+                    }
                 }
 
                 return anyChanged ? XPathValue.FromSequence(new XdmSequence(converted)) : value;
@@ -310,10 +329,28 @@ namespace CodeDeeds.Xslt.XPath
                         : throw Refuse(function, position, "needs a node, and was given a value");
             }
 
-            // Atomization: a node contributes its string-value, which carries no type with it.
-            XPathValue atomic = isNode
-                ? XPathValue.FromUntypedAtomic(XdmSequence.StringValueOf(item))
-                : item;
+            // Atomization: a node contributes its typed value, which is its text untyped unless the node
+            // was validated, and may then be several values, each converted on its own, or none.
+            XPathValue atomic = isNode ? XdmSequence.TypedValueOf(item) : item;
+
+            if (atomic.Kind == XPathValueKind.Sequence)
+            {
+                XdmSequence several = atomic.AsSequence();
+
+                if (several.Count > 1 && !Repeating)
+                {
+                    throw Refuse(function, position, $"takes one value, and the node's typed value is {several.Count} values");
+                }
+
+                List<XPathValue> converted = new List<XPathValue>(several.Count);
+
+                for (int i = 0; i < several.Count; i++)
+                {
+                    converted.Add(ConvertItem(several[i], function, position));
+                }
+
+                return XdmSequence.Concatenate(converted);
+            }
 
             // An untyped value is read as whatever was declared — the rule that keeps document content usable
             // without a cast at every reference. It may fail, as any cast may, and that failure is the answer.

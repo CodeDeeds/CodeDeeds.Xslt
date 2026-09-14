@@ -163,11 +163,51 @@ namespace CodeDeeds.Xslt.XPath
     /// A straightforward <see cref="IXPathStaticContext"/> backed by dictionaries, for evaluating expressions
     /// outside a stylesheet.
     /// </summary>
-    public sealed class XPathStaticContext : IXPathStaticContext
+    public sealed class XPathStaticContext : IXPathStaticContext, ISchemaTypeProvider
     {
         private readonly Dictionary<string, string> m_namespaces = new(StringComparer.Ordinal);
         private readonly Dictionary<ExpandedName, int> m_variables = new();
         private readonly Dictionary<ExpandedName, DecimalFormat> m_decimalFormats = new();
+        private Compiler.SchemaComponents? m_schemas;
+
+        /// <summary>
+        /// Gets or sets the schemas whose types an expression may name: in <c>instance of</c>, a cast, a
+        /// constructor function or a sequence type. Set before the first expression is parsed.
+        /// </summary>
+        public System.Xml.Schema.XmlSchemaSet? Schemas { get; set; }
+
+        XdmSchemaType? ISchemaTypeProvider.ResolveSchemaType(string namespaceUri, string localName)
+        {
+            if (Schemas is null && namespaceUri != XdmType.SchemaNamespace)
+            {
+                return null;
+            }
+
+            m_schemas ??= new Compiler.SchemaComponents(Schemas, null);
+            return m_schemas.FindType(namespaceUri, localName);
+        }
+
+        XdmSchemaDeclaration? ISchemaTypeProvider.ResolveElementDeclaration(string namespaceUri, string localName)
+        {
+            if (Schemas is null)
+            {
+                return null;
+            }
+
+            m_schemas ??= new Compiler.SchemaComponents(Schemas, null);
+            return m_schemas.FindElement(namespaceUri, localName);
+        }
+
+        XdmSchemaDeclaration? ISchemaTypeProvider.ResolveAttributeDeclaration(string namespaceUri, string localName)
+        {
+            if (Schemas is null)
+            {
+                return null;
+            }
+
+            m_schemas ??= new Compiler.SchemaComponents(Schemas, null);
+            return m_schemas.FindAttribute(namespaceUri, localName);
+        }
 
         /// <summary>Initializes a context.</summary>
         /// <param name="names">The name-slot table to use, or <see langword="null"/> to create one.</param>

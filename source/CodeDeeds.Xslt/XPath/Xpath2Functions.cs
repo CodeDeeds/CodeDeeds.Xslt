@@ -797,11 +797,12 @@ namespace CodeDeeds.Xslt.XPath
 
                 case Xpath2Function.Nilled:
                 {
-                    // Nothing carries a type annotation here, so nothing is nilled. The answer is still only
-                    // defined for an element: anything else yields the empty sequence.
+                    // Only an element is ever nilled, and only one that validation found so: anything else
+                    // yields the empty sequence, and an element of a tree nothing validated answers false.
                     List<XPathValue> items = ItemsOrContext(0, ref context);
-                    return items.Count == 1 && IsElement(items[0])
-                        ? XPathValue.FromBoolean(false)
+                    return items.Count == 1 && TryNode(items[0], out Model.XdmTree? nilledTree, out int nilledNode)
+                        && nilledTree!.KindOf(nilledNode) == Model.NodeKind.Element
+                        ? XPathValue.FromBoolean(nilledTree.IsNilled(nilledNode))
                         : XPathValue.FromSequence(XdmSequence.Empty);
                 }
 
@@ -2715,11 +2716,14 @@ namespace CodeDeeds.Xslt.XPath
 
         // ---- Value comparison ----------------------------------------------------------------------------
 
-        /// <summary>Reduces an item to its atomic value, which for a node is its string-value, untyped.</summary>
+        /// <summary>
+        /// Reduces an item to its atomic value, which for a node is its typed value: its string-value,
+        /// untyped, unless the node was validated.
+        /// </summary>
         private static XPathValue Atomize(XPathValue item)
         {
             return item.Kind is XPathValueKind.Node or XPathValueKind.NodeSet
-                ? XPathValue.FromUntypedAtomic(XdmSequence.StringValueOf(item))
+                ? XdmSequence.TypedValueAsOne(item, "The function")
                 : item;
         }
 

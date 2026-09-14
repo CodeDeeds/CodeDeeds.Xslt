@@ -467,7 +467,27 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 foreach (string id in item.ToStringValue().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
                 {
-                    if (ids.TryGetValue(id, out int element) && !found.Contains(element))
+                    if (!ids.TryGetValue(id, out int element))
+                    {
+                        continue;
+                    }
+
+                    // An element whose own typed value is the ID is what id() answers with, and what
+                    // element-with-id() answers with is the element it is inside: the one the ID
+                    // identifies rather than the one that spells it (XPath 3.1 §14.5.2).
+                    if (m_name == "element-with-id" && tree.IsIdTypedElement(element, reference: false))
+                    {
+                        int parent = tree.ParentOf(element);
+
+                        if (parent < 0 || tree.KindOf(parent) != NodeKind.Element)
+                        {
+                            continue;
+                        }
+
+                        element = parent;
+                    }
+
+                    if (!found.Contains(element))
                     {
                         found.Add(element);
                     }
@@ -531,6 +551,7 @@ namespace CodeDeeds.Xslt.Compiler
         public static Dictionary<string, int> BuildIndex(XdmTree tree)
         {
             Dictionary<string, int> ids = new(StringComparer.Ordinal);
+            bool typed = tree.HasTypeAnnotations;
 
             for (int node = 0; node < tree.NodeCount; node++)
             {
@@ -549,6 +570,12 @@ namespace CodeDeeds.Xslt.Compiler
                     {
                         ids.TryAdd(tree.StringValueOf(attribute).Trim(), node);
                     }
+                }
+
+                // An element a schema typed as xs:ID identifies itself by its content.
+                if (typed && tree.IsIdTypedElement(node, reference: false))
+                {
+                    ids.TryAdd(tree.StringValueOf(node).Trim(), node);
                 }
             }
 
@@ -627,22 +654,68 @@ namespace CodeDeeds.Xslt.Compiler
 
             if (wanted.Count != 0)
             {
-                foreach (int entry in tree.DeclaredIdrefAttributes)
+                if (tree.HasTypeAnnotations)
                 {
-                    int attribute = XdmTree.AttributeIdBase + entry;
-
-                    foreach (string token in tree.StringValueOf(attribute).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+                    // A schema may have typed any attribute, or an element's content, as a reference, so
+                    // the whole tree is looked at; the declaration's own list is among what is found.
+                    for (int node = 0; node < tree.NodeCount; node++)
                     {
-                        if (wanted.Contains(token))
+                        if (tree.KindOf(node) != NodeKind.Element)
+                        {
+                            continue;
+                        }
+
+                        int count = tree.AttributeCountOf(node);
+
+                        for (int i = 0; i < count; i++)
+                        {
+                            int attribute = tree.AttributeAt(node, i);
+
+                            if (tree.IsIdrefAttribute(attribute) && RefersToOneOf(tree, attribute, wanted))
+                            {
+                                found.Add(attribute);
+                            }
+                        }
+
+                        if (tree.IsIdTypedElement(node, reference: true) && RefersToOneOf(tree, node, wanted))
+                        {
+                            found.Add(node);
+                        }
+                    }
+
+                    // Attributes were added behind the element that owns them, and an element's attributes
+                    // follow it in document order; the elements typed as references stand where they are.
+                    found.Sort((a, b) => tree.DocumentOrderKeyOf(a).CompareTo(tree.DocumentOrderKeyOf(b)));
+                }
+                else
+                {
+                    foreach (int entry in tree.DeclaredIdrefAttributes)
+                    {
+                        int attribute = XdmTree.AttributeIdBase + entry;
+
+                        if (RefersToOneOf(tree, attribute, wanted))
                         {
                             found.Add(attribute);
-                            break;
                         }
                     }
                 }
             }
 
             return XPathValue.FromNodeSet(NodeSet.FromOrderedNodes(tree, found));
+        }
+
+        /// <summary>Whether any token of a node's string value is one of the IDs sought.</summary>
+        private static bool RefersToOneOf(XdmTree tree, int node, HashSet<string> wanted)
+        {
+            foreach (string token in tree.StringValueOf(node).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (wanted.Contains(token))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }

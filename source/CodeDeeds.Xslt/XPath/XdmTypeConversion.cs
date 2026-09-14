@@ -126,10 +126,32 @@ namespace CodeDeeds.Xslt.XPath
                 return item;
             }
 
-            // Atomization: a node contributes its typed value, which here is always untyped.
+            // Atomization: a node contributes its typed value, which is its text untyped unless the node
+            // was validated, when it may be several values or none, each converted on its own.
             XPathValue atomic = item.Kind is XPathValueKind.Node or XPathValueKind.NodeSet
-                ? XPathValue.FromUntypedAtomic(XdmSequence.StringValueOf(item))
+                ? XdmSequence.TypedValueOf(item)
                 : item;
+
+            if (atomic.Kind == XPathValueKind.Sequence)
+            {
+                XdmSequence several = atomic.AsSequence();
+                List<XPathValue> converted = new List<XPathValue>(several.Count);
+
+                for (int i = 0; i < several.Count; i++)
+                {
+                    converted.Add(ConvertItem(several[i], type));
+                }
+
+                return XdmSequence.Concatenate(converted);
+            }
+
+            // A type from a schema converts an untyped value by casting to it, facets and all, and takes a
+            // typed value as it is: the rules promote numbers and nothing else, and a schema type is
+            // matched by its annotation.
+            if (type.SchemaType is XdmSchemaType schema)
+            {
+                return atomic.TypeCode == XdmTypeCode.UntypedAtomic ? schema.Cast(atomic, null) : atomic;
+            }
 
             XdmTypeCode? wanted = type.AtomicType;
 
@@ -163,7 +185,15 @@ namespace CodeDeeds.Xslt.XPath
                 }
             }
 
-            // Numeric promotion, and only upwards: an integer is a decimal is a float is a double.
+            // An integer is a decimal already, by subtype substitution rather than promotion: it stays
+            // the integer it was, whatever type it was made under, where a cast would have made a decimal
+            // and dropped the name.
+            if (wanted.Value == XdmTypeCode.Decimal && atomic.TypeCode == XdmTypeCode.Integer)
+            {
+                return atomic;
+            }
+
+            // Numeric promotion, and only upwards: a decimal is a float is a double.
             if (IsNumeric(atomic.TypeCode) && IsNumeric(wanted.Value) && Width(wanted.Value) >= Width(atomic.TypeCode))
             {
                 return XdmType.TryGet(NameOf(wanted.Value), out XdmType.BuiltInType numeric)

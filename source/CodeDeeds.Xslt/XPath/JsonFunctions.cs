@@ -154,14 +154,20 @@ namespace CodeDeeds.Xslt.XPath
 
             if (m_function == JsonFunction.JsonToXml)
             {
-                // Validating the result against the schema needs a schema processor, and asking for one
-                // where there is none is the error the specification gives it.
-                if (Flag(options, "validate", false))
+                bool validate = Flag(options, "validate", false);
+
+                // Validating the result against the schema needs a schema-aware processor with the schema
+                // for the XPath functions namespace in scope; without one, asking for it is the error the
+                // specification gives (FOJS0004).
+                Compiler.SchemaComponents? schemas = validate ? context.Runtime?.Schemas : null;
+
+                if (validate && (schemas is null || schemas.FindElement("http://www.w3.org/2005/xpath-functions", "map") is null))
                 {
                     throw XsltErrors.Error(
                         XsltErrorCode.FOJS0004,
-                        "fn:json-to-xml() was asked to validate its result, and this processor is not "
-                        + "schema-aware.");
+                        "fn:json-to-xml() was asked to validate its result, and the schema for the XPath "
+                        + "functions namespace is not in scope. Make the processor schema-aware and import "
+                        + "that namespace's schema.");
                 }
 
                 JsonTreeBuilder.JsonToXmlOptions settings = new JsonTreeBuilder.JsonToXmlOptions
@@ -174,6 +180,27 @@ namespace CodeDeeds.Xslt.XPath
 
                 XdmTree tree = JsonTreeBuilder.FromJson(
                     text, settings, context.Runtime is null ? null : context.Tree.NameTable);
+
+                if (validate)
+                {
+                    // The XML a well-formed JSON document makes is valid against the schema, so this
+                    // annotates rather than refuses; a validity failure would be FOJS0004.
+                    Model.TypeOverlay overlay;
+
+                    try
+                    {
+                        overlay = new Compiler.NodeValidator(schemas!).ValidateDocument(tree, strict: true);
+                    }
+                    catch (XsltException failed)
+                    {
+                        throw XsltErrors.Error(
+                            XsltErrorCode.FOJS0004,
+                            $"fn:json-to-xml() produced a result that is not valid against the JSON schema: {failed.Message}",
+                            failed);
+                    }
+
+                    tree = tree.WithTypeAnnotations(overlay);
+                }
 
                 return XPathValue.FromNodeSet(NodeSet.Singleton(tree, XdmTree.RootNode));
             }

@@ -570,7 +570,7 @@ namespace CodeDeeds.Xslt.Compiler
         {
             return tokens[index].Kind == XPathTokenKind.Name
                 && tokens[index].Prefix.Length == 0
-                && tokens[index].Text is "key" or "id"
+                && tokens[index].Text is "key" or "id" or "element-with-id"
                 && tokens[index + 1].Kind == XPathTokenKind.LeftParen;
         }
 
@@ -582,11 +582,21 @@ namespace CodeDeeds.Xslt.Compiler
         {
             XPathToken opening = tokens[index];
 
-            if (opening.Text == "id")
+            if (opening.Text is "id" or "element-with-id")
             {
                 // id(v) selects the elements an ID names — an xml:id, or an attribute the document's type
-                // declaration typed ID — and the steps after it are relative to those, as with a key. The
-                // value is held to the same grammar as a key's: a literal or a variable, not an expression.
+                // declaration or a schema typed ID — and the steps after it are relative to those, as with
+                // a key; element-with-id(v), which XSLT 3.0 adds, answers with the element an ID
+                // identifies where the ID is an element's own content. The value is held to the same
+                // grammar as a key's: a literal or a variable, not an expression.
+                if (opening.Text == "element-with-id" && context.SyntaxVersion.CompareTo(XsltVersion.V30) < 0)
+                {
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XTSE0340,
+                        "element-with-id() in a pattern is XSLT 3.0; under XSLT 2.0 a pattern may start with "
+                        + "id() or key().");
+                }
+
                 index += 2;
                 Expr ids = ParseKeyValue(tokens, ref index, source, context);
                 Expr? document = null;
@@ -612,7 +622,7 @@ namespace CodeDeeds.Xslt.Compiler
                 }
 
                 index++;
-                return new IdExpr("id", ids, document);
+                return new IdExpr(opening.Text, ids, document);
             }
 
             index += 2;

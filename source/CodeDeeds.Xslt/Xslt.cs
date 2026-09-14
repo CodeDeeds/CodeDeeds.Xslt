@@ -54,6 +54,7 @@ namespace CodeDeeds.Xslt
             ArgumentNullException.ThrowIfNull(stream);
 
             m_options = options ?? XsltOptions.Default;
+            CheckOptions(m_options);
 
             try
             {
@@ -77,6 +78,7 @@ namespace CodeDeeds.Xslt
             ArgumentNullException.ThrowIfNull(reader);
 
             m_options = options ?? XsltOptions.Default;
+            CheckOptions(m_options);
 
             try
             {
@@ -95,6 +97,27 @@ namespace CodeDeeds.Xslt
             m_stylesheet = stylesheet;
             m_options = options;
         }
+
+        /// <summary>Refuses options that contradict one another before anything is compiled with them.</summary>
+        /// <param name="options">The options.</param>
+        /// <exception cref="ArgumentException">Input validation is asked for without schema awareness.</exception>
+        private static void CheckOptions(XsltOptions options)
+        {
+            if (options.InputValidation is XsltValidation.Strict or XsltValidation.Lax && !options.SchemaAware)
+            {
+                throw new ArgumentException(
+                    "XsltOptions.InputValidation asks for the documents read to be validated, which needs "
+                    + "XsltOptions.SchemaAware: the schemas to validate against are the ones a schema-aware "
+                    + "stylesheet imports and the caller supplies.",
+                    nameof(options));
+            }
+        }
+
+        /// <summary>
+        /// What the input is validated against, or null where it is read as it is; see
+        /// <see cref="XsltOptions.InputValidation"/>.
+        /// </summary>
+        private TreeValidation? InputValidation => m_stylesheet.InputValidationFor(m_options);
 
         /// <summary>Gets the configuration this stylesheet was built with.</summary>
         public XsltOptions Options => m_options;
@@ -147,6 +170,7 @@ namespace CodeDeeds.Xslt
                     nameof(options));
             }
 
+            CheckOptions(options);
             return new Xslt(m_stylesheet, options);
         }
 
@@ -237,7 +261,7 @@ namespace CodeDeeds.Xslt
         private XdmTree ParseXmlText(string xmlInput)
         {
             return XdmTreeBuilder.FromXmlPooled(
-                xmlInput, m_stylesheet.Whitespace, m_options.EntityResolver, m_options.InputUri);
+                xmlInput, m_stylesheet.Whitespace, m_options.EntityResolver, m_options.InputUri, InputValidation);
         }
 
         public void TransformXml(TextReader xmlInput, TextWriter writer)
@@ -245,7 +269,7 @@ namespace CodeDeeds.Xslt
             ArgumentNullException.ThrowIfNull(xmlInput);
             ArgumentNullException.ThrowIfNull(writer);
 
-            Transform(XdmTreeBuilder.FromXmlPooled(xmlInput, m_stylesheet.Whitespace, m_options.EntityResolver, m_options.InputUri), writer);
+            Transform(XdmTreeBuilder.FromXmlPooled(xmlInput, m_stylesheet.Whitespace, m_options.EntityResolver, m_options.InputUri, InputValidation), writer);
         }
 
         /// <summary>
@@ -265,7 +289,7 @@ namespace CodeDeeds.Xslt
             ArgumentNullException.ThrowIfNull(xmlInput);
             ArgumentNullException.ThrowIfNull(writer);
 
-            Transform(XdmTreeBuilder.FromXmlPooled(xmlInput, m_stylesheet.Whitespace, m_options.EntityResolver, m_options.InputUri), writer);
+            Transform(XdmTreeBuilder.FromXmlPooled(xmlInput, m_stylesheet.Whitespace, m_options.EntityResolver, m_options.InputUri, InputValidation), writer);
         }
 
         /// <summary>
@@ -284,7 +308,7 @@ namespace CodeDeeds.Xslt
             ArgumentNullException.ThrowIfNull(xmlInput);
             ArgumentNullException.ThrowIfNull(output);
 
-            Transform(XdmTreeBuilder.FromXmlPooled(xmlInput, m_stylesheet.Whitespace, m_options.EntityResolver, m_options.InputUri), output);
+            Transform(XdmTreeBuilder.FromXmlPooled(xmlInput, m_stylesheet.Whitespace, m_options.EntityResolver, m_options.InputUri, InputValidation), output);
         }
 
         /// <summary>
@@ -297,7 +321,7 @@ namespace CodeDeeds.Xslt
             ArgumentNullException.ThrowIfNull(xmlInput);
             ArgumentNullException.ThrowIfNull(output);
 
-            Transform(XdmTreeBuilder.FromXmlPooled(xmlInput, m_stylesheet.Whitespace, m_options.EntityResolver, m_options.InputUri), output);
+            Transform(XdmTreeBuilder.FromXmlPooled(xmlInput, m_stylesheet.Whitespace, m_options.EntityResolver, m_options.InputUri, InputValidation), output);
         }
 
         /// <summary>

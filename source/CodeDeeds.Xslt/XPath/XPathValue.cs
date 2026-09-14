@@ -201,10 +201,34 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         public XdmType.DerivedType DerivedType { get; private init; }
 
+        /// <summary>
+        /// The number of the schema type this value was made as, where that is a type from a schema rather
+        /// than a built-in one, or zero for none.
+        /// </summary>
+        /// <remarks>
+        /// A user-defined atomic type is held as the built-in type beneath it, an integer or a string, and
+        /// carries the type beside it the way <see cref="DerivedType"/> carries a built-in derived name: read
+        /// by the type tests and by nothing else. A number rather than a reference, because the struct has
+        /// room for two more bytes in its padding and none for another reference.
+        /// </remarks>
+        internal ushort SchemaTypeId { get; private init; }
+
+        /// <summary>The schema type this value was made as, or null where it was made as a built-in one.</summary>
+        internal XdmSchemaType? SchemaType => SchemaTypeId == 0 ? null : XdmSchemaType.ById(SchemaTypeId);
+
         /// <summary>Returns this value carrying the derived type it was made under.</summary>
+        /// <remarks>
+        /// A cast to a built-in type, which is what calls this, leaves whatever schema type the value
+        /// arrived with behind: the result is of the type cast to.
+        /// </remarks>
         /// <param name="derived">The derived type, or <see cref="XdmType.DerivedType.None"/> for none.</param>
         public XPathValue AsDerived(XdmType.DerivedType derived) =>
-            derived == DerivedType ? this : this with { DerivedType = derived };
+            derived == DerivedType && SchemaTypeId == 0 ? this : this with { DerivedType = derived, SchemaTypeId = 0 };
+
+        /// <summary>Returns this value annotated with a schema type, held as it is.</summary>
+        /// <param name="type">The type the value was made as.</param>
+        internal XPathValue AsSchemaType(XdmSchemaType type) =>
+            this with { SchemaTypeId = type.Id, DerivedType = type.Derived };
 
         /// <summary>Gets which of the four XPath types this value holds.</summary>
         public XPathValueKind Kind { get; }

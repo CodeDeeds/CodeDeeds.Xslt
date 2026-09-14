@@ -599,6 +599,10 @@ namespace CodeDeeds.Xslt.Compiler
                 Version = m_host.Version,
                 DynamicEvaluation = m_host.DynamicEvaluation,
                 EnvironmentVariablesEnabled = m_host.EnvironmentVariablesEnabled,
+                SchemaAware = m_host.SchemaAware,
+                SchemaResolver = m_host.SchemaResolver,
+                Schemas = m_host.Schemas,
+                InputValidation = m_host.InputValidation,
                 MessageWriter = messages ? m_host.MessageWriter : TextWriter.Null,
                 BaseUri = BaseUriOption() ?? uri,
                 Parameters = Parameters(),
@@ -827,7 +831,7 @@ namespace CodeDeeds.Xslt.Compiler
             // string value.
             if (items.Count == 1 && items[0].Kind is XPathValueKind.Node or XPathValueKind.NodeSet)
             {
-                return XPathValue.FromUntypedAtomic(XdmSequence.StringValueOf(items[0]));
+                return XdmSequence.TypedValueAsOne(items[0], $"The option '{option}'");
             }
 
             if (items.Count != 1

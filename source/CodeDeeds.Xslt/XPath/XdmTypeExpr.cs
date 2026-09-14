@@ -70,6 +70,12 @@ namespace CodeDeeds.Xslt.XPath
         /// </summary>
         private readonly XdmType.DerivedType m_derivedType;
 
+        /// <summary>
+        /// The schema type named, where the name is one from a schema rather than a built-in one: a
+        /// user-defined atomic type or a union, which a value is an instance of by its annotation.
+        /// </summary>
+        internal XdmSchemaType? SchemaType { get; private init; }
+
         private XdmSequenceType(
             XdmTypeCode atomic,
             NodeKind? nodeKind,
@@ -129,6 +135,7 @@ namespace CodeDeeds.Xslt.XPath
                 || m_anyAtomic != other.m_anyAtomic
                 || m_anyNumeric != other.m_anyNumeric
                 || m_derivedType != other.m_derivedType
+                || !ReferenceEquals(SchemaType, other.SchemaType)
                 || (m_memberType is null) != (other.m_memberType is null)
                 || (m_keyType is null) != (other.m_keyType is null)
                 || (m_kindTest is null) != (other.m_kindTest is null))
@@ -229,7 +236,7 @@ namespace CodeDeeds.Xslt.XPath
         /// names one type. Both still atomize what they are given — that is the first of the conversion
         /// rules and it does not depend on knowing the type — so the two are asked separately.
         /// </remarks>
-        public bool WantsAtomic => m_anyAtomic || m_anyNumeric || AtomicType is not null;
+        public bool WantsAtomic => m_anyAtomic || m_anyNumeric || AtomicType is not null || SchemaType is not null;
 
         /// <summary>The type matching nothing but the empty sequence.</summary>
         public static XdmSequenceType EmptySequence { get; } =
@@ -343,6 +350,17 @@ namespace CodeDeeds.Xslt.XPath
             new XdmSequenceType(code, null, false, false, occurrence, written, derivedType: derived)
             {
                 BuiltIn = builtIn,
+            };
+
+        /// <summary>Creates a type matching the values of a type from a schema: an atomic type or a union.</summary>
+        /// <param name="type">The schema type.</param>
+        /// <param name="occurrence">How many items the type admits.</param>
+        /// <param name="written">The type as it was written, for diagnostics.</param>
+        internal static XdmSequenceType Schema(XdmSchemaType type, XdmOccurrence occurrence, string written) =>
+            new XdmSequenceType(type.Primitive, null, false, false, occurrence, written, derivedType: type.Derived)
+            {
+                SchemaType = type,
+                BuiltIn = type.BuiltIn,
             };
 
         /// <summary>
@@ -529,6 +547,13 @@ namespace CodeDeeds.Xslt.XPath
                 return false;
             }
 
+            // A type from a schema asks about the annotation a value carries, or for a union about its
+            // members, which the type itself answers.
+            if (SchemaType is not null)
+            {
+                return !item.IsFunctionItem && SchemaType.Accepts(item);
+            }
+
             // A derived name asks which type the value was made under rather than which one it is held in,
             // so xs:long(1) is not an xs:nonNegativeInteger and a plain integer is not an xs:int. The
             // representation still has to agree, or 'x' would be an xs:byte for want of anything to say no.
@@ -682,6 +707,21 @@ namespace CodeDeeds.Xslt.XPath
             if (other.m_anyNumeric)
             {
                 return m_anyNumeric || XdmComparison.IsNumeric(m_atomic);
+            }
+
+            // A type from a schema is within another by derivation, and within a built-in type by the
+            // built-in type it is held as; a built-in type is within no schema type.
+            if (other.SchemaType is not null)
+            {
+                return SchemaType is not null && SchemaType.DerivesFrom(other.SchemaType);
+            }
+
+            if (SchemaType is not null)
+            {
+                return SchemaType.Primitive != XdmTypeCode.None
+                    && (SchemaType.Primitive == other.m_atomic || DerivedFromCode(SchemaType.Primitive, other.m_atomic))
+                    && (other.m_derivedType == XdmType.DerivedType.None
+                        || XdmType.DerivesFrom(SchemaType.Derived, other.m_derivedType));
             }
 
             if (m_anyNumeric
@@ -892,6 +932,7 @@ namespace CodeDeeds.Xslt.XPath
     {
         private readonly Expr m_value;
         private readonly XdmType.BuiltInType m_type;
+        private readonly XdmSchemaType? m_schemaType;
         private readonly bool m_allowEmpty;
         private readonly bool m_testOnly;
         private readonly IReadOnlyDictionary<string, string>? m_namespaces;
@@ -914,6 +955,26 @@ namespace CodeDeeds.Xslt.XPath
         {
             m_value = value;
             m_type = type;
+            m_allowEmpty = allowEmpty;
+            m_testOnly = testOnly;
+            m_namespaces = namespaces;
+        }
+
+        /// <summary>Initializes a cast to a type from a schema, which is also that type's constructor function.</summary>
+        /// <param name="value">The value to cast.</param>
+        /// <param name="type">The schema type to cast to.</param>
+        /// <param name="allowEmpty">Whether the empty sequence is admitted, which a constructor always does.</param>
+        /// <param name="testOnly">Whether this is <c>castable as</c> rather than <c>cast as</c>.</param>
+        /// <param name="namespaces">The namespace bindings in scope where the cast is written.</param>
+        internal CastExpr(
+            Expr value,
+            XdmSchemaType type,
+            bool allowEmpty,
+            bool testOnly,
+            IReadOnlyDictionary<string, string>? namespaces = null)
+        {
+            m_value = value;
+            m_schemaType = type;
             m_allowEmpty = allowEmpty;
             m_testOnly = testOnly;
             m_namespaces = namespaces;
@@ -943,19 +1004,46 @@ namespace CodeDeeds.Xslt.XPath
                         $"A cast takes one value, but was given {items.Count}.");
             }
 
-            // A node casts by way of its string-value, which is untyped.
+            // A node casts by way of its typed value: its string-value, untyped, unless it was validated,
+            // when it may be nothing at all, which casts as the empty sequence does.
             XPathValue single = items[0].Kind == XPathValueKind.Node
-                ? XPathValue.FromUntypedAtomic(XdmSequence.StringValueOf(items[0]))
+                ? XdmSequence.TypedValueAsOne(items[0], "A cast")
                 : items[0];
+
+            if (single.Kind == XPathValueKind.Sequence)
+            {
+                if (m_allowEmpty)
+                {
+                    return m_testOnly
+                        ? XPathValue.FromBoolean(true)
+                        : XPathValue.FromSequence(XdmSequence.Empty);
+                }
+
+                return m_testOnly
+                    ? XPathValue.FromBoolean(false)
+                    : throw XsltErrors.Error(
+                        XsltErrorCode.XPTY0004,
+                        "A cast takes one value, and the node's typed value is empty.");
+            }
 
             if (!m_testOnly)
             {
-                return XdmType.Cast(single, m_type, m_namespaces);
+                return m_schemaType is not null
+                    ? m_schemaType.Cast(single, m_namespaces)
+                    : XdmType.Cast(single, m_type, m_namespaces);
             }
 
             try
             {
-                XdmType.Cast(single, m_type, m_namespaces);
+                if (m_schemaType is not null)
+                {
+                    m_schemaType.Cast(single, m_namespaces);
+                }
+                else
+                {
+                    XdmType.Cast(single, m_type, m_namespaces);
+                }
+
                 return XPathValue.FromBoolean(true);
             }
             catch (XsltException)

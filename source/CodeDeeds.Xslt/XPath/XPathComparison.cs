@@ -205,14 +205,14 @@ namespace CodeDeeds.Xslt.XPath
                     NodeSet nodes = value.AsNodeSet();
                     for (int i = 0; i < nodes.Count; i++)
                     {
-                        items.Add(XPathValue.FromUntypedAtomic(nodes.TreeAt(i).StringValueOf(nodes[i])));
+                        XdmSequence.AtomizeNodeInto(nodes.TreeAt(i), nodes[i], items);
                     }
 
                     break;
                 }
 
                 case XPathValueKind.Node:
-                    items.Add(XPathValue.FromUntypedAtomic(XdmSequence.StringValueOf(value)));
+                    XdmSequence.AtomizeNodeInto(value.NodeTree, value.NodeId, items);
                     break;
 
                 case XPathValueKind.Array:

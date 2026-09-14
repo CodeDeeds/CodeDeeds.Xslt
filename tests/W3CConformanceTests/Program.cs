@@ -38,13 +38,18 @@ namespace CodeDeeds.Xslt.Conformance
                 ? XsltBackend.Compiled
                 : XsltBackend.Interpreted;
 
+            // Schema awareness is opt-in for the XSLT run while it is being built: on, the schemas an
+            // environment declares are in scope and the tests marked schema_aware are judged rather than
+            // skipped, which is how the work is measured without moving the headline figure under it.
+            bool schemaAware = Array.Exists(args, argument => argument == "--schema");
+
             args = Array.FindAll(args, argument => !argument.StartsWith("--", StringComparison.Ordinal));
 
             XsltVersion version = thirty ? XsltVersion.V30 : XsltVersion.V20;
 
             if (xslt)
             {
-                return Xslt30.Run(args, version, backend);
+                return Xslt30.Run(args, version, backend, schemaAware);
             }
 
             if (backend == XsltBackend.Compiled)

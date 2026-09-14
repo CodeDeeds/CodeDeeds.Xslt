@@ -21,7 +21,7 @@ namespace CodeDeeds.Xslt.Compiler
     /// <c>call-template</c> could not refer to a template declared later in the file.
     /// </para>
     /// </remarks>
-    internal sealed class StylesheetCompiler : IXPathStaticContext
+    internal sealed class StylesheetCompiler : IXPathStaticContext, ISchemaTypeProvider
     {
         /// <summary>The XSLT namespace.</summary>
         public const string XsltNamespace = "http://www.w3.org/1999/XSL/Transform";
@@ -296,11 +296,74 @@ namespace CodeDeeds.Xslt.Compiler
         private readonly XsltBackend m_backend;
         private int m_nextPrecedence;
 
+        /// <summary>
+        /// The schema components in scope, or null for a processor that is not schema-aware. Made with the
+        /// caller's schemas, and grown by every xsl:import-schema.
+        /// </summary>
+        private readonly SchemaComponents? m_schemas;
+
         private StylesheetCompiler(XdmTree tree, XsltOptions options)
         {
             m_tree = tree;
             m_options = options;
             m_backend = options.Backend;
+            m_schemas = options.SchemaAware ? new SchemaComponents(options.Schemas, options.SchemaResolver) : null;
+        }
+
+        /// <summary>
+        /// What the modules read so far say about the type annotations of the documents the stylesheet
+        /// reads: true for <c>strip</c>, false for <c>preserve</c>, null while none has said either.
+        /// </summary>
+        private bool? m_stripInputTypeAnnotations;
+
+        /// <summary>
+        /// Records a module's <c>input-type-annotations</c>. <c>unspecified</c> says nothing, and this
+        /// engine then preserves; <c>strip</c> and <c>preserve</c> from two modules of one stylesheet
+        /// cannot both be honoured (§4.4, <c>XTSE0265</c>).
+        /// </summary>
+        /// <param name="said">The attribute's value.</param>
+        private void NoteInputTypeAnnotations(string said)
+        {
+            bool? asked = said.Trim() switch
+            {
+                "strip" => true,
+                "preserve" => false,
+                _ => null,
+            };
+
+            if (asked is null)
+            {
+                return;
+            }
+
+            if (m_stripInputTypeAnnotations is bool settled && settled != asked)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTSE0265,
+                    "One stylesheet module says input-type-annotations=\"strip\" and another says "
+                    + "\"preserve\", and the documents read cannot be both.");
+            }
+
+            m_stripInputTypeAnnotations = asked;
+        }
+
+        /// <inheritdoc/>
+        /// <remarks>What an expression's type name resolves to beyond the built-in types: the imported schemas' types.</remarks>
+        public XdmSchemaType? ResolveSchemaType(string namespaceUri, string localName)
+        {
+            return m_schemas?.FindType(namespaceUri, localName);
+        }
+
+        /// <inheritdoc/>
+        public XdmSchemaDeclaration? ResolveElementDeclaration(string namespaceUri, string localName)
+        {
+            return m_schemas?.FindElement(namespaceUri, localName);
+        }
+
+        /// <inheritdoc/>
+        public XdmSchemaDeclaration? ResolveAttributeDeclaration(string namespaceUri, string localName)
+        {
+            return m_schemas?.FindAttribute(namespaceUri, localName);
         }
 
         /// <summary>Compiles a stylesheet.</summary>
@@ -603,9 +666,11 @@ namespace CodeDeeds.Xslt.Compiler
                 EligibleInitialModes = eligibleModes,
                 Functions = m_functions,
                 PackageWhitespace = m_whitespaceByPackage,
+                StripInputTypeAnnotations = m_stripInputTypeAnnotations == true,
                 DecimalFormats = DecimalFormatsOf(0),
                 PrincipalNamespaces = principalNamespaces,
                 Version = VersionOf(m_scopeElement),
+                Schemas = m_schemas,
             };
         }
 
@@ -837,7 +902,8 @@ namespace CodeDeeds.Xslt.Compiler
                         property.LocalName,
                         Version,
                         SyntaxVersion,
-                        m_options.DynamicEvaluation);
+                        m_options.DynamicEvaluation,
+                        m_options.SchemaAware);
 
                     return value.Kind == XPathValueKind.Number
                         ? new NumberLiteralExpr(value.ToNumber())
@@ -845,7 +911,12 @@ namespace CodeDeeds.Xslt.Compiler
                 }
 
                 return new SystemPropertyExpr(
-                    arguments[0], PrefixesInScope(), Version, SyntaxVersion, m_options.DynamicEvaluation);
+                    arguments[0],
+                    PrefixesInScope(),
+                    Version,
+                    SyntaxVersion,
+                    m_options.DynamicEvaluation,
+                    m_options.SchemaAware);
             }
 
             if (name == "available-system-properties" && Implements30)
@@ -1054,13 +1125,14 @@ namespace CodeDeeds.Xslt.Compiler
                     return new BooleanLiteralExpr(name == "element-available"
                         ? Availability.IsElementAvailable(
                             probed.NamespaceUri, probed.LocalName, Implements30, m_options.DynamicEvaluation)
-                        : Availability.IsTypeAvailable(probed.NamespaceUri, probed.LocalName, Implements30));
+                        : Availability.IsTypeAvailable(probed.NamespaceUri, probed.LocalName, Implements30)
+                            || m_schemas?.IsTypeAvailable(probed.NamespaceUri, probed.LocalName) == true);
                 }
 
                 return name == "element-available"
                     ? new ElementAvailableExpr(
                         arguments[0], PrefixesInScope(), Implements30, m_options.DynamicEvaluation)
-                    : new TypeAvailableExpr(arguments[0], PrefixesInScope(), Implements30);
+                    : new TypeAvailableExpr(arguments[0], PrefixesInScope(), Implements30, m_schemas);
             }
 
             if (name is "unparsed-entity-uri" or "unparsed-entity-public-id")
@@ -1684,6 +1756,27 @@ namespace CodeDeeds.Xslt.Compiler
                 }
             }
 
+            // Schemas before declarations, whichever comes first in the module: a declaration's 'as' may
+            // name a type an import brings into scope, and the declarations are read in order.
+            if (m_schemas is not null)
+            {
+                foreach ((ModuleElement source, string? moduleUri) in topLevel)
+                {
+                    m_tree = source.Tree;
+
+                    if (IsXsltElement(source.Element, out string localName) && localName == "import-schema")
+                    {
+                        m_scopeElement = source.Element;
+                        ValidateXsltElement(source.Element, localName, XsltPlacement.Declaration);
+                        ImportSchema(source.Element, moduleUri);
+                    }
+                }
+
+                // Compiled now rather than on first use, so that a schema that is not a valid one is a
+                // static error of the stylesheet whether or not anything goes on to name its types.
+                m_schemas.EnsureCompiled();
+            }
+
             int precedence = m_nextPrecedence++;
 
             foreach ((ModuleElement source, string? _) in topLevel)
@@ -1701,6 +1794,42 @@ namespace CodeDeeds.Xslt.Compiler
 
                 DeclareTopLevelElement(source, precedence);
             }
+        }
+
+        /// <summary>
+        /// Imports the schema one <c>xsl:import-schema</c> names: by location, inline, or by namespace alone.
+        /// </summary>
+        /// <param name="element">The <c>xsl:import-schema</c> element.</param>
+        /// <param name="moduleUri">The module's URI, which a relative location resolves against.</param>
+        private void ImportSchema(int element, string? moduleUri)
+        {
+            string? targetNamespace = GetAttribute(element, "namespace");
+            string? location = GetAttribute(element, "schema-location");
+            string? inline = null;
+
+            for (int child = FirstIncludedChild(element); child >= 0; child = NextIncludedSibling(child))
+            {
+                if (m_tree.KindOf(child) != NodeKind.Element)
+                {
+                    continue;
+                }
+
+                int fingerprint = m_tree.FingerprintOf(child);
+
+                if (m_tree.NameTable.GetNamespaceUri(fingerprint) == XdmType.SchemaNamespace
+                    && m_tree.NameTable.GetLocalName(fingerprint) == "schema")
+                {
+                    // Handed to the schema reader as text, which is the one form it reads; serialized
+                    // with its in-scope namespaces, so that a prefix declared on the stylesheet element is
+                    // there for the schema to use.
+                    inline = Serializer.Serialize(
+                        XdmSequence.Items(XPathValue.FromNodeSet(NodeSet.Singleton(m_tree, child))),
+                        XPathValue.FromSequence(XdmSequence.Empty));
+                    break;
+                }
+            }
+
+            m_schemas!.Import(targetNamespace, location, inline, StaticBaseUri(element) ?? moduleUri);
         }
 
         /// <summary>
@@ -1748,6 +1877,13 @@ namespace CodeDeeds.Xslt.Compiler
             m_scopeElement = stylesheetElement;
             _ = IsXsltElement(stylesheetElement, out string outermost);
             ValidateXsltElement(stylesheetElement, outermost, XsltPlacement.Subordinate);
+
+            // What the module says about the annotations of the documents read, every module having a
+            // say and two modules not being allowed to disagree.
+            if (GetAttribute(stylesheetElement, "input-type-annotations") is string annotations)
+            {
+                NoteInputTypeAnnotations(annotations);
+            }
 
             // A package's own version has to be one (§3.5.1). A used package's is read where it is used,
             // and the principal's would otherwise never be read at all — so a shadow attribute computing it
@@ -2656,14 +2792,20 @@ namespace CodeDeeds.Xslt.Compiler
                         break;
 
                     case "import-schema":
-                        // Not in the ignorable set below. A stylesheet importing a schema is written against
-                        // the types in it, and running it as though the import were absent would silently give
-                        // back untyped answers to typed questions — the same reason validation="strict" is
-                        // refused rather than shrugged off.
+                        // Imported before any declaration was read, where the processor is schema-aware.
+                        // Otherwise not in the ignorable set below: a stylesheet importing a schema is
+                        // written against the types in it, and running it as though the import were absent
+                        // would silently give back untyped answers to typed questions — the same reason
+                        // validation="strict" is refused rather than shrugged off.
+                        if (m_schemas is not null)
+                        {
+                            break;
+                        }
+
                         throw XsltErrors.Error(
                             XsltErrorCode.XTSE1650,
-                            "xsl:import-schema needs a schema-aware processor, and this engine does not "
-                            + "validate.");
+                            "xsl:import-schema needs a schema-aware processor, and this one was not asked to "
+                            + "be: set XsltOptions.SchemaAware.");
 
                     default:
                         // Declarations this engine does not implement are ignored rather than rejected, so a
@@ -8272,7 +8414,8 @@ namespace CodeDeeds.Xslt.Compiler
 
             // On a literal result element the directives are themselves in the XSLT namespace, which is what
             // keeps an ordinary type attribute — <input type="text"/> — part of the result rather than a
-            // request to validate against a schema.
+            // request to validate against a schema. A schema-aware processor reads xsl:validation and
+            // xsl:type there and validates as WithValidation says.
             RejectSchemaValidation(element, xslt: true);
             ExpandedName[] attributeSets = ReadAttributeSetNames(element);
 
@@ -8283,7 +8426,7 @@ namespace CodeDeeds.Xslt.Compiler
             (string elementPrefix, string elementUri) = ApplyNamespaceAlias(
                 names.GetPrefix(nameCode), names.GetNamespaceUri(fingerprint));
 
-            return new LiteralElementInstruction(
+            Instruction literal = new LiteralElementInstruction(
                 elementPrefix,
                 elementUri,
                 names.GetLocalName(fingerprint),
@@ -8292,6 +8435,8 @@ namespace CodeDeeds.Xslt.Compiler
                 body,
                 attributeSets,
                 ReadInheritNamespaces(element, xslt: true));
+
+            return WithValidation(element, literal, ValidationShape.Element, literal: true);
         }
 
         /// <summary>
@@ -9937,6 +10082,20 @@ namespace CodeDeeds.Xslt.Compiler
                 {
                     RejectSchemaValidation(element);
 
+                    // A result document is a document node, so validation validates it as one; strip and
+                    // preserve validate nothing.
+                    bool validateResult = false;
+                    bool strictResult = false;
+                    XdmSchemaType? resultType = null;
+
+                    if (m_schemas is not null)
+                    {
+                        (string resultMode, XdmSchemaType? resultNamedType) = EffectiveValidation(element, literal: false);
+                        resultType = resultNamedType;
+                        strictResult = resultMode == "strict";
+                        validateResult = resultNamedType is not null || resultMode is "strict" or "lax";
+                    }
+
                     // Serialization attributes written here override what xsl:output settled for the
                     // principal result, so one transformation can write XML and HTML at once. A format names
                     // an xsl:output declaration to start from instead of the unnamed one.
@@ -9975,7 +10134,10 @@ namespace CodeDeeds.Xslt.Compiler
                         templated.ToArray(),
                         formatComputed ? format : null,
                         formatComputed ? AllNamedOutputSettings() : null,
-                        formatComputed || templated.Count != 0 ? PrefixesInScope() : null));
+                        formatComputed || templated.Count != 0 ? PrefixesInScope() : null,
+                        validateResult,
+                        strictResult,
+                        resultType));
 
                     return;
                 }
@@ -10071,61 +10233,68 @@ namespace CodeDeeds.Xslt.Compiler
                 }
 
                 case "copy-of":
-                    RejectSchemaValidation(element);
-                    output.Add(new CopyOfInstruction(
+                {
+                    bool preserveCopyOf = PreservesTypesOnCopy(element);
+                    Instruction copyOf = new CopyOfInstruction(
                         RequireExpression(element, "select"),
                         ReadCopyNamespaces(element),
-                        ReadDeclarationFlag(element, "copy-accumulators")));
+                        ReadDeclarationFlag(element, "copy-accumulators"),
+                        preserveCopyOf);
+                    output.Add(WithValidation(element, copyOf, ValidationShape.Copy));
 
                     return;
+                }
 
                 case "copy":
                 {
-                    RejectSchemaValidation(element);
                     ExpandedName[] sets = ReadAttributeSetNames(element);
-                    output.Add(new CopyInstruction(
+                    Instruction copy = new CopyInstruction(
                         CompileSequence(element),
                         sets,
                         ReadCopyNamespaces(element),
                         OptionalExpression(element, "select"),
                         Claims30(element),
                         ReadDeclarationFlag(element, "copy-accumulators"),
-                        ReadInheritNamespaces(element)));
+                        ReadInheritNamespaces(element),
+                        PreservesTypesOnCopy(element));
+                    output.Add(WithValidation(element, copy, ValidationShape.Copy));
 
                     return;
                 }
 
                 case "element":
                 {
-                    RejectSchemaValidation(element);
                     ExpandedName[] sets = ReadAttributeSetNames(element);
-                    output.Add(new ElementInstruction(
+                    Instruction elementInstruction = new ElementInstruction(
                         RequireAttributeValueTemplate(element, "name"),
                         OptionalAttributeValueTemplate(element, "namespace"),
                         CompileSequence(element),
                         NamespacesOn(element),
                         sets,
-                        ReadInheritNamespaces(element)));
+                        ReadInheritNamespaces(element));
+                    output.Add(WithValidation(element, elementInstruction, ValidationShape.Element));
                     return;
                 }
 
                 case "attribute":
                 {
-                    RejectSchemaValidation(element);
-                    output.Add(new AttributeInstruction(
+                    Instruction attributeInstruction = new AttributeInstruction(
                         RequireAttributeValueTemplate(element, "name"),
                         OptionalAttributeValueTemplate(element, "namespace"),
                         CompileSequence(element),
                         NamespacesOn(element),
                         CompileValueSelect(element),
-                        OptionalAttributeValueTemplate(element, "separator")));
+                        OptionalAttributeValueTemplate(element, "separator"));
+                    output.Add(WithValidation(element, attributeInstruction, ValidationShape.Attribute));
 
                     return;
                 }
 
                 case "document":
-                    RejectSchemaValidation(element);
-                    output.Add(new DocumentInstruction(CompileSequence(element), StaticBaseUri(element)));
+                    output.Add(WithValidation(
+                        element,
+                        new DocumentInstruction(CompileSequence(element), StaticBaseUri(element)),
+                        ValidationShape.Document));
                     return;
 
                 case "namespace":
@@ -11038,11 +11207,13 @@ namespace CodeDeeds.Xslt.Compiler
 
             string? typedSaid = GetAttribute(element, "typed")?.Trim();
 
+            // What the mode admits (§6.6.2): yes, strict and lax take typed nodes alone, no takes untyped
+            // nodes alone, and unspecified takes either, which is also what saying nothing means.
             bool? typed = typedSaid switch
             {
-                null => null,
+                null or "unspecified" => null,
                 "yes" or "true" or "1" or "strict" or "lax" => true,
-                "no" or "false" or "0" or "unspecified" => false,
+                "no" or "false" or "0" => false,
                 _ => throw XsltErrors.Error(
                     XsltErrorCode.XTSE0020,
                     $"'{typedSaid}' is not one of the values 'typed' may take: yes, no, strict, lax, "
@@ -11206,7 +11377,7 @@ namespace CodeDeeds.Xslt.Compiler
                     by < 0 ? OnNoMatch.TextOnlyCopy : declarations[by].OnNoMatch!.Value,
                     warned >= 0 && declarations[warned].WarnOnNoMatch!.Value,
                     multiple >= 0 && declarations[multiple].OnMultipleMatch == "fail",
-                    typed >= 0 && declarations[typed].Typed!.Value);
+                    typed >= 0 ? declarations[typed].Typed : null);
                 m_modeAccumulators[mode] = used < 0
                     ? AccumulatorSet.None
                     : AccumulatorsOf(declarations[used].Written);
@@ -12051,6 +12222,13 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="element">The element that may carry the attribute.</param>
         private void RejectSchemaDefaultValidation(int element)
         {
+            // A schema-aware processor honours default-validation; a value outside its grammar
+            // (strict, lax) is caught as XTSE0020 by the attribute-value check, not here.
+            if (m_schemas is not null)
+            {
+                return;
+            }
+
             if (GetAttribute(element, "default-validation") is not string validation)
             {
                 return;
@@ -12065,8 +12243,148 @@ namespace CodeDeeds.Xslt.Compiler
             }
         }
 
+        /// <summary>
+        /// Wraps a constructor instruction so that it validates its result, where the stylesheet asks: an
+        /// explicit <c>validation</c> or <c>type</c>, or the <c>default-validation</c> in scope. Returns
+        /// the instruction unchanged where nothing is to be validated, and refuses validation outright where
+        /// the processor is not schema-aware.
+        /// </summary>
+        /// <param name="element">The instruction element.</param>
+        /// <param name="inner">The instruction it compiled to.</param>
+        /// <param name="shape">What the instruction produces.</param>
+        /// <param name="literal">Whether the attributes are in the XSLT namespace, as on a literal result element.</param>
+        private Instruction WithValidation(int element, Instruction inner, ValidationShape shape, bool literal = false)
+        {
+            if (m_schemas is null)
+            {
+                RejectSchemaValidation(element, literal);
+                return inner;
+            }
+
+            (string mode, XdmSchemaType? type) = EffectiveValidation(element, literal);
+
+            // strip and preserve validate nothing; a freshly constructed element and its content are
+            // untyped whichever is asked, so the instruction stands as it is.
+            if (type is null && mode is not ("strict" or "lax"))
+            {
+                return inner;
+            }
+
+            return new ValidatingInstruction(
+                inner, shape, mode == "strict", type, StaticBaseUri(element), NamespacesOn(element));
+        }
+
+        /// <summary>
+        /// The validation a constructor is subject to: a <c>type</c> it names, or a mode — the explicit
+        /// <c>validation</c>, or the <c>default-validation</c> in scope, or <c>strip</c>.
+        /// </summary>
+        /// <exception cref="XsltException">
+        /// <c>XTSE1505</c> for both a type and a validation; <c>XTSE1520</c> for a type that is not in scope.
+        /// </exception>
+        private (string Mode, XdmSchemaType? Type) EffectiveValidation(int element, bool literal)
+        {
+            string? validation = literal ? GetXsltAttribute(element, "validation") : GetAttribute(element, "validation");
+            string? type = literal ? GetXsltAttribute(element, "type") : GetAttribute(element, "type");
+
+            if (validation is not null && type is not null)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTSE1505,
+                    $"{QualifiedNameOf(element)} has both a type and a validation attribute, and a node is "
+                    + "validated by one or the other.");
+            }
+
+            if (type is not null)
+            {
+                return (string.Empty, ResolveNamedType(element, type));
+            }
+
+            if (validation is not null)
+            {
+                return (validation, null);
+            }
+
+            return (DefaultValidationInScope(element), null);
+        }
+
+        /// <summary>The type a <c>type</c> attribute names, among the schema components in scope.</summary>
+        /// <exception cref="XsltException"><c>XTSE1520</c> where the name is not a QName or names no type in scope.</exception>
+        private XdmSchemaType ResolveNamedType(int element, string type)
+        {
+            ExpandedName name;
+
+            try
+            {
+                name = ResolveQualifiedName(element, type);
+            }
+            catch (XsltException)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTSE1520,
+                    $"The type attribute of {QualifiedNameOf(element)} is '{type}', which is not a QName or "
+                    + "uses a prefix nothing in scope binds.");
+            }
+
+            // An unprefixed type name is in the default namespace that is in scope, as an unprefixed
+            // element name is (XSLT 3.0 §5.6.1): xpath-default-namespace, or none.
+            if (name.NamespaceUri.Length == 0
+                && !type.Trim().StartsWith("Q{", StringComparison.Ordinal)
+                && type.IndexOf(':') < 0
+                && DefaultElementNamespaceAt(element) is { Length: > 0 } defaultNamespace)
+            {
+                name = new ExpandedName(defaultNamespace, name.LocalName);
+            }
+
+            return m_schemas!.FindType(name.NamespaceUri, name.LocalName)
+                ?? throw XsltErrors.Error(
+                    XsltErrorCode.XTSE1520,
+                    $"The type attribute of {QualifiedNameOf(element)} is '{type}', which names no type among "
+                    + "the schema components in scope.");
+        }
+
+        /// <summary>
+        /// Whether an <c>xsl:copy</c> or <c>xsl:copy-of</c> keeps the type annotations of what it copies:
+        /// only where its effective validation is <c>preserve</c>. Strict, lax and a type validate afresh —
+        /// the wrapper puts back what validation settles — and strip and the default drop annotations.
+        /// </summary>
+        private bool PreservesTypesOnCopy(int element)
+        {
+            if (m_schemas is null)
+            {
+                // No schema, so nothing carries an annotation; the flag is a no-op, kept true for the
+                // path that copies an already-typed tree the caller supplied through the input.
+                return true;
+            }
+
+            (string mode, XdmSchemaType? type) = EffectiveValidation(element, literal: false);
+            return type is null && mode == "preserve";
+        }
+
+        /// <summary>The nearest <c>default-validation</c> above an element, or <c>strip</c> where none is.</summary>
+        private string DefaultValidationInScope(int element)
+        {
+            for (int current = element; current >= 0; current = m_tree.ParentOf(current))
+            {
+                if (m_tree.KindOf(current) == NodeKind.Element
+                    && IsXsltElement(current, out _)
+                    && GetAttribute(current, "default-validation") is string said)
+                {
+                    return said.Trim();
+                }
+            }
+
+            return "strip";
+        }
+
         private void RejectSchemaValidation(int element, bool xslt = false)
         {
+            // A schema-aware processor honours validation and type; what it does with them is settled where
+            // the instruction is compiled, by WithValidation. Here there is nothing to refuse.
+            if (m_schemas is not null)
+            {
+                return;
+            }
+
             string? validation = xslt
                 ? GetXsltAttribute(element, "validation")
                 : GetAttribute(element, "validation");
@@ -12089,7 +12407,9 @@ namespace CodeDeeds.Xslt.Compiler
                     throw XsltErrors.Error(
                         XsltErrorCode.XTSE1660,
                         $"{QualifiedNameOf(element)} asks for '{validation}' validation, which needs a "
-                        + "schema-aware processor. This engine does not validate.");
+                        + (m_schemas is null
+                            ? "schema-aware processor. This engine does not validate."
+                            : "processor that validates what it constructs, which this one does not yet."));
                 }
             }
 
@@ -12097,8 +12417,10 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 throw XsltErrors.Error(
                     XsltErrorCode.XTSE1660,
-                    $"{QualifiedNameOf(element)} names a type, which needs a schema-aware processor. This "
-                    + "engine does not validate.");
+                    $"{QualifiedNameOf(element)} names a type, which needs a "
+                    + (m_schemas is null
+                        ? "schema-aware processor. This engine does not validate."
+                        : "processor that validates what it constructs, which this one does not yet."));
             }
         }
 

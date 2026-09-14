@@ -50,12 +50,14 @@ namespace CodeDeeds.Xslt.Conformance
         private readonly Xslt30Catalog m_catalog;
         private readonly XsltVersion m_version;
         private readonly XsltBackend m_backend;
+        private readonly bool m_schemaAware;
 
-        public Xslt30Runner(Xslt30Catalog catalog, XsltVersion version, XsltBackend backend)
+        public Xslt30Runner(Xslt30Catalog catalog, XsltVersion version, XsltBackend backend, bool schemaAware = false)
         {
             m_catalog = catalog;
             m_version = version;
             m_backend = backend;
+            m_schemaAware = schemaAware;
         }
 
         /// <summary>Features a test may declare that this engine does not have.</summary>
@@ -358,6 +360,15 @@ namespace CodeDeeds.Xslt.Conformance
                     // The suite's own case-blind collation, which a test names by URI and expects the
                     // driver to supply; everything else an environment declares the engine provides.
                     CollationResolver = SuiteCollations.Instance,
+                    // Schema-aware where the run asks: the schemas the environment declares are in scope,
+                    // and anything a stylesheet imports by location is read from the suite.
+                    SchemaAware = m_schemaAware,
+                    SchemaResolver = m_schemaAware ? resolver : null,
+                    Schemas = m_schemaAware ? EnvironmentSchemas(environment, directory) : null,
+                    // The catalog says which sources are validated, and a validated source is a typed one.
+                    InputValidation = m_schemaAware && environment is { ValidatesSources: true }
+                        ? XsltValidation.Strict
+                        : XsltValidation.Strip,
                     // A source given inline has no URI of its own, so what its declaration names resolves
                     // against the test set's directory, as the catalog means it to.
                     EntityResolver = new EntityResolverWithin(resolver, directory),
@@ -841,7 +852,32 @@ namespace CodeDeeds.Xslt.Conformance
 
         // ---- The environment -----------------------------------------------------------------------------
 
-        private static Xslt30Environment? ResolveEnvironment(
+        /// <summary>
+        /// The schemas an environment declares, loaded into a set of their own, or null where it declares
+        /// none. What <c>xsl:import-schema namespace="..."</c> with no location finds.
+        /// </summary>
+        private static System.Xml.Schema.XmlSchemaSet? EnvironmentSchemas(Xslt30Environment? environment, string directory)
+        {
+            if (environment is null || environment.Schemas.Count == 0)
+            {
+                return null;
+            }
+
+            System.Xml.Schema.XmlSchemaSet set = new System.Xml.Schema.XmlSchemaSet
+            {
+                XmlResolver = new System.Xml.XmlUrlResolver(),
+            };
+
+            foreach ((string file, string? _) in environment.Schemas)
+            {
+                set.Add(null, Path.Combine(directory, file));
+            }
+
+            set.Compile();
+            return set;
+        }
+
+        private Xslt30Environment? ResolveEnvironment(
             XElement testCase, XElement testSet, out string? problem)
         {
             problem = null;
@@ -872,7 +908,11 @@ namespace CodeDeeds.Xslt.Conformance
                 environment = Xslt30Environment.Parse(reference);
             }
 
-            problem = environment.Unsupported;
+            // A schema is something to declare only to a schema-aware run; to the other it is a reason to
+            // stand aside, since the test is asking typed questions.
+            problem = environment.Unsupported
+                ?? (environment.Schemas.Count > 0 && !m_schemaAware ? "environment declares a schema" : null);
+
             return environment;
         }
 
@@ -1000,7 +1040,8 @@ namespace CodeDeeds.Xslt.Conformance
                         break;
 
                     case "feature":
-                        if (s_absentFeatures.Contains(value) == wanted)
+                        // schema_aware is absent unless the run was asked to be schema-aware.
+                        if ((s_absentFeatures.Contains(value) && !(m_schemaAware && value == "schema_aware")) == wanted)
                         {
                             why = wanted ? $"needs feature '{value}'" : $"needs feature '{value}' to be absent";
                             return false;

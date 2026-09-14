@@ -796,8 +796,11 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             ExpectKeyword("as");
-            (XdmType.BuiltInType type, bool allowEmpty) = ParseSingleType();
-            return new CastExpr(value, type, allowEmpty, testOnly: true, m_context.InScopeNamespaces);
+            (XdmType.BuiltInType? type, XdmSchemaType? schemaType, bool allowEmpty) = ParseSingleType();
+
+            return type is XdmType.BuiltInType builtIn
+                ? new CastExpr(value, builtIn, allowEmpty, testOnly: true, m_context.InScopeNamespaces)
+                : new CastExpr(value, schemaType!, allowEmpty, testOnly: true, m_context.InScopeNamespaces);
         }
 
         private Expr ParseCast()
@@ -810,10 +813,16 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             ExpectKeyword("as");
-            (XdmType.BuiltInType type, bool allowEmpty) = ParseSingleType();
-            XdmType.RequireLiteralNameBelowThree(type, value, m_context.SyntaxVersion);
+            (XdmType.BuiltInType? type, XdmSchemaType? schemaType, bool allowEmpty) = ParseSingleType();
 
-            return new CastExpr(value, type, allowEmpty, testOnly: false, m_context.InScopeNamespaces);
+            if (type is not XdmType.BuiltInType builtIn)
+            {
+                return new CastExpr(value, schemaType!, allowEmpty, testOnly: false, m_context.InScopeNamespaces);
+            }
+
+            XdmType.RequireLiteralNameBelowThree(builtIn, value, m_context.SyntaxVersion);
+
+            return new CastExpr(value, builtIn, allowEmpty, testOnly: false, m_context.InScopeNamespaces);
         }
 
         /// <summary>
@@ -965,8 +974,11 @@ namespace CodeDeeds.Xslt.XPath
             return true;
         }
 
-        /// <summary>Parses the type after <c>cast as</c>, which is one atomic type and an optional <c>?</c>.</summary>
-        private (XdmType.BuiltInType Type, bool AllowEmpty) ParseSingleType()
+        /// <summary>
+        /// Parses the type after <c>cast as</c>, which is one atomic type and an optional <c>?</c>: a
+        /// built-in type, or failing that a simple type the in-scope schema components have.
+        /// </summary>
+        private (XdmType.BuiltInType? Type, XdmSchemaType? SchemaType, bool AllowEmpty) ParseSingleType()
         {
             XPathToken token = Current;
 
@@ -993,9 +1005,32 @@ namespace CodeDeeds.Xslt.XPath
 
             // A list type is a cast target and nothing else, so it is looked for here and not among the
             // types an expression may test against: xs:NMTOKENS names a sequence rather than an item.
-            if (!schemaType
-                || (!XdmType.TryGet(token.Text, out XdmType.BuiltInType type)
-                    && !XdmType.TryGetList(token.Text, out type)))
+            XdmType.BuiltInType? builtIn = null;
+            XdmSchemaType? fromSchema = null;
+
+            if (schemaType
+                && (XdmType.TryGet(token.Text, out XdmType.BuiltInType type)
+                    || XdmType.TryGetList(token.Text, out type)))
+            {
+                builtIn = type;
+            }
+            else if (TypeNamespaceOf(token) is string uri
+                && m_context is ISchemaTypeProvider provider
+                && provider.ResolveSchemaType(uri, token.Text) is XdmSchemaType found)
+            {
+                // A simple type a schema defines is a cast target as the built-in ones are; a complex type
+                // has no values for a cast to make.
+                if (found.Variety == XdmSchemaVariety.Complex)
+                {
+                    throw Error(
+                        token,
+                        XsltErrorCode.XPST0051,
+                        $"'{token.Text}' is a complex type, and a cast names a simple one.");
+                }
+
+                fromSchema = found;
+            }
+            else
             {
                 throw Error(
                     token, XsltErrorCode.XPST0051, $"'{token.Text}' is not a type this engine can construct.");
@@ -1007,7 +1042,7 @@ namespace CodeDeeds.Xslt.XPath
                 m_index++;
             }
 
-            return (type, allowEmpty);
+            return (builtIn, fromSchema, allowEmpty);
         }
 
         /// <summary>Parses the type after <c>instance of</c> or <c>treat as</c>.</summary>
@@ -1124,6 +1159,25 @@ namespace CodeDeeds.Xslt.XPath
                 if (TypeNamespaceOf(token) != XdmType.SchemaNamespace
                     || !XdmType.TryGet(token.Text, out XdmType.BuiltInType atomic))
                 {
+                    // Not a built-in type: a type from a schema, where the context has schema components.
+                    // An atomic type or a union of atomic types names values an item can be; a list type
+                    // or a complex type does not, and a sequence type cannot name one (XPath 3.1 §2.5.4).
+                    if (TypeNamespaceOf(token) is string uri
+                        && m_context is ISchemaTypeProvider provider
+                        && provider.ResolveSchemaType(uri, token.Text) is XdmSchemaType fromSchema)
+                    {
+                        if (fromSchema.Variety is XdmSchemaVariety.Atomic or XdmSchemaVariety.Union)
+                        {
+                            return XdmSequenceType.Schema(fromSchema, occurrence, TypeNameWritten(token));
+                        }
+
+                        throw Error(
+                            token,
+                            XsltErrorCode.XPST0051,
+                            $"'{token.Text}' is a {(fromSchema.Variety == XdmSchemaVariety.List ? "list" : "complex")} "
+                            + "type, and a sequence type names an atomic type or a union of them.");
+                    }
+
                     throw Error(
                         token, XsltErrorCode.XPST0051, $"'{token.Text}' is not a type this engine knows.");
                 }
@@ -2090,19 +2144,32 @@ namespace CodeDeeds.Xslt.XPath
                 return new TypedLiteralExpr(ResolveLiteralQName(literal.Value));
             }
 
-            return uri is XdmType.SchemaNamespace
+            if (uri is XdmType.SchemaNamespace
                 or MapArrayFunctionExpr.MapNamespace
                 or MapArrayFunctionExpr.ArrayNamespace
-                or Xpath30FunctionExpr.MathNamespace
-                ? WithDefaultCollation(FunctionLibrary.TryCreate(
+                or Xpath30FunctionExpr.MathNamespace)
+            {
+                return WithDefaultCollation(FunctionLibrary.TryCreate(
                     uri,
                     token.Text,
                     arguments.ToArray(),
                     m_context.Version,
                     m_context.SyntaxVersion,
                     m_context.LegacySyntax,
-                    m_context.InScopeNamespaces))
-                : null;
+                    m_context.InScopeNamespaces));
+            }
+
+            // A simple type a schema defines is a constructor function of its own name, as the built-in
+            // types are: one argument, the empty sequence admitted, and the cast is the whole of it.
+            if (arguments.Count == 1
+                && m_context is ISchemaTypeProvider provider
+                && provider.ResolveSchemaType(uri, token.Text) is { Variety: not XdmSchemaVariety.Complex } constructed)
+            {
+                return new CastExpr(
+                    arguments[0], constructed, allowEmpty: true, testOnly: false, m_context.InScopeNamespaces);
+            }
+
+            return null;
         }
 
         private XPathValue ResolveLiteralQName(string text)
@@ -2587,16 +2654,40 @@ namespace CodeDeeds.Xslt.XPath
                 case "schema-element":
                 case "schema-attribute":
                 {
+                    XPathToken named = Current;
                     (string uri, string local) = ParseKindTestName(token, wildcardAllowed: false)
                         ?? throw Error(token, $"{token.Text}() names a declaration, so it needs one.");
 
                     Expect(XPathTokenKind.RightParen);
 
-                    throw Error(
-                        token,
-                        XsltErrorCode.XPST0008,
-                        $"There is no declaration of '{(uri.Length == 0 ? local : $"{{{uri}}}{local}")}' — "
-                        + "this engine is not schema-aware, so it has none to look in");
+                    // The declaration is looked for among the schema components in scope, which a
+                    // processor that is not schema-aware has none of: XPST0008, which is what a name that
+                    // is not declared gets, and not a claim that the syntax is wrong.
+                    bool element = token.Text == "schema-element";
+                    XdmSchemaDeclaration? declaration = m_context is ISchemaTypeProvider provider
+                        ? element ? provider.ResolveElementDeclaration(uri, local) : provider.ResolveAttributeDeclaration(uri, local)
+                        : null;
+
+                    if (declaration is null)
+                    {
+                        throw Error(
+                            token,
+                            XsltErrorCode.XPST0008,
+                            $"There is no declaration of '{(uri.Length == 0 ? local : $"{{{uri}}}{local}")}'"
+                            + (m_context is ISchemaTypeProvider
+                                ? " among the schemas in scope"
+                                : ": this engine is not schema-aware, so it has none to look in"));
+                    }
+
+                    return new KindNodeTest(
+                        element ? NodeKind.Element : NodeKind.Attribute, uri, local, null,
+                        token.Text + "(" + TypeNameWritten(named) + ")")
+                    {
+                        NamesAType = true,
+                        TypeName = declaration.Type.Written,
+                        Declaration = declaration,
+                        AdmitsNilled = declaration.Nillable,
+                    };
                 }
 
                 case "document-node":
@@ -2631,17 +2722,18 @@ namespace CodeDeeds.Xslt.XPath
                     NodeKind kind = token.Text == "element" ? NodeKind.Element : NodeKind.Attribute;
                     (string Uri, string Local)? name = ParseKindTestName(token, wildcardAllowed: true);
 
-                    // A type annotation after the name. Nothing here carries one — no validation has
-                    // happened — so the name is checked and the test then matches nothing, which is what a
-                    // processor that is not schema-aware can honestly say. That it was written still counts:
-                    // a test naming both halves is the most specific kind test there is, and as a pattern it
-                    // takes the priority that goes with saying more (XSLT 3.0 §6.5).
+                    // A type annotation after the name, which a node validated against a schema carries
+                    // and a node nothing validated has as xs:untyped or xs:untypedAtomic. That it was
+                    // written counts too: a test naming both halves is the most specific kind test there
+                    // is, and as a pattern it takes the priority that goes with saying more (XSLT 3.0 §6.5).
                     string? annotation = null;
+                    XdmSchemaType? annotationType = null;
+                    bool nillable = true;
 
                     if (Current.Kind == XPathTokenKind.Comma)
                     {
                         m_index++;
-                        annotation = ParseTypeAnnotation();
+                        annotation = ParseTypeAnnotation(out annotationType, out nillable);
                     }
 
                     Expect(XPathTokenKind.RightParen);
@@ -2655,12 +2747,14 @@ namespace CodeDeeds.Xslt.XPath
 
                     string written = annotation is null
                         ? token.Text + "(" + inside + ")"
-                        : token.Text + "(" + inside + ", " + annotation + ")";
+                        : token.Text + "(" + inside + ", " + annotation + (nillable ? "?" : string.Empty) + ")";
 
                     return new KindNodeTest(kind, name?.Uri, name?.Local, null, written)
                     {
                         NamesAType = annotation is not null,
                         TypeName = annotation,
+                        SchemaType = annotationType,
+                        AdmitsNilled = nillable,
                     };
                 }
             }
@@ -2697,8 +2791,21 @@ namespace CodeDeeds.Xslt.XPath
             XPathToken name = Current;
             m_index++;
 
-            // An unprefixed name inside a kind test is in no namespace, as everywhere else in a path.
-            return (name.Prefix.Length == 0 ? string.Empty : ResolvePrefixOrThrow(name), name.Text);
+            // An unprefixed element name inside a kind test is in the default element namespace, as a
+            // name test's is (XPath 3.1 §2.5.5.3), and an unprefixed attribute name is in none.
+            if (name.NamespaceUri is string braced)
+            {
+                return (braced, name.Text);
+            }
+
+            if (name.Prefix.Length != 0)
+            {
+                return (ResolvePrefixOrThrow(name), name.Text);
+            }
+
+            return (
+                token.Text is "element" or "schema-element" ? m_context.DefaultElementNamespace : string.Empty,
+                name.Text);
         }
 
         /// <summary>Reads the type name a kind test may carry, and checks that it is one.</summary>
@@ -2711,31 +2818,54 @@ namespace CodeDeeds.Xslt.XPath
         /// in the type table, but an unvalidated element is annotated <c>xs:untyped</c> and an unvalidated
         /// attribute <c>xs:untypedAtomic</c>, and a test may name a type either of those derives from.
         /// </remarks>
-        private string ParseTypeAnnotation()
+        private string ParseTypeAnnotation(out XdmSchemaType? type, out bool nillable)
         {
             if (Current.Kind != XPathTokenKind.Name)
             {
                 throw Error(Current, "A type name was expected after the comma.");
             }
 
-            XPathToken type = Current;
+            XPathToken name = Current;
             m_index++;
 
-            // Trailing '?', which says the element may be nilled. Nothing is nilled here either.
+            // Trailing '?', which says the element may be nilled.
+            nillable = false;
+
             if (Current.Kind == XPathTokenKind.Question)
             {
                 m_index++;
+                nillable = true;
             }
 
-            if (m_context.ResolvePrefix(type.Prefix) != XdmType.SchemaNamespace
-                || !(XdmType.TryGet(type.Text, out XdmType.BuiltInType _)
-                    || type.Text is "anyType" or "anySimpleType"))
+            if (m_context.ResolvePrefix(name.Prefix) == XdmType.SchemaNamespace
+                && (XdmType.TryGet(name.Text, out XdmType.BuiltInType _)
+                    || name.Text is "anyType" or "anySimpleType")
+                && XdmSchemaType.BuiltInNamed(name.Text) is XdmSchemaType builtIn)
             {
-                throw Error(
-                    type, XsltErrorCode.XPST0051, $"'{type.Text}' is not a type this engine knows");
+                type = builtIn;
+                return name.Text;
             }
 
-            return type.Text;
+            // A type from a schema, where the context has schema components; the written form keeps
+            // the name as the stylesheet spelt it.
+            if (TypeNamespaceOf(name) is string uri
+                && m_context is ISchemaTypeProvider provider
+                && provider.ResolveSchemaType(uri, name.Text) is XdmSchemaType found)
+            {
+                type = found;
+                return TypeNameWritten(name);
+            }
+
+            throw Error(
+                name, XsltErrorCode.XPST0051, $"'{name.Text}' is not a type this engine knows");
+        }
+
+        /// <summary>A type name as it was written, prefix and all, for the written form of a type.</summary>
+        private static string TypeNameWritten(XPathToken token)
+        {
+            return token.NamespaceUri is string braced
+                ? "Q{" + braced + "}" + token.Text
+                : token.Prefix.Length == 0 ? token.Text : token.Prefix + ":" + token.Text;
         }
 
         private Expr[] ParsePredicates()

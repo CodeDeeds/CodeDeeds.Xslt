@@ -84,6 +84,12 @@ namespace CodeDeeds.Xslt.Model
         // The base URI of each node parsed out of an external entity, where it differs from its parent's.
         private Dictionary<int, string>? m_entityBase;
 
+        // The type each element and each attribute was validated as, and the elements found nilled;
+        // allocated by the first annotation, so that a tree nothing validates pays nothing.
+        private ushort[]? m_nodeType;
+        private ushort[]? m_attributeType;
+        private HashSet<int>? m_nilled;
+
         /// <summary>How many elements are open, the document node itself not counting as one.</summary>
         public int OpenElementDepth => m_openDepth < 1 ? 0 : m_openDepth - 1;
 
@@ -285,6 +291,31 @@ namespace CodeDeeds.Xslt.Model
         }
 
         /// <summary>
+        /// Builds a tree from XML text, validating the document against schemas as it is read and
+        /// annotating each element and attribute with the type validation settled on.
+        /// </summary>
+        /// <param name="reader">The XML to parse. The caller retains ownership and must dispose it.</param>
+        /// <param name="whitespace">Which whitespace-only text nodes to strip, or <see langword="null"/> to keep all.</param>
+        /// <param name="entityResolver">What fetches what a document type declaration names, or null for nothing.</param>
+        /// <param name="baseUri">The document's base URI.</param>
+        /// <param name="validation">What to validate against, and how.</param>
+        /// <returns>The parsed tree, its nodes annotated.</returns>
+        /// <exception cref="XsltException">The document is not valid; see <see cref="TreeValidation"/>.</exception>
+        internal static XdmTree FromXmlValidated(
+            TextReader reader,
+            WhitespaceControl? whitespace,
+            IXsltResolver? entityResolver,
+            string? baseUri,
+            TreeValidation validation)
+        {
+            EntityResolverAdapter? entities = entityResolver is null ? null : new EntityResolverAdapter(entityResolver, baseUri);
+            using XmlReader xmlReader = XmlReader.Create(reader, HardenedSettings(entities, validation));
+            return Build(
+                xmlReader, null, whitespace, false, entities, baseUri,
+                InitialNodeCapacity, InitialAttributeCapacity, trackEntityBases: entities is not null, validation: validation);
+        }
+
+        /// <summary>
         /// Builds a tree from XML bytes.
         /// </summary>
         /// <param name="stream">The XML to parse. The caller retains ownership and must dispose it.</param>
@@ -446,13 +477,15 @@ namespace CodeDeeds.Xslt.Model
             string xml,
             WhitespaceControl? whitespace,
             IXsltResolver? entityResolver,
-            string? baseUri)
+            string? baseUri,
+            TreeValidation? validation = null)
         {
             EntityResolverAdapter? entities = entityResolver is null ? null : new EntityResolverAdapter(entityResolver, baseUri);
-            using XmlReader xmlReader = XmlReader.Create(new StringReader(xml), HardenedSettings(entities));
+            using XmlReader xmlReader = XmlReader.Create(new StringReader(xml), HardenedSettings(entities, validation));
             return Build(
                 xmlReader, null, whitespace, false, entities, baseUri,
-                EstimateNodeCount(xml), EstimateAttributeCount(xml), pooledStorage: true, trackEntityBases: entities is not null);
+                EstimateNodeCount(xml), EstimateAttributeCount(xml), pooledStorage: true, trackEntityBases: entities is not null,
+                validation: validation);
         }
 
         /// <summary>Builds a tree from a reader for a transformation that will release it.</summary>
@@ -460,13 +493,15 @@ namespace CodeDeeds.Xslt.Model
             TextReader reader,
             WhitespaceControl? whitespace,
             IXsltResolver? entityResolver,
-            string? baseUri)
+            string? baseUri,
+            TreeValidation? validation = null)
         {
             EntityResolverAdapter? entities = entityResolver is null ? null : new EntityResolverAdapter(entityResolver, baseUri);
-            using XmlReader xmlReader = XmlReader.Create(reader, HardenedSettings(entities));
+            using XmlReader xmlReader = XmlReader.Create(reader, HardenedSettings(entities, validation));
             return Build(
                 xmlReader, null, whitespace, false, entities, baseUri,
-                InitialNodeCapacity, InitialAttributeCapacity, pooledStorage: true, trackEntityBases: entities is not null);
+                InitialNodeCapacity, InitialAttributeCapacity, pooledStorage: true, trackEntityBases: entities is not null,
+                validation: validation);
         }
 
         /// <summary>Builds a tree from a stream for a transformation that will release it.</summary>
@@ -474,12 +509,15 @@ namespace CodeDeeds.Xslt.Model
             Stream stream,
             WhitespaceControl? whitespace,
             IXsltResolver? entityResolver,
-            string? baseUri)
+            string? baseUri,
+            TreeValidation? validation = null)
         {
             EntityResolverAdapter? entities = entityResolver is null ? null : new EntityResolverAdapter(entityResolver, baseUri);
             (int nodes, int attributes) = EstimateFromStream(stream);
-            using XmlReader xmlReader = XmlReader.Create(stream, HardenedSettings(entities));
-            return Build(xmlReader, null, whitespace, false, entities, baseUri, nodes, attributes, pooledStorage: true, trackEntityBases: entities is not null);
+            using XmlReader xmlReader = XmlReader.Create(stream, HardenedSettings(entities, validation));
+            return Build(
+                xmlReader, null, whitespace, false, entities, baseUri, nodes, attributes, pooledStorage: true,
+                trackEntityBases: entities is not null, validation: validation);
         }
 
         /// <summary>
@@ -564,9 +602,9 @@ namespace CodeDeeds.Xslt.Model
             return false;
         }
 
-        private static XmlReaderSettings HardenedSettings(EntityResolverAdapter? entities)
+        private static XmlReaderSettings HardenedSettings(EntityResolverAdapter? entities, TreeValidation? validation = null)
         {
-            return new XmlReaderSettings
+            XmlReaderSettings settings = new XmlReaderSettings
             {
                 DtdProcessing = DtdProcessing.Parse,
                 XmlResolver = entities,
@@ -576,6 +614,22 @@ namespace CodeDeeds.Xslt.Model
                 IgnoreProcessingInstructions = false,
                 CloseInput = false,
             };
+
+            if (validation is not null)
+            {
+                // Against the schemas in scope and those alone: neither an inline schema nor an
+                // xsi:schemaLocation in the document adds to the set, which is shared by every
+                // transformation over the stylesheet and would be changed under them. The xml:*
+                // attributes are allowed on any element, as XSD has them, and identity constraints are
+                // checked, being part of what valid means.
+                settings.ValidationType = ValidationType.Schema;
+                settings.Schemas = validation.Schemas;
+                settings.ValidationFlags = System.Xml.Schema.XmlSchemaValidationFlags.ProcessIdentityConstraints
+                    | System.Xml.Schema.XmlSchemaValidationFlags.AllowXmlAttributes;
+                settings.ValidationEventHandler += validation.Report;
+            }
+
+            return settings;
         }
 
         /// <summary>
@@ -618,13 +672,19 @@ namespace CodeDeeds.Xslt.Model
             int nodeCapacity,
             int attributeCapacity,
             bool pooledStorage = false,
-            bool trackEntityBases = true)
+            bool trackEntityBases = true,
+            TreeValidation? validation = null)
         {
             XdmTreeBuilder builder = new XdmTreeBuilder(nameTable, nodeCapacity, attributeCapacity, pooledStorage)
             {
                 Whitespace = whitespace,
             };
             IXmlLineInfo? lines = locations && reader is IXmlLineInfo info && info.HasLineInfo() ? info : null;
+
+            // For each open element of a validated document, whether its type admits elements and no
+            // text: the whitespace in such an element is element content whitespace, which the data
+            // model leaves out (XDM §6.7.3), as it does for an element a declaration says the same of.
+            List<bool>? openElementOnly = validation is null ? null : new List<bool>();
 
             // The open elements' names as written, which a declaration's content models are keyed by, and
             // the base URI in force in each — the entity it was parsed out of, which the reader knows. Both
@@ -659,7 +719,9 @@ namespace CodeDeeds.Xslt.Model
                             ? NoteEntityBase(builder, reader, openBases)
                             : string.Empty;
 
-                        builder.CopyAttributes(reader);
+                        bool elementOnly = validation is not null && builder.AnnotateElement(reader, validation);
+
+                        builder.CopyAttributes(reader, validation);
                         if (reader.IsEmptyElement)
                         {
                             builder.EndElement();
@@ -675,6 +737,8 @@ namespace CodeDeeds.Xslt.Model
                             {
                                 openBases.Add(entityBase);
                             }
+
+                            openElementOnly?.Add(elementOnly);
                         }
 
                         break;
@@ -692,6 +756,7 @@ namespace CodeDeeds.Xslt.Model
                             openBases.RemoveAt(openBases.Count - 1);
                         }
 
+                        openElementOnly?.RemoveAt(openElementOnly.Count - 1);
                         break;
 
                     case XmlNodeType.Whitespace:
@@ -707,6 +772,11 @@ namespace CodeDeeds.Xslt.Model
                         // Whitespace in an element the declaration gives element content only is element
                         // content whitespace, which the data model excludes (XDM §6.7.3).
                         if (openNames.Count > 0 && builder.HasElementOnlyContent(openNames[^1]))
+                        {
+                            break;
+                        }
+
+                        if (openElementOnly is { Count: > 0 } && openElementOnly[^1])
                         {
                             break;
                         }
@@ -1226,11 +1296,21 @@ namespace CodeDeeds.Xslt.Model
                 Array.Resize(ref m_attributeNameCode, capacity);
                 Array.Resize(ref m_attributeValue, capacity);
                 Array.Resize(ref m_attributeOwner, capacity);
+
+                if (m_attributeType is not null)
+                {
+                    Array.Resize(ref m_attributeType, capacity);
+                }
             }
 
             m_attributeNameCode[m_attributeCount] = InternName(prefix, namespaceUri, localName);
             m_attributeValue[m_attributeCount] = value;
             m_attributeOwner[m_attributeCount] = -1;
+
+            if (m_attributeType is not null)
+            {
+                m_attributeType[m_attributeCount] = 0;
+            }
 
             return XdmTree.AttributeIdBase + m_attributeCount++;
         }
@@ -1269,6 +1349,11 @@ namespace CodeDeeds.Xslt.Model
                 Array.Resize(ref m_attributeNameCode, capacity);
                 Array.Resize(ref m_attributeValue, capacity);
                 Array.Resize(ref m_attributeOwner, capacity);
+
+                if (m_attributeType is not null)
+                {
+                    Array.Resize(ref m_attributeType, capacity);
+                }
             }
 
             if (localName == "space" && namespaceUri == XdmTree.XmlNamespaceUri)
@@ -1296,6 +1381,11 @@ namespace CodeDeeds.Xslt.Model
                 {
                     m_attributeNameCode[j - 1] = m_attributeNameCode[j];
                     m_attributeValue[j - 1] = m_attributeValue[j];
+
+                    if (m_attributeType is not null)
+                    {
+                        m_attributeType[j - 1] = m_attributeType[j];
+                    }
                 }
 
                 m_attributeCount--;
@@ -1306,6 +1396,12 @@ namespace CodeDeeds.Xslt.Model
             m_attributeNameCode[m_attributeCount] = nameCode;
             m_attributeValue[m_attributeCount] = value;
             m_attributeOwner[m_attributeCount] = element;
+
+            if (m_attributeType is not null)
+            {
+                m_attributeType[m_attributeCount] = 0;
+            }
+
             m_attributeCount++;
             m_attrCount[element]++;
         }
@@ -1524,6 +1620,11 @@ namespace CodeDeeds.Xslt.Model
                     Array.Resize(ref m_line, m_nodeCount);
                     Array.Resize(ref m_column, m_nodeCount);
                 }
+
+                if (m_nodeType is not null)
+                {
+                    Array.Resize(ref m_nodeType, m_nodeCount);
+                }
             }
 
             if (IsWorthTrimming(m_attributeCount, m_attributeNameCode.Length))
@@ -1531,6 +1632,11 @@ namespace CodeDeeds.Xslt.Model
                 Array.Resize(ref m_attributeNameCode, m_attributeCount);
                 Array.Resize(ref m_attributeValue, m_attributeCount);
                 Array.Resize(ref m_attributeOwner, m_attributeCount);
+
+                if (m_attributeType is not null)
+                {
+                    Array.Resize(ref m_attributeType, m_attributeCount);
+                }
             }
 
             if (IsWorthTrimming(m_namespaceDeclarationCount, m_namespacePrefix.Length))
@@ -1573,6 +1679,11 @@ namespace CodeDeeds.Xslt.Model
                     ? m_documentType.UnparsedEntities
                     : m_inheritedEntities,
                 EntityBases = m_entityBase,
+                NodeTypes = m_nodeType,
+                AttributeTypes = m_attributeType,
+                NilledNodes = m_nilled,
+                IdElements = m_idElements,
+                IdrefElements = m_idrefElements,
             };
 
             return tree;
@@ -1590,7 +1701,102 @@ namespace CodeDeeds.Xslt.Model
         /// <summary>Whether a document type declaration has been read, so that its lists can be asked.</summary>
         internal bool HasDocumentType => m_documentType is not null;
 
-        private void CopyAttributes(XmlReader reader)
+        /// <summary>
+        /// Reads what the validating reader settled for the element just started, and annotates the
+        /// element with it.
+        /// </summary>
+        /// <remarks>
+        /// The reader knows the element's declaration, its type and whether it is nilled at the start
+        /// tag, which is where this is called; whether its content turns out valid it knows only at the
+        /// end tag, and says through the validation event handler.
+        /// </remarks>
+        /// <param name="reader">The reader, positioned on the element.</param>
+        /// <param name="validation">What the document is validated against.</param>
+        /// <returns>Whether the element's type admits elements and no text.</returns>
+        private bool AnnotateElement(XmlReader reader, TreeValidation validation)
+        {
+            System.Xml.Schema.IXmlSchemaInfo? info = reader.SchemaInfo;
+
+            if (info is null)
+            {
+                return false;
+            }
+
+            System.Xml.Schema.XmlSchemaType? type = info.SchemaType;
+
+            // Strict validation is of the document element against a top-level declaration, and an
+            // element with none is the error the specification names; below the top, what a declaration
+            // admits is the schema's own business, and an undeclared element is what a wildcard let in.
+            if (type is null && info.SchemaElement is null && validation.Strict && OpenElementDepth == 1)
+            {
+                throw TreeValidation.Undeclared(reader.NamespaceURI, reader.LocalName);
+            }
+
+            if (validation.Annotate && (type is not null || info.IsNil))
+            {
+                AnnotateElement(type is null ? (ushort)0 : validation.TypeIds(type), info.IsNil);
+            }
+            else if (!validation.Annotate && type is not null && XPath.XdmSchemaType.ById(validation.TypeIds(type)) is XPath.XdmSchemaType stripped)
+            {
+                // Stripped of its annotation, an element whose content is an ID, or a reference to one,
+                // keeps being one (XSLT 3.0 §4.4), as an attribute does.
+                XPath.XdmSchemaType? content = stripped.Variety == XPath.XdmSchemaVariety.Complex
+                    ? stripped.Content == System.Xml.Schema.XmlSchemaContentType.TextOnly ? stripped.SimpleContent : null
+                    : stripped;
+
+                if (content is { IsIdType: true })
+                {
+                    (m_idElements ??= new HashSet<int>()).Add(m_nodeCount - 1);
+                }
+                else if (content is { IsIdrefType: true })
+                {
+                    (m_idrefElements ??= new HashSet<int>()).Add(m_nodeCount - 1);
+                }
+            }
+
+            return type is System.Xml.Schema.XmlSchemaComplexType { ContentType: System.Xml.Schema.XmlSchemaContentType.ElementOnly };
+        }
+
+        /// <summary>The elements a schema typed as an ID or a reference, kept where the annotations were not.</summary>
+        private HashSet<int>? m_idElements;
+        private HashSet<int>? m_idrefElements;
+
+        /// <summary>
+        /// Annotates the element most recently started with the type it was validated as, and whether
+        /// it is nilled.
+        /// </summary>
+        /// <param name="typeId">The type's number, from <c>XdmSchemaType.Id</c>, or 0 for none.</param>
+        /// <param name="nilled">Whether the element is nilled.</param>
+        internal void AnnotateElement(ushort typeId, bool nilled)
+        {
+            int element = RequireOpenElement();
+
+            if (typeId != 0)
+            {
+                m_nodeType ??= new ushort[m_kind.Length];
+                m_nodeType[element] = typeId;
+            }
+
+            if (nilled)
+            {
+                (m_nilled ??= new HashSet<int>()).Add(element);
+            }
+        }
+
+        /// <summary>Annotates the attribute most recently added with the type it was validated as.</summary>
+        /// <param name="typeId">The type's number, from <c>XdmSchemaType.Id</c>, or 0 for none.</param>
+        internal void AnnotateLastAttribute(ushort typeId)
+        {
+            if (typeId == 0 || m_attributeCount == 0)
+            {
+                return;
+            }
+
+            m_attributeType ??= new ushort[m_attributeNameCode.Length];
+            m_attributeType[m_attributeCount - 1] = typeId;
+        }
+
+        private void CopyAttributes(XmlReader reader, TreeValidation? validation = null)
         {
             // The element's name as written, which is what a declaration's attribute list is keyed by —
             // and wanted only where there is a declaration to key by it.
@@ -1600,6 +1806,8 @@ namespace CodeDeeds.Xslt.Model
             {
                 return;
             }
+
+            bool annotate = validation is { Annotate: true };
 
             do
             {
@@ -1613,6 +1821,30 @@ namespace CodeDeeds.Xslt.Model
                 else
                 {
                     AddAttribute(reader.Prefix, reader.NamespaceURI, reader.LocalName, reader.Value);
+
+                    if (validation is not null && reader.SchemaInfo is { SchemaType: System.Xml.Schema.XmlSchemaType attributeType })
+                    {
+                        ushort typeId = validation.TypeIds(attributeType);
+
+                        if (annotate)
+                        {
+                            AnnotateLastAttribute(typeId);
+                        }
+                        else if (XPath.XdmSchemaType.ById(typeId) is XPath.XdmSchemaType type)
+                        {
+                            // Stripped of its annotation, an attribute keeps whether it is an ID or a
+                            // reference to one (XSLT 3.0 §4.4): the properties are the tree's, not the
+                            // annotation's, and are kept the way a declaration's are.
+                            if (type.IsIdType)
+                            {
+                                (m_idAttributeEntries ??= new List<int>()).Add(m_attributeCount - 1);
+                            }
+                            else if (type.IsIdrefType)
+                            {
+                                (m_idrefAttributeEntries ??= new List<int>()).Add(m_attributeCount - 1);
+                            }
+                        }
+                    }
 
                     if (m_documentType is not null)
                     {
@@ -1709,6 +1941,11 @@ namespace CodeDeeds.Xslt.Model
                 {
                     Array.Resize(ref m_line, capacity);
                     Array.Resize(ref m_column, capacity);
+                }
+
+                if (m_nodeType is not null)
+                {
+                    Array.Resize(ref m_nodeType, capacity);
                 }
             }
 

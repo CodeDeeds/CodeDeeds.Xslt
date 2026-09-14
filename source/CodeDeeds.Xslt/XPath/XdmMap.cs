@@ -218,12 +218,12 @@ namespace CodeDeeds.Xslt.XPath
         /// <exception cref="XsltException">The value is a node, a sequence, a map or an array.</exception>
         public static XdmKey Of(XPathValue value)
         {
-            // A node is atomized first, which is what lets an attribute out of the input be a key. Nothing
-            // here carries a type annotation, so its typed value is its text as xs:untypedAtomic — and that
-            // shares a key family with xs:string, so map { @id: 1 } is read back by the text of the id.
+            // A node is atomized first, which is what lets an attribute out of the input be a key. In a
+            // tree nothing validated its typed value is its text as xs:untypedAtomic — and that shares a
+            // key family with xs:string, so map { @id: 1 } is read back by the text of the id.
             if (value.Kind is XPathValueKind.Node or XPathValueKind.NodeSet)
             {
-                value = XPathValue.FromUntypedAtomic(XdmSequence.StringValueOf(value));
+                value = XdmSequence.TypedValueAsOne(value, "A map key");
             }
 
             switch (value.Kind)

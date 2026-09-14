@@ -465,15 +465,21 @@ namespace CodeDeeds.Xslt.XPath
         public static XPathValue Cast(
             XPathValue value, BuiltInType type, IReadOnlyDictionary<string, string>? namespaces = null)
         {
-            // A node casts by way of its string value, which is untyped — for the constructor function as
-            // for 'cast as'. Left as a node, xs:boolean() read it as a number, which it is not, and said no.
+            // A node casts by way of its typed value — its string value, untyped, unless the node was
+            // validated — for the constructor function as for 'cast as'. Left as a node, xs:boolean() read
+            // it as a number, which it is not, and said no.
             if (value.Kind is XPathValueKind.Node or XPathValueKind.NodeSet)
             {
                 List<XPathValue> items = XdmSequence.Items(value);
 
                 if (items.Count == 1)
                 {
-                    value = XPathValue.FromUntypedAtomic(XdmSequence.StringValueOf(items[0]));
+                    value = XdmSequence.TypedValueAsOne(items[0], "A cast");
+
+                    if (value.Kind == XPathValueKind.Sequence)
+                    {
+                        return value;
+                    }
                 }
             }
 

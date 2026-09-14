@@ -633,11 +633,17 @@ namespace CodeDeeds.Xslt.Compiler
             string localName,
             XsltVersion version,
             XsltVersion implemented,
-            bool dynamicEvaluation = true)
+            bool dynamicEvaluation = true,
+            bool schemaAware = false)
         {
             if (localName == "supports-dynamic-evaluation" && !dynamicEvaluation)
             {
                 return XPathValue.FromString("no");
+            }
+
+            if (localName == "is-schema-aware" && namespaceUri == StylesheetCompiler.XsltNamespace)
+            {
+                return XPathValue.FromString(schemaAware ? "yes" : "no");
             }
 
             if (namespaceUri != StylesheetCompiler.XsltNamespace)
@@ -807,6 +813,7 @@ namespace CodeDeeds.Xslt.Compiler
         private readonly XsltVersion m_version;
         private readonly XsltVersion m_implemented;
         private readonly bool m_dynamicEvaluation;
+        private readonly bool m_schemaAware;
 
         /// <summary>Initializes a call to <c>system-property()</c>.</summary>
         /// <param name="name">The expression giving the property name.</param>
@@ -814,17 +821,20 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="version">The version in force, which decides the type of <c>xsl:version</c>.</param>
         /// <param name="implemented">The version this processor was asked to be, which is what it reports.</param>
         /// <param name="dynamicEvaluation">Whether <c>xsl:evaluate</c> is switched on.</param>
+        /// <param name="schemaAware">Whether the processor was asked to be schema-aware.</param>
         public SystemPropertyExpr(
             Expr name,
             Dictionary<string, string> prefixes,
             XsltVersion version,
             XsltVersion implemented,
-            bool dynamicEvaluation = true)
+            bool dynamicEvaluation = true,
+            bool schemaAware = false)
             : base(name, prefixes)
         {
             m_version = version;
             m_implemented = implemented;
             m_dynamicEvaluation = dynamicEvaluation;
+            m_schemaAware = schemaAware;
         }
 
         /// <inheritdoc/>
@@ -836,7 +846,7 @@ namespace CodeDeeds.Xslt.Compiler
         protected override XPathValue Lookup(string namespaceUri, string localName)
         {
             return SystemProperty.Lookup(
-                namespaceUri, localName, m_version, m_implemented, m_dynamicEvaluation);
+                namespaceUri, localName, m_version, m_implemented, m_dynamicEvaluation, m_schemaAware);
         }
     }
 
@@ -846,15 +856,19 @@ namespace CodeDeeds.Xslt.Compiler
     internal sealed class TypeAvailableExpr : QualifiedNameProbeExpr
     {
         private readonly bool m_implements30;
+        private readonly SchemaComponents? m_schemas;
 
         /// <summary>Initializes a call to <c>type-available()</c>.</summary>
         /// <param name="name">The expression giving the type name.</param>
         /// <param name="prefixes">The namespace bindings in scope where the call was written.</param>
         /// <param name="implements30">Whether this processor implements XSLT 3.0.</param>
-        public TypeAvailableExpr(Expr name, Dictionary<string, string> prefixes, bool implements30)
+        /// <param name="schemas">The schema components in scope, or null for a processor with none.</param>
+        public TypeAvailableExpr(
+            Expr name, Dictionary<string, string> prefixes, bool implements30, SchemaComponents? schemas = null)
             : base(name, prefixes)
         {
             m_implements30 = implements30;
+            m_schemas = schemas;
         }
 
         /// <inheritdoc/>
@@ -866,7 +880,8 @@ namespace CodeDeeds.Xslt.Compiler
         protected override XPathValue Lookup(string namespaceUri, string localName)
         {
             return XPathValue.FromBoolean(
-                Availability.IsTypeAvailable(namespaceUri, localName, m_implements30));
+                Availability.IsTypeAvailable(namespaceUri, localName, m_implements30)
+                || m_schemas?.IsTypeAvailable(namespaceUri, localName) == true);
         }
     }
 

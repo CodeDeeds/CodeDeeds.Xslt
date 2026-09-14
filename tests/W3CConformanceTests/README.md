@@ -78,6 +78,44 @@ The flag is for the XSLT suite only. The QT3 runner parses and evaluates an expr
 through a stylesheet, so there is no `XsltOptions` in its path to carry a backend, and the driver says so
 rather than running the interpreter and reporting the number as though it had measured the other one.
 
+## Schema awareness, while it is being built
+
+`--schema` runs the XSLT suite with `XsltOptions.SchemaAware`: the schemas an environment declares are
+loaded into `XsltOptions.Schemas`, a `schema-location` is read from the suite, and the tests marked
+`schema_aware` are judged rather than skipped. It is opt-in so that the headline figure does not move while
+the phases of `Documentation/SchemaAwarenessPlan.md` land one at a time: a test that needs typed input or
+validation of constructed nodes fails under the flag until the phase that provides it, and the count of
+those failures is the measure of what is left. Without the flag a run is what it was.
+
+On landing phase 1 (13 September 2026) the schema-aware 3.0 run stood at **7,673 of 8,208, 93.5%**: 590
+tests came in that the plain run skips, 93 of them pass on the type system alone, and the 497 that fail
+are where the plan says the next two phases are — 179 in `decl/import-schema` and 43 in `attr/validation`
+wanting `type` and `validation` on constructed nodes, and 81 in `attr/match`, 50 in `attr/as` and 34 in
+`expr/nodetest` wanting annotated input.
+
+Phase 2, typed input, took it to **7,822 of 8,208, 95.3%** on the same day, on both backends. A source
+the catalog marks `validation="strict"` is now read under `XsltOptions.InputValidation`, and the tests
+that ask about annotated input followed: `expr/nodetest` fell from 34 failures to none,
+`attr/strip-type-annotations` from 4 to 1, `attr/xpath-default-namespace` from 4 to none, `attr/match`
+from 81 to 27 and `attr/as` from 50 to 33. Of the 386 failures left, 293 were one thing said many ways:
+`validation` or `type` on an instruction that constructs nodes.
+
+Phase 3, validation of constructed nodes, took it to **8,101 of 8,207, 98.7%** (14 September 2026), the
+same on both backends, with the headline runs unchanged. `validation` and `type` on `xsl:element`,
+`xsl:attribute`, `xsl:copy`, `xsl:copy-of`, `xsl:document`, `xsl:result-document` and literal result
+elements build their result, validate it against the schemas through .NET's push validator, and carry
+what validation settled onto the output; the `XTTE15xx` codes are chosen by what was being validated.
+All 293 refusals cleared: `insn/copy` fell from 17 failures to 2, `attr/validation` from 31 to 17,
+`attr/as` from 33 to a handful, `misc/error` from 26 to 6.
+
+Phase 4, the tail, took it to **8,110 of 8,207, 98.8%**, both backends. `fn:json-to-xml` with
+`validate:=true` validates its result against the schema for the XPath functions namespace, which is
+built in, and `xsl:evaluate schema-aware="no"` — the default — raises `XTDE3160` where the target names
+an imported type. The 97 left are `xs:NOTATION` (5), whose typed value the type-code model cannot tell
+from a plain `xs:QName`; a schema's `xs:include` by relative location from an inline schema; per-document
+input validation; and a scatter of edge cases, some unrelated to schema awareness, that the `--schema`
+environments surface.
+
 ## Reading the result
 
 A test the driver cannot present fairly is **skipped with a reason** rather than counted either way, so the

@@ -227,10 +227,17 @@ namespace CodeDeeds.Xslt.XPath
                         $"'{Spell(op)}' takes one value on each side, but was given {items.Count}.");
             }
 
-            // A node contributes its string-value, which is untyped and so becomes a double below.
+            // A node contributes its typed value: its text, untyped and so a double below, unless the
+            // node was validated, when it is what its type says, and may be nothing at all.
             single = items[0].Kind == XPathValueKind.Node
-                ? XPathValue.FromUntypedAtomic(XdmSequence.StringValueOf(items[0]))
+                ? XdmSequence.TypedValueAsOne(items[0], $"'{Spell(op)}'")
                 : items[0];
+
+            if (single.Kind == XPathValueKind.Sequence)
+            {
+                single = default;
+                return false;
+            }
 
             return true;
         }
@@ -282,8 +289,13 @@ namespace CodeDeeds.Xslt.XPath
                 }
 
                 value = items[0].Kind == XPathValueKind.Node
-                    ? XPathValue.FromUntypedAtomic(XdmSequence.StringValueOf(items[0]))
+                    ? XdmSequence.TypedValueAsOne(items[0], $"'{symbol}'")
                     : items[0];
+
+                if (value.Kind == XPathValueKind.Sequence)
+                {
+                    return XPathValue.FromSequence(XdmSequence.Empty);
+                }
             }
 
             if (!IsNumericOperand(value))

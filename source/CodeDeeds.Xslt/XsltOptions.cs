@@ -218,6 +218,84 @@ namespace CodeDeeds.Xslt
         public IXsltCollationResolver? CollationResolver { get; init; }
 
         /// <summary>
+        /// Gets whether the processor is schema-aware: whether a stylesheet may import a schema and name
+        /// the types it defines. Defaults to <see langword="false"/>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Off, the processor is a <em>basic</em> XSLT processor in the specification's sense:
+        /// <c>xsl:import-schema</c> is <c>XTSE1650</c>, <c>validation="strict"</c> and a <c>type</c>
+        /// attribute are <c>XTSE1660</c>, and <c>system-property('xsl:is-schema-aware')</c> is <c>no</c>.
+        /// On, a stylesheet imports schemas through <c>xsl:import-schema</c>, from
+        /// <see cref="Schemas"/> or through <see cref="SchemaResolver"/>, and the types they define are in
+        /// scope for <c>as</c>, <c>instance of</c>, casts, constructor functions and <c>type-available()</c>.
+        /// </para>
+        /// <para>
+        /// What is in place so far is the type system — user-defined atomic, list and union types, with
+        /// their facets enforced by a cast — and typed input: a document validated as it is read, which
+        /// <see cref="InputValidation"/> asks for, carries the types validation settled on, and
+        /// atomization, the kind tests, <c>schema-element()</c>, <c>nilled()</c> and <c>id()</c> read
+        /// them. <c>validation</c> and <c>type</c> on the instructions that construct nodes are not yet
+        /// honoured, so those remain refused; a schema-aware transformation is otherwise the same
+        /// transformation.
+        /// </para>
+        /// </remarks>
+        public bool SchemaAware { get; init; }
+
+        /// <summary>
+        /// Gets the resolver that fetches a schema an <c>xsl:import-schema</c> names by
+        /// <c>schema-location</c>, or by namespace alone, and what a schema includes or imports.
+        /// </summary>
+        /// <remarks>
+        /// A fifth kind of reference with a resolver of its own: a schema is a definition of what is
+        /// valid, which is neither code nor data, and a caller may reasonably let a stylesheet read one
+        /// without letting it read the other two. <see langword="null"/>, the default, means a
+        /// <c>schema-location</c> is <c>XTSE0165</c> and only <see cref="Schemas"/> is in scope. Asked
+        /// with the namespace URI as the reference where an import names no location.
+        /// </remarks>
+        public IXsltResolver? SchemaResolver { get; init; }
+
+        /// <summary>
+        /// Gets schemas the caller has already loaded, whose types are in scope for every stylesheet
+        /// compiled with these options.
+        /// </summary>
+        /// <remarks>
+        /// Copied into a set of the stylesheet's own before anything is imported, so that what a stylesheet
+        /// imports does not change this set under the caller. An <c>xsl:import-schema</c> naming a
+        /// namespace this set covers imports nothing further.
+        /// </remarks>
+        public System.Xml.Schema.XmlSchemaSet? Schemas { get; init; }
+
+        /// <summary>
+        /// Gets how the documents a transformation reads are validated: the input, and what
+        /// <c>document()</c>, <c>doc()</c> and <c>collection()</c> load. Defaults to
+        /// <see cref="XsltValidation.Strip"/>, which validates nothing.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see cref="XsltValidation.Strict"/> and <see cref="XsltValidation.Lax"/> validate each document
+        /// as it is read, against the schemas the stylesheet imported and those in <see cref="Schemas"/>,
+        /// and annotate its elements and attributes with the types validation settles on: the typed value
+        /// of an element declared <c>xs:integer</c> is an integer, <c>element(*, my:type)</c> matches what
+        /// was validated as that type, <c>schema-element(e)</c> matches by declaration, <c>nilled()</c>
+        /// answers, and <c>id()</c> follows what a schema typed as ID. Validation stops at the first
+        /// fault, reported as the specification has it: <c>XTTE1510</c> for an invalid document under
+        /// strict validation and <c>XTTE1515</c> under lax, <c>XTTE1512</c> for a document element strict
+        /// validation finds no declaration for. Needs <see cref="SchemaAware"/>; asking for validation
+        /// without it is refused when the stylesheet is constructed.
+        /// </para>
+        /// <para>
+        /// The schemas in scope are the whole of what a document is validated against: an
+        /// <c>xsi:schemaLocation</c> in the document is not followed, and an inline schema not read, since
+        /// either would let a document add to a set every transformation over the stylesheet shares. A
+        /// stylesheet declaring <c>input-type-annotations="strip"</c> is still validated, and then reads
+        /// its documents untyped, as the specification asks. A tree the caller built and hands to
+        /// <see cref="Xslt.Transform(Model.XdmTree)"/> is not validated here.
+        /// </para>
+        /// </remarks>
+        public XsltValidation InputValidation { get; init; }
+
+        /// <summary>
         /// Gets the resolver that finds the library packages named by <c>xsl:use-package</c>.
         /// </summary>
         /// <remarks>
@@ -431,6 +509,10 @@ namespace CodeDeeds.Xslt
                 PackageResolver = PackageResolver,
                 EntityResolver = EntityResolver,
                 EnvironmentVariablesEnabled = EnvironmentVariablesEnabled,
+                SchemaAware = SchemaAware,
+                SchemaResolver = SchemaResolver,
+                Schemas = Schemas,
+                InputValidation = InputValidation,
                 ResultResolver = ResultResolver,
                 ResultStreamResolver = ResultStreamResolver,
                 BaseUri = BaseUri,

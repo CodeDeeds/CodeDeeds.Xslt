@@ -289,11 +289,34 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>Whether the test names an element or attribute, rather than admitting any name.</summary>
         public bool NamesAName => m_localName is not null;
 
-        /// <summary>Whether a type was written after the name, which no node here carries.</summary>
+        /// <summary>Whether a type was written after the name, or a declaration was named.</summary>
         public bool NamesAType { get; init; }
 
-        /// <summary>The local part of the type the test names, or <see langword="null"/> where it names none.</summary>
+        /// <summary>The type the test names as written, or <see langword="null"/> where it names none.</summary>
         public string? TypeName { get; init; }
+
+        /// <summary>
+        /// The type the test names, built in or from a schema, or <see langword="null"/> where it names
+        /// none. A node matches where its annotation is this type or derives from it; a node nothing
+        /// validated is annotated <c>xs:untyped</c> as an element and <c>xs:untypedAtomic</c> as an
+        /// attribute (XDM §5.2), which is what a test naming those matches.
+        /// </summary>
+        internal XdmSchemaType? SchemaType { get; init; }
+
+        /// <summary>
+        /// Whether the test admits a nilled element: written with no type, or with the type followed by
+        /// <c>?</c>. <c>element(e)</c> means <c>element(e, xs:anyType?)</c>, and the <c>?</c> is what
+        /// admits a nilled node; <c>element(e, xs:anyType)</c> is narrower and does not.
+        /// </summary>
+        internal bool AdmitsNilled { get; init; } = true;
+
+        /// <summary>
+        /// The declaration <c>schema-element()</c> or <c>schema-attribute()</c> names, or null for the
+        /// other kind tests. A node matches where its name is the declared one, or in the declared
+        /// element's substitution group, and its annotation derives from the declared type, and it is
+        /// not nilled unless the declaration allows that.
+        /// </summary>
+        internal XdmSchemaDeclaration? Declaration { get; init; }
 
         /// <summary>For <c>document-node(element(…))</c>, the test the element child must satisfy.</summary>
         public KindNodeTest? Content => m_content;
@@ -306,8 +329,8 @@ namespace CodeDeeds.Xslt.XPath
         /// The name has to be the other's, or the other has to ask for no name. The type is the part with a
         /// wrinkle in it: <c>element(e)</c> means <c>element(e, xs:anyType?)</c>, and the <c>?</c> there is
         /// what makes it nillable — so <c>element(e, xs:anyType)</c>, which looks like the same thing
-        /// written out, is narrower and <c>element(e)</c> is not within it. This engine validates nothing,
-        /// so two named types are compared by name and no hierarchy is consulted.
+        /// written out, is narrower and <c>element(e)</c> is not within it. Two named types are compared
+        /// by derivation, and two declarations by name.
         /// </remarks>
         /// <param name="other">The test this one may be within.</param>
         public bool Within(KindNodeTest other)
@@ -315,6 +338,13 @@ namespace CodeDeeds.Xslt.XPath
             if (m_kind != other.m_kind)
             {
                 return false;
+            }
+
+            if (other.Declaration is XdmSchemaDeclaration wanted)
+            {
+                return Declaration is XdmSchemaDeclaration own
+                    && own.NamespaceUri == wanted.NamespaceUri
+                    && own.LocalName == wanted.LocalName;
             }
 
             if (other.m_localName is not null
@@ -328,7 +358,21 @@ namespace CodeDeeds.Xslt.XPath
                 return false;
             }
 
-            return !other.NamesAType || (NamesAType && TypeName == other.TypeName);
+            if (!other.NamesAType)
+            {
+                return true;
+            }
+
+            if (AdmitsNilled && !other.AdmitsNilled)
+            {
+                return false;
+            }
+
+            XdmSchemaType? mine = SchemaType ?? Declaration?.Type;
+
+            return other.SchemaType is XdmSchemaType type
+                ? mine is not null && mine.DerivesFrom(type)
+                : NamesAType && TypeName == other.TypeName;
         }
 
         /// <summary>
@@ -343,12 +387,22 @@ namespace CodeDeeds.Xslt.XPath
                 return false;
             }
 
+            if (Declaration is XdmSchemaDeclaration declaration)
+            {
+                return MatchesDeclaration(tree, node, declaration);
+            }
+
             if (m_localName is not null && !HasName(tree, node))
             {
                 return false;
             }
 
-            if (TypeName is string annotation && !AnnotatedAs(annotation))
+            if (SchemaType is XdmSchemaType type && !AnnotatedAs(tree, node, type))
+            {
+                return false;
+            }
+
+            if (!AdmitsNilled && tree.IsNilled(node))
             {
                 return false;
             }
@@ -371,20 +425,46 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
-        /// Whether the node's type annotation is the type named, or one that annotation derives from.
+        /// Whether a node is one <c>schema-element(E)</c> or <c>schema-attribute(A)</c> matches
+        /// (XPath 3.1 §2.5.5.6): named as declared or substitutable for it, annotated with the declared
+        /// type or one derived from it, and nilled only where the declaration allows.
         /// </summary>
-        /// <remarks>
-        /// Nothing here has been validated, so every element is annotated <c>xs:untyped</c> and every
-        /// attribute <c>xs:untypedAtomic</c> (XDM §5.2). A test naming one of those, or a type it derives
-        /// from, matches accordingly; naming anything else matches nothing at all, which is the honest
-        /// answer from a processor that has no schema to have validated against.
-        /// </remarks>
-        /// <param name="typeName">The local part of the type named, which is in the schema namespace.</param>
-        private bool AnnotatedAs(string typeName)
+        private static bool MatchesDeclaration(XdmTree tree, int node, XdmSchemaDeclaration declaration)
         {
-            return m_kind == NodeKind.Element
-                ? typeName is "untyped" or "anyType"
-                : typeName is "untypedAtomic" or "anyAtomicType" or "anySimpleType" or "anyType";
+            int fingerprint = tree.FingerprintOf(node);
+
+            if (fingerprint == NameTable.NoFingerprint
+                || !declaration.AdmitsName(
+                    tree.NameTable.GetNamespaceUri(fingerprint), tree.NameTable.GetLocalName(fingerprint)))
+            {
+                return false;
+            }
+
+            // A node nothing validated is no instance of a declaration, whatever the declaration's type:
+            // xs:untyped derives from xs:anyType, which an element declared without a type has, and the
+            // test is still about what was validated against the declaration, not about the name alone.
+            if (!tree.HasTypeAnnotations || tree.TypeIdOf(node) == 0)
+            {
+                return false;
+            }
+
+            return AnnotatedAs(tree, node, declaration.Type)
+                && (declaration.Nillable || !tree.IsNilled(node));
+        }
+
+        /// <summary>
+        /// Whether the node's type annotation is the type named, or one that derives from it; a node
+        /// nothing validated is annotated <c>xs:untyped</c> or <c>xs:untypedAtomic</c> by its kind.
+        /// </summary>
+        private static bool AnnotatedAs(XdmTree tree, int node, XdmSchemaType type)
+        {
+            XdmSchemaType? annotation = tree.HasTypeAnnotations ? tree.TypeAnnotationOf(node) : null;
+
+            annotation ??= tree.KindOf(node) == NodeKind.Element
+                ? XdmSchemaType.BuiltInNamed("untyped")
+                : XdmSchemaType.BuiltInNamed("untypedAtomic");
+
+            return annotation is not null && annotation.DerivesFrom(type);
         }
 
         private bool HasName(XdmTree tree, int node)

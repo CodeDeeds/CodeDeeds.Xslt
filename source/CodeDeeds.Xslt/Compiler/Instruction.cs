@@ -375,8 +375,12 @@ namespace CodeDeeds.Xslt.Compiler
             // items joined, not the text of a fragment.
             string text;
 
+            // The nodes' text read straight off the tree, where the tree is one nothing validated: a
+            // validated node's typed value is what its type says, which may read differently from the
+            // text — a duration in its canonical form — and may be several values, so it goes the
+            // general way and is atomized.
             if (m_select is not null && m_separator is null && m_select.ReturnsNodeSet
-                && !m_select.MaySpanDocuments)
+                && !m_select.MaySpanDocuments && !context.Tree.HasTypeAnnotations)
             {
                 text = SelectedNodesText(ref context);
             }
@@ -1901,6 +1905,7 @@ namespace CodeDeeds.Xslt.Compiler
         private readonly Expr m_select;
         private readonly bool m_copyNamespaces;
         private readonly bool m_copyAccumulators;
+        private readonly bool m_preserveTypes;
 
         /// <summary>Initializes a copy-of instruction.</summary>
         /// <param name="select">What to copy.</param>
@@ -1913,11 +1918,17 @@ namespace CodeDeeds.Xslt.Compiler
         /// is XSLT 3.0's <c>copy-accumulators="yes"</c>. Without it a copy is a fresh tree and the
         /// accumulators, all of them, are computed over the copy from the beginning.
         /// </param>
-        public CopyOfInstruction(Expr select, bool copyNamespaces = true, bool copyAccumulators = false)
+        /// <param name="preserveTypes">
+        /// Whether the copies keep the type annotations of what they copy, which <c>validation="preserve"</c>
+        /// asks; the default strips them, as a schema-aware processor's default validation does.
+        /// </param>
+        public CopyOfInstruction(
+            Expr select, bool copyNamespaces = true, bool copyAccumulators = false, bool preserveTypes = true)
         {
             m_select = select;
             m_copyNamespaces = copyNamespaces;
             m_copyAccumulators = copyAccumulators;
+            m_preserveTypes = preserveTypes;
         }
 
         /// <inheritdoc/>
@@ -1931,7 +1942,8 @@ namespace CodeDeeds.Xslt.Compiler
                 for (int i = 0; i < nodes.Count; i++)
                 {
                     NodeCopier.CopyDeep(
-                        nodes.TreeAt(i), nodes[i], runtime.Output, m_copyNamespaces, m_copyAccumulators, runtime);
+                        nodes.TreeAt(i), nodes[i], runtime.Output, m_copyNamespaces, m_copyAccumulators, runtime,
+                        m_preserveTypes);
                 }
 
                 return;
@@ -1957,7 +1969,8 @@ namespace CodeDeeds.Xslt.Compiler
                         runtime.Output,
                         m_copyNamespaces,
                         m_copyAccumulators,
-                        runtime);
+                        runtime,
+                        m_preserveTypes);
 
                     continue;
                 }
@@ -2057,7 +2070,8 @@ namespace CodeDeeds.Xslt.Compiler
             Expr? select = null,
             bool copiesItems = false,
             bool copyAccumulators = false,
-            bool inheritNamespaces = true)
+            bool inheritNamespaces = true,
+            bool preserveTypes = true)
         {
             m_inheritNamespaces = inheritNamespaces;
             m_body = body;
@@ -2066,7 +2080,10 @@ namespace CodeDeeds.Xslt.Compiler
             m_select = select;
             m_copiesItems = copiesItems;
             m_copyAccumulators = copyAccumulators;
+            m_preserveTypes = preserveTypes;
         }
+
+        private readonly bool m_preserveTypes;
 
         /// <inheritdoc/>
         public override void Execute(ref DynamicContext context, XsltRuntime runtime)
@@ -2203,6 +2220,20 @@ namespace CodeDeeds.Xslt.Compiler
                         tree.NameTable.GetNamespaceUri(fingerprint),
                         tree.NameTable.GetLocalName(fingerprint));
 
+                    // A shallow copy keeps the source element's type where validation="preserve" asks and
+                    // the source carries one; strict and lax reach this through the validating wrapper, and
+                    // strip and the default leave it untyped.
+                    if (m_preserveTypes && tree.HasTypeAnnotations)
+                    {
+                        ushort typeId = tree.TypeIdOf(node);
+                        bool nilled = tree.IsNilled(node);
+
+                        if (typeId != 0 || nilled)
+                        {
+                            runtime.Output.AnnotateElement(typeId, nilled);
+                        }
+                    }
+
                     runtime.Output.MarkOwnNamespaces(root: true);
 
                     if (m_copyAccumulators)
@@ -2230,7 +2261,7 @@ namespace CodeDeeds.Xslt.Compiler
                 }
 
                 default:
-                    NodeCopier.CopyShallow(tree, node, runtime.Output, m_copyAccumulators);
+                    NodeCopier.CopyShallow(tree, node, runtime.Output, m_copyAccumulators, m_preserveTypes);
                     return;
             }
         }
@@ -2791,18 +2822,31 @@ namespace CodeDeeds.Xslt.Compiler
         /// The transformation, where the copy is to keep the node's base URI if it ends up parentless;
         /// null where that does not arise.
         /// </param>
+        /// <param name="preserveTypes">
+        /// Whether the copies carry the type annotations the originals do, which copying constructed
+        /// content and <c>validation="preserve"</c> ask, where <c>validation="strip"</c> asks the opposite.
+        /// </param>
+        /// <param name="types">
+        /// What validation settled for the nodes, which the copies then carry in place of whatever the
+        /// originals do; null where the originals' own annotations, or none, are what is copied.
+        /// </param>
         public static void CopyDeep(
             XdmTree tree,
             int node,
             OutputTarget output,
             bool copyNamespaces = true,
             bool copyAccumulators = false,
-            XsltRuntime? runtime = null)
+            XsltRuntime? runtime = null,
+            bool preserveTypes = true,
+            TypeOverlay? types = null)
         {
             if (runtime is not null && output.OpenElementDepth == 0)
             {
                 output.NoteSourceOfNext(tree, node, runtime, withAttributes: true);
             }
+
+            // Only a validated tree, or an overlay of what validation settled, has anything to carry.
+            preserveTypes = types is not null || (preserveTypes && tree.HasTypeAnnotations);
 
             // The walk is driven by the tree's own links — first child, next sibling, parent — rather than
             // by recursing once per level. The depth of a document is the one thing about its shape that a
@@ -2821,7 +2865,8 @@ namespace CodeDeeds.Xslt.Compiler
                     if (kind == NodeKind.Element)
                     {
                         StartElementCopy(
-                            tree, current, output, copyNamespaces, copyAccumulators, root: current == node);
+                            tree, current, output, copyNamespaces, copyAccumulators, root: current == node,
+                            preserveTypes, types);
                     }
                     else
                     {
@@ -2833,7 +2878,7 @@ namespace CodeDeeds.Xslt.Compiler
                 }
                 else
                 {
-                    CopyShallow(tree, current, output, copyAccumulators);
+                    CopyShallow(tree, current, output, copyAccumulators, preserveTypes, types);
                 }
 
                 if (child >= 0)
@@ -2880,8 +2925,15 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="copyAccumulators">
         /// Whether the copy is to answer for the accumulators as the node it was copied from does.
         /// </param>
+        /// <param name="preserveTypes">Whether the copy carries the original's type annotation.</param>
+        /// <param name="types">What validation settled for the node, or null; see <see cref="CopyDeep"/>.</param>
         public static void CopyShallow(
-            XdmTree tree, int node, OutputTarget output, bool copyAccumulators = false)
+            XdmTree tree,
+            int node,
+            OutputTarget output,
+            bool copyAccumulators = false,
+            bool preserveTypes = true,
+            TypeOverlay? types = null)
         {
             NameTable names = tree.NameTable;
 
@@ -2918,12 +2970,13 @@ namespace CodeDeeds.Xslt.Compiler
                         names.GetPrefix(nameCode),
                         names.GetNamespaceUri(fingerprint),
                         names.GetLocalName(fingerprint),
-                        tree.StringValueOf(node));
+                        tree.StringValueOf(node),
+                        TypeToCarry(tree, node, preserveTypes, types));
                     return;
                 }
 
                 case NodeKind.Element:
-                    StartElementCopy(tree, node, output, copyNamespaces: true, copyAccumulators);
+                    StartElementCopy(tree, node, output, copyNamespaces: true, copyAccumulators, root: true, preserveTypes, types);
                     output.EndElement();
                     return;
 
@@ -2937,13 +2990,26 @@ namespace CodeDeeds.Xslt.Compiler
             }
         }
 
+        /// <summary>The type a copy of a node carries: what validation settled, or the original's own, or none.</summary>
+        private static ushort TypeToCarry(XdmTree tree, int node, bool preserveTypes, TypeOverlay? types)
+        {
+            if (types is not null)
+            {
+                return types.TypeIdOf(node);
+            }
+
+            return preserveTypes && tree.HasTypeAnnotations ? tree.TypeIdOf(node) : (ushort)0;
+        }
+
         private static void StartElementCopy(
             XdmTree tree,
             int element,
             OutputTarget output,
             bool copyNamespaces = true,
             bool copyAccumulators = false,
-            bool root = true)
+            bool root = true,
+            bool preserveTypes = true,
+            TypeOverlay? types = null)
         {
             NameTable names = tree.NameTable;
             int nameCode = tree.NameCodeOf(element);
@@ -2953,6 +3019,28 @@ namespace CodeDeeds.Xslt.Compiler
                 names.GetPrefix(nameCode),
                 names.GetNamespaceUri(fingerprint),
                 names.GetLocalName(fingerprint));
+
+            // The annotation, where the copy carries one: the type validation settled, or the original's.
+            if (types is not null)
+            {
+                ushort settled = types.TypeIdOf(element);
+                bool nilled = types.IsNilled(element);
+
+                if (settled != 0 || nilled)
+                {
+                    output.AnnotateElement(settled, nilled);
+                }
+            }
+            else if (preserveTypes && tree.HasTypeAnnotations)
+            {
+                ushort own = tree.TypeIdOf(element);
+                bool nilled = tree.IsNilled(element);
+
+                if (own != 0 || nilled)
+                {
+                    output.AnnotateElement(own, nilled);
+                }
+            }
 
             output.MarkOwnNamespaces(root);
 
@@ -2975,7 +3063,7 @@ namespace CodeDeeds.Xslt.Compiler
             int attributeCount = tree.AttributeCountOf(element);
             for (int i = 0; i < attributeCount; i++)
             {
-                CopyShallow(tree, tree.AttributeAt(element, i), output);
+                CopyShallow(tree, tree.AttributeAt(element, i), output, preserveTypes: preserveTypes, types: types);
             }
         }
     }

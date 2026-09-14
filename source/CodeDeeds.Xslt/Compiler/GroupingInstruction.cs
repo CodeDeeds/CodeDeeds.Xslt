@@ -815,7 +815,10 @@ namespace CodeDeeds.Xslt.Compiler
             (string Name, AttributeValueTemplate Template)[]? templated = null,
             AttributeValueTemplate? format = null,
             IReadOnlyDictionary<ExpandedName, OutputSettings>? formats = null,
-            IReadOnlyDictionary<string, string>? prefixes = null)
+            IReadOnlyDictionary<string, string>? prefixes = null,
+            bool validate = false,
+            bool strictValidation = false,
+            XdmSchemaType? validationType = null)
         {
             m_href = href;
             m_settings = settings;
@@ -825,7 +828,14 @@ namespace CodeDeeds.Xslt.Compiler
             m_format = format;
             m_formats = formats;
             m_prefixes = prefixes;
+            m_validate = validate;
+            m_strictValidation = strictValidation;
+            m_validationType = validationType;
         }
+
+        private readonly bool m_validate;
+        private readonly bool m_strictValidation;
+        private readonly XdmSchemaType? m_validationType;
 
         /// <summary>
         /// The settings for this run of the instruction: the compiled ones, or where the format or any
@@ -1020,7 +1030,14 @@ namespace CodeDeeds.Xslt.Compiler
 
             try
             {
-                ExecuteAll(m_body, ref context, runtime);
+                if (m_validate)
+                {
+                    WriteValidatedBody(output, ref context, runtime);
+                }
+                else
+                {
+                    ExecuteAll(m_body, ref context, runtime);
+                }
             }
             finally
             {
@@ -1030,6 +1047,44 @@ namespace CodeDeeds.Xslt.Compiler
             if (output is OutputWriter written)
             {
                 written.Flush();
+            }
+        }
+
+        /// <summary>
+        /// Builds the result document's content, validates it as a document node against the schemas in
+        /// scope, and then writes it out. The serialized bytes do not depend on the type annotations, so
+        /// what validation is for here is the error it raises on an invalid document.
+        /// </summary>
+        private void WriteValidatedBody(OutputTarget output, ref DynamicContext context, XsltRuntime runtime)
+        {
+            SchemaComponents schemas = runtime.Schemas
+                ?? throw XsltErrors.Error(
+                    XsltErrorCode.XTSE1660, "Validation was asked for, but the stylesheet imported no schema.");
+
+            ResultTreeBuilder builder = new ResultTreeBuilder();
+            runtime.Output = builder;
+
+            try
+            {
+                ExecuteAll(m_body, ref context, runtime);
+            }
+            finally
+            {
+                runtime.Output = output;
+            }
+
+            XdmTree built = builder.Finish();
+            NodeValidator validator = new NodeValidator(schemas);
+
+            TypeOverlay overlay = m_validationType is not null
+                ? validator.ValidateElementAgainstType(built, m_validationType)
+                : validator.ValidateDocument(built, m_strictValidation);
+
+            XdmTree annotated = built.WithTypeAnnotations(overlay);
+
+            for (int child = annotated.FirstChildOf(XdmTree.RootNode); child >= 0; child = annotated.NextSiblingOf(child))
+            {
+                NodeCopier.CopyDeep(annotated, child, output, runtime: runtime);
             }
         }
     }
