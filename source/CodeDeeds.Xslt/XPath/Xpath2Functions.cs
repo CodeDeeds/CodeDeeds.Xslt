@@ -1945,11 +1945,25 @@ namespace CodeDeeds.Xslt.XPath
                 // until something compares it with a number.
                 bool numeric = atomic.Kind == XPathValueKind.Number;
 
-                // A string's key is the collation's, not the string: under one that ignores case, 'DATA' and
-                // 'data' are one value and have to land in one bucket.
-                string key = numeric
-                    ? "n:" + atomic.ToNumber().ToString("R", CultureInfo.InvariantCulture)
-                    : "s:" + collation.Key(atomic.ToStringValue());
+                // A name is its namespace and local name, whatever prefix it was written with: two names
+                // spelled differently are one value, which is what 'eq' says of them.
+                string key;
+
+                if (numeric)
+                {
+                    key = "n:" + atomic.ToNumber().ToString("R", CultureInfo.InvariantCulture);
+                }
+                else if (atomic.TypeCode == XdmTypeCode.QName)
+                {
+                    XdmQName name = atomic.AsQName();
+                    key = "q:" + name.NamespaceUri + "}" + name.LocalName;
+                }
+                else
+                {
+                    // A string's key is the collation's, not the string: under one that ignores case,
+                    // 'DATA' and 'data' are one value and have to land in one bucket.
+                    key = "s:" + collation.Key(atomic.ToStringValue());
+                }
 
                 if (seen.Add(key))
                 {

@@ -111,10 +111,15 @@ All 293 refusals cleared: `insn/copy` fell from 17 failures to 2, `attr/validati
 Phase 4, the tail, took it to **8,110 of 8,207, 98.8%**, both backends. `fn:json-to-xml` with
 `validate:=true` validates its result against the schema for the XPath functions namespace, which is
 built in, and `xsl:evaluate schema-aware="no"` — the default — raises `XTDE3160` where the target names
-an imported type. The 97 left are `xs:NOTATION` (5), whose typed value the type-code model cannot tell
-from a plain `xs:QName`; a schema's `xs:include` by relative location from an inline schema; per-document
-input validation; and a scatter of edge cases, some unrelated to schema awareness, that the `--schema`
-environments surface.
+an imported type.
+
+`xs:NOTATION` followed, taking it to **8,115 of 8,207, 98.9%**. A notation and a plain name are two
+primitive types held alike here, so a notation carries a mark beside the name it is held as and the
+matching paths refuse to call one the other; a name written with no prefix in validated content takes
+the default namespace in scope; and a key or a group now files a node under its typed value rather than
+its text, so two names spelled with different prefixes are one key. The 92 left are a schema's
+`xs:include` by relative location from an inline schema, per-document input validation, and a scatter of
+edge cases, some unrelated to schema awareness, that the `--schema` environments surface.
 
 ## Reading the result
 

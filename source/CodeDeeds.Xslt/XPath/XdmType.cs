@@ -111,6 +111,18 @@ namespace CodeDeeds.Xslt.XPath
 
             /// <summary><c>xs:ENTITY</c>.</summary>
             Entity,
+
+            /// <summary>
+            /// <c>xs:NOTATION</c>, which is held as a name and is not one.
+            /// </summary>
+            /// <remarks>
+            /// The one mark here that does not narrow the type it is held in but stands beside it:
+            /// <c>xs:QName</c> and <c>xs:NOTATION</c> are two primitive types, neither derived from the
+            /// other, and both are a namespace and a local name in this engine. Without the mark a
+            /// notation would answer to <c>instance of xs:QName</c>, and a name to
+            /// <c>instance of xs:NOTATION</c>, for want of anything to tell them apart.
+            /// </remarks>
+            Notation,
         }
 
         /// <summary>
@@ -265,7 +277,13 @@ namespace CodeDeeds.Xslt.XPath
             Add("dayTimeDuration", XdmTypeCode.DayTimeDuration);
 
             Add("QName", XdmTypeCode.QName);
-            Add("NOTATION", XdmTypeCode.QName);
+
+            // Held as a name, and marked as a notation so that the two primitive types are told apart.
+            types.Add(
+                "NOTATION",
+                new BuiltInType(
+                    "NOTATION", XdmTypeCode.QName, decimal.MinValue, decimal.MaxValue,
+                    Derived: DerivedType.Notation));
             Add("hexBinary", XdmTypeCode.HexBinary);
             Add("base64Binary", XdmTypeCode.Base64Binary);
 

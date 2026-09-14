@@ -447,7 +447,23 @@ namespace CodeDeeds.Xslt.Compiler
                     return key.ToBoolean() ? "b:1" : "b:0";
 
                 case XPathValueKind.Node:
+                {
+                    // A node contributes its typed value, which in a validated tree may be a name or a
+                    // number rather than the text it is written as: two names spelled with different
+                    // prefixes are one key. Where nothing was validated the typed value is the text, and
+                    // going straight to the string saves making the value to throw it away.
+                    if (key.NodeTree.HasTypeAnnotations)
+                    {
+                        XPathValue typed = XdmSequence.TypedValueOf(key);
+
+                        if (typed.Kind != XPathValueKind.Sequence)
+                        {
+                            return KeyIdentity(typed, collation);
+                        }
+                    }
+
                     return "s:" + Keyed(XdmSequence.StringValueOf(key), collation);
+                }
             }
 
             switch (key.TypeCode)

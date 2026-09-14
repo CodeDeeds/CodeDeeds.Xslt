@@ -599,6 +599,92 @@ namespace CodeDeeds.Xslt.UnitTests
                     + Value("$p instance of schema-element(c:item), $s instance of schema-element(c:item)"))));
         }
 
+        /// <summary>A schema whose attribute is a type derived from <c>xs:NOTATION</c> by enumeration.</summary>
+        private const string NotationSchema =
+            "<xs:schema targetNamespace=\"urn:n\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:n=\"urn:n\""
+            + " elementFormDefault=\"qualified\">"
+            + "<xs:notation name=\"mp3\" public=\"audio/mpeg\" system=\"play.exe\"/>"
+            + "<xs:notation name=\"wav\" public=\"audio/wav\" system=\"play.exe\"/>"
+            + "<xs:simpleType name=\"kind\"><xs:restriction base=\"xs:NOTATION\">"
+            + "<xs:enumeration value=\"n:mp3\"/><xs:enumeration value=\"n:wav\"/></xs:restriction></xs:simpleType>"
+            + "<xs:element name=\"items\"><xs:complexType><xs:sequence>"
+            + "<xs:element name=\"item\" maxOccurs=\"unbounded\"><xs:complexType>"
+            + "<xs:attribute name=\"k\" type=\"n:kind\"/><xs:attribute name=\"name\" type=\"xs:string\"/>"
+            + "</xs:complexType></xs:element></xs:sequence></xs:complexType></xs:element>"
+            + "</xs:schema>";
+
+        /// <summary>Items whose notation values differ by prefix, by namespace and by local name.</summary>
+        private const string NotationDocument =
+            "<items xmlns=\"urn:n\" xmlns:n=\"urn:n\" xmlns:alt=\"urn:n\">"
+            + "<item k=\"n:mp3\" name=\"a\"/><item k=\"alt:mp3\" name=\"b\"/>"
+            + "<item k=\"n:wav\" name=\"c\"/><item k=\"mp3\" name=\"d\"/></items>";
+
+        private static string NotationSheet(string body, string declarations = "")
+        {
+            return "<xsl:stylesheet version=\"3.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\""
+                + " xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:n=\"urn:n\" exclude-result-prefixes=\"xs n\">"
+                + "<xsl:import-schema namespace=\"urn:n\">" + NotationSchema + "</xsl:import-schema>"
+                + declarations
+                + "<xsl:template match=\"/\"><out>" + body + "</out></xsl:template></xsl:stylesheet>";
+        }
+
+        [TestMethod]
+        public void ANotationTypedAttributeIsANotationAndComparesByExpandedName()
+        {
+            // The typed value of a NOTATION attribute is a name, not text: it is an xs:NOTATION, it is not
+            // an xs:QName, and it keeps the prefix it was written with for its string value.
+            Assert.AreEqual(
+                "true,false,n:mp3,true,true,false,2,n:mp3 n:wav",
+                Both(
+                    NotationSheet(Value(
+                        "data(/n:items/n:item[1]/@k) instance of xs:NOTATION, "
+                        + "data(/n:items/n:item[1]/@k) instance of xs:QName, "
+                        + "string(/n:items/n:item[1]/@k), "
+                        + "/n:items/n:item[1]/@k eq /n:items/n:item[2]/@k, "
+                        + "/n:items/n:item[1]/@k eq /n:items/n:item[4]/@k, "
+                        + "/n:items/n:item[1]/@k eq /n:items/n:item[3]/@k, "
+                        + "count(distinct-values(/n:items/n:item/@k)), "
+                        + "string-join(distinct-values(/n:items/n:item/@k), ' ')")),
+                    Validating,
+                    NotationDocument));
+
+            // Two names are equal when their namespace and local name are, whatever prefix was written;
+            // an unprefixed one takes the default namespace in scope where it stands.
+            Assert.AreEqual(
+                "true,true,false",
+                Both(
+                    NotationSheet(Value(
+                        "/n:items/n:item[1]/@k eq /n:items/n:item[2]/@k, "
+                        + "/n:items/n:item[1]/@k eq /n:items/n:item[4]/@k, "
+                        + "/n:items/n:item[1]/@k eq /n:items/n:item[3]/@k")),
+                    Validating,
+                    NotationDocument));
+
+            // Grouping and distinct-values see the same equality, so the four items make two names.
+            Assert.AreEqual(
+                "2,n:mp3 n:wav",
+                Both(
+                    NotationSheet(Value(
+                        "count(distinct-values(/n:items/n:item/@k)), "
+                        + "string-join(distinct-values(/n:items/n:item/@k), ' ')")),
+                    Validating,
+                    NotationDocument));
+
+            // xsl:for-each-group and xsl:key file a node under its typed value too, so the three items
+            // whose name is n:mp3 group together and are found under it however each was written.
+            Assert.AreEqual(
+                "a|c|,a b d",
+                Both(
+                    NotationSheet(
+                        "<xsl:for-each-group select=\"/n:items/n:item\" group-by=\"@k\">"
+                        + "<xsl:value-of select=\"@name\"/><xsl:text>|</xsl:text></xsl:for-each-group>"
+                        + "<xsl:text>,</xsl:text>"
+                        + Value("string-join(key('byKind', data(/n:items/n:item[1]/@k))/@name, ' ')"),
+                        "<xsl:key name=\"byKind\" match=\"n:item\" use=\"@k\"/>"),
+                    Validating,
+                    NotationDocument));
+        }
+
         [TestMethod]
         public void ValidationAndTypeAreRefusedTogetherAndAnUnknownTypeIsRejected()
         {

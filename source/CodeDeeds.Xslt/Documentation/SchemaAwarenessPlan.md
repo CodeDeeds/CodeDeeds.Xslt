@@ -1,10 +1,9 @@
 # Schema awareness: a plan
 
-Status: phases 0 to 4 done, September 2026. The engine reads schemas, types its input, validates what it
-constructs, and validates the result of `fn:json-to-xml()`, behind `XsltOptions.SchemaAware` and
-`XsltOptions.InputValidation`. What is left is a scatter of edge cases and the `xs:NOTATION` corner, which
-the type-code model cannot tell from `xs:QName` without more work than the few tests warrant. This is the
-plan the work followed.
+Status: phases 0 to 4 done, September 2026, and the `xs:NOTATION` corner with them. The engine reads
+schemas, types its input, validates what it constructs, and validates the result of `fn:json-to-xml()`,
+behind `XsltOptions.SchemaAware` and `XsltOptions.InputValidation`. What is left is a scatter of edge
+cases. This is the plan the work followed.
 
 ## Where the engine stands
 
@@ -332,13 +331,22 @@ result against the schema for the XPath functions namespace, which is built in (
 schema is), and annotates it, `FOJS0004` where no schema is in scope; `xsl:evaluate schema-aware="no"`,
 the default, hides the imported types from the target and raises `XTDE3160` where it names one, told from
 a genuinely unknown type by whether the target would compile with the schemas in scope. That took the
-schema-aware run to **8,110 of 8,207, 98.8%**, both backends, headline unchanged. Left, and deferred:
-`xs:NOTATION` (`type/notation`, 5), whose typed value is an `xs:QName` the `XdmTypeCode` model cannot
-tell from a plain one without routing `NOTATION` through the schema-type path; a schema's `xs:include`
-reached by relative location from an inline schema (`decl/import-schema` 185, 202); per-document input
-validation (`attr/validation` 1201, 1203); and `xsl:mode typed="strict"`'s static pattern check
-(`XTSE3105`, 1). About 97 tests remain, some of them unrelated to schema awareness — `expr/math`,
-`decl/package`, `decl/strip-space` — that the `--schema` environments happen to surface.
+schema-aware run to **8,110 of 8,207, 98.8%**, both backends, headline unchanged.
+
+**`xs:NOTATION`.** Done, and it took three things. `xs:QName` and `xs:NOTATION` are two primitive types
+held alike here, both a namespace and a local name, so a notation now carries `DerivedType.Notation`
+beside the name it is held as, and the two matching paths — the built-in one and `XdmSchemaType.Accepts`
+— refuse to call a notation an `xs:QName` or a name an `xs:NOTATION`. A name written in validated
+content with no prefix takes the default namespace in scope where it stands (XSD §3.2.18), which is what
+makes `mp3` and `n:mp3` one value. And a key or a group keyed a node by its string value, so two names
+spelled with different prefixes were two keys: a node in a validated tree now contributes its typed
+value, which is the same thing `xsl:for-each-group` was already doing through atomization. That closed
+all five `type/notation` tests and took the run to **8,115 of 8,207, 98.9%**.
+
+Left: a schema's `xs:include` reached by relative location from an inline schema (`decl/import-schema`
+185, 202); per-document input validation (`attr/validation` 1201, 1203); and `xsl:mode typed="strict"`'s
+static pattern check (`XTSE3105`, 1). About 92 tests remain, some of them unrelated to schema
+awareness — `expr/math`, `decl/package`, `decl/strip-space` — that the `--schema` environments surface.
 
 Rough weight: phase 1 is the smallest and phase 2 the largest, since annotations touch the tree, the
 builders, atomization and every node test; phase 3 is the validator and the seven constructors that
@@ -390,13 +398,11 @@ feed it.
 
 ## Next steps
 
-1. `xs:NOTATION`: route it through the schema-type path so a `NOTATION`-typed value is told from a plain
-   `xs:QName`, which the `XdmTypeCode` model cannot do on its own. Five tests (`type/notation`).
-2. The remaining validation edge cases: nested strict validation not catching what it should
+1. The remaining validation edge cases: nested strict validation not catching what it should
    (`import-schema` 118-120), a schema's `xs:include` reached by relative location from an inline schema
    (`import-schema` 185, 202), per-document input validation (`attr/validation` 1201, 1203), and the
    `xsl:mode typed="strict"` static pattern check (`XTSE3105`).
-3. Keep the DocBook benchmarks as the check that an untyped transformation has not slowed.
-4. The QT3 driver still skips its 140 schema environments: it evaluates XPath outside a stylesheet, and
+2. Keep the DocBook benchmarks as the check that an untyped transformation has not slowed.
+3. The QT3 driver still skips its 140 schema environments: it evaluates XPath outside a stylesheet, and
    validating a source there needs the tree builder's validated entry point reached through something
    public. A small addition now that the entry point stands.

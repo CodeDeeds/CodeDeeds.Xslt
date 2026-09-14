@@ -563,6 +563,15 @@ namespace CodeDeeds.Xslt.XPath
                     && XdmType.DerivesFrom(item.DerivedType, m_derivedType);
             }
 
+            // xs:QName and xs:NOTATION are two primitive types, neither derived from the other, and both
+            // are held here as a namespace and a local name. A notation is therefore not an xs:QName,
+            // which nothing but the mark it carries could say.
+            if (m_atomic == XdmTypeCode.QName
+                && XdmType.DerivesFrom(item.DerivedType, XdmType.DerivedType.Notation))
+            {
+                return false;
+            }
+
             // xs:untypedAtomic is a type of its own and not a kind of string, however alike the two are held
             // here: what a node atomizes to is an instance of the one and not of the other. What is left is
             // the built-in derivations two codes can stand in.

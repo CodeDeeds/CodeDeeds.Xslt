@@ -478,6 +478,26 @@ namespace CodeDeeds.Xslt.XPath
                 return XPathValue.FromUntypedAtomic(text);
             }
 
+            // A name written in a document with no prefix is in the default namespace in scope where it
+            // stands, which is what an xs:QName or xs:NOTATION in validated content means by it (XSD §3.2.18)
+            // and what tells 'mp3' and 'n:mp3' apart from a name in no namespace.
+            if (held.Code == XdmTypeCode.QName && namespaces is not null)
+            {
+                string bare = text.Trim();
+
+                if (bare.Length != 0
+                    && bare.IndexOf(':') < 0
+                    && namespaces.TryGetValue(string.Empty, out string? defaultNamespace)
+                    && defaultNamespace.Length != 0)
+                {
+                    XPathValue name = XPathValue
+                        .FromQName(new XdmQName(string.Empty, defaultNamespace, bare))
+                        .AsDerived(held.Derived);
+
+                    return IsBuiltIn ? name : name.AsSchemaType(this);
+                }
+            }
+
             XPathValue value = XdmType.Cast(XPathValue.FromUntypedAtomic(text), held, namespaces);
             return IsBuiltIn ? value : value.AsSchemaType(this);
         }
@@ -604,6 +624,15 @@ namespace CodeDeeds.Xslt.XPath
                 || (entry.Code == XdmTypeCode.Decimal && code == XdmTypeCode.Integer)
                 || (entry.Code == XdmTypeCode.Duration
                     && code is XdmTypeCode.YearMonthDuration or XdmTypeCode.DayTimeDuration);
+
+            // A notation is not an xs:QName and a name is not an xs:NOTATION: two primitive types held
+            // alike, which only the mark the value carries tells apart.
+            if (entry.Code == XdmTypeCode.QName
+                && entry.Derived != XdmType.DerivedType.Notation
+                && XdmType.DerivesFrom(item.DerivedType, XdmType.DerivedType.Notation))
+            {
+                return false;
+            }
 
             return held
                 && (entry.Derived == XdmType.DerivedType.None
