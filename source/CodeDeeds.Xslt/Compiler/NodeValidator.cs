@@ -44,6 +44,22 @@ namespace CodeDeeds.Xslt.Compiler
         /// <exception cref="XsltException">The document is not valid; see the class remarks.</exception>
         public TypeOverlay ValidateDocument(XdmTree tree, bool strict)
         {
+            return ValidateFrom(tree, RequireDocumentShape(tree), strict, identityConstraints: true);
+        }
+
+        /// <summary>
+        /// Checks that a document node about to be validated is shaped as a validated document must be —
+        /// exactly one element child, no text among the children — and answers with that element.
+        /// </summary>
+        /// <remarks>
+        /// Asked of every document node that is validated, by a mode or against a named type alike: what
+        /// <c>XTTE1550</c> is about is the document node's own shape, and a <c>type</c> attribute does not
+        /// excuse it.
+        /// </remarks>
+        /// <param name="tree">The tree, rooted at the document node.</param>
+        /// <exception cref="XsltException"><c>XTTE1550</c> where the children are not what a document's are.</exception>
+        public int RequireDocumentShape(XdmTree tree)
+        {
             int root = XdmTree.RootNode;
 
             // Exactly one element child, no text: what a document node has to be for validation to mean
@@ -87,7 +103,7 @@ namespace CodeDeeds.Xslt.Compiler
                     + "exactly one.");
             }
 
-            return ValidateFrom(tree, elementChild, strict, identityConstraints: true);
+            return elementChild;
         }
 
         /// <summary>
@@ -392,15 +408,21 @@ namespace CodeDeeds.Xslt.Compiler
             return attribute < 0 ? null : tree.StringValueOf(attribute);
         }
 
-        /// <summary>Whether a validator's message is about an ID, an IDREF or an identity constraint.</summary>
+        /// <summary>
+        /// Whether a validator's message is about an ID or an IDREF, which is the document-level
+        /// constraint <c>XTTE1555</c> names.
+        /// </summary>
+        /// <remarks>
+        /// Only ID and IDREF. An <c>xs:unique</c>, <c>xs:key</c> or <c>xs:keyref</c> that is not satisfied
+        /// makes the element invalid like any other content failure, and takes the code the mode gives
+        /// that: the suite's own error-1555c validates a document whose <c>xs:unique</c> is broken and
+        /// asks for <c>XTTE1510</c>.
+        /// </remarks>
         private static bool IsIdentityProblem(string message)
         {
             return message.Contains("as an ID", StringComparison.Ordinal)
                 || message.Contains("undeclared ID", StringComparison.Ordinal)
-                || message.Contains("Reference to undeclared", StringComparison.Ordinal)
-                || message.Contains("identity constraint", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("KeyRef", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase);
+                || message.Contains("Reference to undeclared", StringComparison.Ordinal);
         }
     }
 }

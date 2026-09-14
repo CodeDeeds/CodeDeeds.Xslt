@@ -117,9 +117,20 @@ an imported type.
 primitive types held alike here, so a notation carries a mark beside the name it is held as and the
 matching paths refuse to call one the other; a name written with no prefix in validated content takes
 the default namespace in scope; and a key or a group now files a node under its typed value rather than
-its text, so two names spelled with different prefixes are one key. The 92 left are a schema's
-`xs:include` by relative location from an inline schema, per-document input validation, and a scatter of
-edge cases, some unrelated to schema awareness, that the `--schema` environments surface.
+its text, so two names spelled with different prefixes are one key.
+
+A last round on the remaining validation issues reached **8,125 of 8,207, 99.0%**, both backends.
+Validation is declared per source, so the driver now tells the engine which documents an environment
+validates and the engine honours it per document; a rule in a `typed="strict"` mode matching an
+undeclared element is refused when the stylesheet is compiled; and several error codes were put right —
+a schema that is reached and is not a schema is `XTSE0220` rather than `XTSE0165`, an `xs:unique`
+failure is ordinary invalidity rather than the ID constraint's `XTTE1555`, and a document node validated
+against a named type is still held to its own shape.
+
+Of the 82 left, 15 fail in the headline run too and have nothing to do with schema awareness. Four name
+schema files the suite does not contain. Six assert that the result *document* carries type annotations,
+which this driver cannot answer: it hands the engine's serialized output to a fresh parse, and
+serialized XML carries no annotations. The rest are small individual rules.
 
 ## Reading the result
 

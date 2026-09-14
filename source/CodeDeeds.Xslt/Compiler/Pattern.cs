@@ -135,6 +135,33 @@ namespace CodeDeeds.Xslt.Compiler
         public int NameSlot { get; private init; } = -1;
 
         /// <summary>
+        /// The name slot of the outermost step, where that step names an element on an axis whose
+        /// principal node kind is element, and -1 otherwise.
+        /// </summary>
+        /// <remarks>
+        /// What <c>xsl:mode typed="strict"</c> holds a template rule to: the first step of the pattern as
+        /// it was written names an element the schemas must declare (<c>XTSE3105</c>). The steps are kept
+        /// innermost-first, so the first step written is the last of them.
+        /// </remarks>
+        public int OutermostElementNameSlot
+        {
+            get
+            {
+                if (m_steps.Length == 0)
+                {
+                    return -1;
+                }
+
+                PatternStep outermost = m_steps[^1];
+
+                return outermost.Axis is Axis.Child or Axis.Descendant or Axis.DescendantOrSelf or Axis.Self
+                    && outermost.Test is NameNodeTest named
+                        ? named.Slot
+                        : -1;
+            }
+        }
+
+        /// <summary>
         /// Gets the node kind the innermost step requires, or <see langword="null"/> if it matches any kind.
         /// </summary>
         public NodeKind? RequiredKind { get; private init; }

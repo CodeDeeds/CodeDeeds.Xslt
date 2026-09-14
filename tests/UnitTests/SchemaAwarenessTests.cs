@@ -286,14 +286,15 @@ namespace CodeDeeds.Xslt.UnitTests
                 Both(Sheet(Value("my:age(3) instance of my:age"), ByLocation), backend => Options(backend, resolver: schemas)));
             Assert.AreEqual("types.xsd", schemas.Asked[0].Href);
 
-            // Without a resolver the location cannot be followed; with one that has nothing, the schema is
-            // not found; both are XTSE0165, as is a schema whose namespace is not the one imported.
+            // Without a resolver the location cannot be followed, and with one that has nothing the schema
+            // is not found: both are XTSE0165, which is about reaching the document. A schema that is
+            // reached and is for another namespace is not one that fits, which is XTSE0220.
             Assert.AreEqual("XTSE0165", Fails(Sheet(Value("1"), ByLocation)));
             Assert.AreEqual(
                 "XTSE0165",
                 Fails(Sheet(Value("1"), ByLocation), backend => Options(backend, resolver: new Schemas { Text = null })));
             Assert.AreEqual(
-                "XTSE0165",
+                "XTSE0220",
                 Fails(
                     Sheet(Value("1"), "<xsl:import-schema namespace=\"urn:other\" schema-location=\"types.xsd\"/>"),
                     backend => Options(backend, resolver: new Schemas())));
@@ -306,9 +307,10 @@ namespace CodeDeeds.Xslt.UnitTests
                     backend => Options(backend, resolver: new Schemas())));
 
             // An inline schema that is not a schema document at all, and one that reads as XML but does
-            // not compile: the first is XTSE0165, the second XTSE0220, and both are static.
+            // not compile: both are a fault in the schema rather than in reaching it, so both are
+            // XTSE0220, and both are static.
             Assert.AreEqual(
-                "XTSE0165",
+                "XTSE0220",
                 Fails(Sheet(
                     Value("1"),
                     "<xsl:import-schema namespace=\"urn:my\"><xs:schema targetNamespace=\"urn:my\"><xs:nonsense/></xs:schema></xsl:import-schema>")));
@@ -408,10 +410,16 @@ namespace CodeDeeds.Xslt.UnitTests
             // A type holding elements and no text has no typed value.
             Assert.AreEqual("FOTY0012", Fails(PeopleSheet(Value("data(/t:people)")), Validating, People));
 
-            // A document reached through document() is validated as the input is.
+            // A document the stylesheet fetches for itself is not what the caller asked to be validated,
+            // so it is read as it stands: its content is untyped, and arithmetic on it reads the text.
             Assert.AreEqual(
-                "31",
-                Both(PeopleSheet(Value("document('people.xml')/t:people/t:person[1]/@age + 1")), Validating, People));
+                "31,true",
+                Both(
+                    PeopleSheet(Value(
+                        "document('people.xml')/t:people/t:person[1]/@age + 1, "
+                        + "data(document('people.xml')/t:people/t:person[1]/@age) instance of xs:untypedAtomic")),
+                    Validating,
+                    People));
         }
 
         [TestMethod]

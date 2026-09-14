@@ -89,6 +89,9 @@ namespace CodeDeeds.Xslt.Runtime
 
         /// <summary>What the documents read are validated against, or null where they are read as they are.</summary>
         private readonly TreeValidation? m_inputValidation;
+
+        /// <summary>What the input was validated against, where the caller asked for validation.</summary>
+        internal TreeValidation? InputValidation => m_inputValidation;
         private int m_callDepth;
 
         /// <summary>Whether the processor claims XSLT 3.0, which decides the codes a later specification renamed.</summary>
@@ -806,9 +809,12 @@ namespace CodeDeeds.Xslt.Runtime
             XdmTree tree;
             try
             {
-                // Validated as the caller asked, against the stylesheet's schemas, so that a document
-                // reached through document() is as typed as the input is.
-                tree = m_inputValidation is TreeValidation validation
+                // Read as it stands unless the resolver that supplied it says otherwise. What the caller
+                // asked to be validated is the document it handed in; a document the stylesheet goes and
+                // fetches is not that, and is validated only where whoever supplies it says so.
+                TreeValidation? validation = m_stylesheet.ValidationFor(resolved.Validation);
+
+                tree = validation is not null
                     ? XdmTreeBuilder.FromXmlValidated(
                         resolved.Reader, m_stylesheet.WhitespaceIn(package), m_options.EntityResolver, resolved.Uri, validation)
                     : XdmTreeBuilder.FromXml(

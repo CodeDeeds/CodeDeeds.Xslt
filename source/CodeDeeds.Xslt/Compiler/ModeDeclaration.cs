@@ -51,8 +51,16 @@ namespace CodeDeeds.Xslt.Compiler
     /// <c>typed="no"</c>, which admits untyped nodes alone (<c>XTTE3110</c>); null for
     /// <c>unspecified</c> or nothing said, which admits both.
     /// </param>
+    /// <param name="StrictlyTyped">
+    /// Whether the mode was declared <c>typed="strict"</c> in particular, which holds every template rule
+    /// in it to a pattern whose first step names a declared element (<c>XTSE3105</c>).
+    /// </param>
     internal readonly record struct ModeDeclaration(
-        OnNoMatch OnNoMatch, bool WarnOnNoMatch, bool FailOnMultipleMatch = false, bool? Typed = null)
+        OnNoMatch OnNoMatch,
+        bool WarnOnNoMatch,
+        bool FailOnMultipleMatch = false,
+        bool? Typed = null,
+        bool StrictlyTyped = false)
     {
         /// <summary>The rules a mode follows when the stylesheet says nothing about it.</summary>
         public static ModeDeclaration Default => new ModeDeclaration(OnNoMatch.TextOnlyCopy, false);

@@ -343,10 +343,32 @@ spelled with different prefixes were two keys: a node in a validated tree now co
 value, which is the same thing `xsl:for-each-group` was already doing through atomization. That closed
 all five `type/notation` tests and took the run to **8,115 of 8,207, 98.9%**.
 
-Left: a schema's `xs:include` reached by relative location from an inline schema (`decl/import-schema`
-185, 202); per-document input validation (`attr/validation` 1201, 1203); and `xsl:mode typed="strict"`'s
-static pattern check (`XTSE3105`, 1). About 92 tests remain, some of them unrelated to schema
-awareness — `expr/math`, `decl/package`, `decl/strip-space` — that the `--schema` environments surface.
+**The tail after that.** Another round closed the named items and took the run to **8,125 of 8,207,
+99.0%**, both backends, headline unchanged.
+
+- **Per-document validation.** Validation is declared per source, so a stylesheet may read one document
+  the catalog validates and another it does not. `XsltOptions.InputValidation` speaks for the input the
+  caller hands in; a document the stylesheet fetches for itself is read as it stands unless the resolver
+  that supplies it says otherwise, which `ResolvedResource.Validation` is for. That is the one way
+  `document()` and `doc()` get validated, and it is the resolver's to decide because the resolver is what
+  knows where the document came from.
+- **`XTSE3105`.** A template rule in a mode declared `typed="strict"` whose pattern's first step names an
+  element the schemas do not declare is refused when the stylesheet is compiled: such a rule could never
+  match, since only a declared element can be validated strictly.
+- **Error codes.** A schema reached and found not to be a schema, or found to be for another namespace,
+  is `XTSE0220` rather than the `XTSE0165` of a document nothing could fetch; an `xsl:import-schema` with
+  a `schema-location` and no `namespace` requires the schema to have no target namespace. An `xs:unique`,
+  `xs:key` or `xs:keyref` that is not satisfied is ordinary invalidity and takes the mode's code, where
+  only ID and IDREF failures are `XTTE1555`. A document node validated against a named `type` is still
+  held to its own shape, so `xsl:document type="..."` over the wrong children is `XTTE1550`.
+
+Left, and not reachable from here: four tests name schema files (`variousTypesSchemaInline.xsd`,
+`lc-simple.xsd`) that are not in the suite at all, so there is nothing to fetch; and six
+(`attr/validation` 1601-1607) assert that the *result document* carries type annotations, which this
+driver cannot answer because it hands the engine's serialized output to a fresh parse. The engine does
+annotate what it validates, which `AConstructedElementIsValidatedAndTyped` in the unit tests shows
+directly. About 82 tests remain, 15 of them failing in the headline run too and so nothing to do with
+schema awareness.
 
 Rough weight: phase 1 is the smallest and phase 2 the largest, since annotations touch the tree, the
 builders, atomization and every node test; phase 3 is the validator and the seven constructors that
@@ -398,10 +420,10 @@ feed it.
 
 ## Next steps
 
-1. The remaining validation edge cases: nested strict validation not catching what it should
-   (`import-schema` 118-120), a schema's `xs:include` reached by relative location from an inline schema
-   (`import-schema` 185, 202), per-document input validation (`attr/validation` 1201, 1203), and the
-   `xsl:mode typed="strict"` static pattern check (`XTSE3105`).
+1. The validation edge cases left: nested strict validation not catching what it should
+   (`import-schema` 118-120, 137), `xsl:output item-separator` applied when a result document is built
+   rather than serialized (`attr/validation` 0214), and validating an element against `xs:untypedAtomic`
+   (`attr/validation` 0109). Each is its own small rule rather than a theme.
 2. Keep the DocBook benchmarks as the check that an untyped transformation has not slowed.
 3. The QT3 driver still skips its 140 schema environments: it evaluates XPath outside a stylesheet, and
    validating a source there needs the tree builder's validated entry point reached through something

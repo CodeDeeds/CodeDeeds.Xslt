@@ -267,13 +267,18 @@ namespace CodeDeeds.Xslt
         public System.Xml.Schema.XmlSchemaSet? Schemas { get; init; }
 
         /// <summary>
-        /// Gets how the documents a transformation reads are validated: the input, and what
-        /// <c>document()</c>, <c>doc()</c> and <c>collection()</c> load. Defaults to
+        /// Gets how the document handed to the transformation is validated. Defaults to
         /// <see cref="XsltValidation.Strip"/>, which validates nothing.
         /// </summary>
         /// <remarks>
         /// <para>
-        /// <see cref="XsltValidation.Strict"/> and <see cref="XsltValidation.Lax"/> validate each document
+        /// This is about the input the caller supplies and nothing else: a document the stylesheet fetches
+        /// for itself through <c>document()</c>, <c>doc()</c> or <c>collection()</c> is read as it stands,
+        /// as the specification leaves it (§3.9.1), and is typed only where an instruction validates what
+        /// it builds from it.
+        /// </para>
+        /// <para>
+        /// <see cref="XsltValidation.Strict"/> and <see cref="XsltValidation.Lax"/> validate the input
         /// as it is read, against the schemas the stylesheet imported and those in <see cref="Schemas"/>,
         /// and annotate its elements and attributes with the types validation settles on: the typed value
         /// of an element declared <c>xs:integer</c> is an integer, <c>element(*, my:type)</c> matches what

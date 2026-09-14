@@ -127,9 +127,12 @@ namespace CodeDeeds.Xslt.Conformance
                 return Skip($"raised an error with no code, where {expected} was expected");
             }
 
-            return expected is "*" || string.Equals(expected, outcome.ErrorCode, StringComparison.Ordinal)
-                ? Pass()
-                : Fail($"expected error {expected}, got {outcome.ErrorCode}");
+            // XXXX9999 is the catalog's way of saying an error is required and the specification names
+            // none in particular, so any code answers it.
+            return expected is "*" or "XXXX9999"
+                || string.Equals(expected, outcome.ErrorCode, StringComparison.Ordinal)
+                    ? Pass()
+                    : Fail($"expected error {expected}, got {outcome.ErrorCode}");
         }
 
         private static TestResult CheckResultDocument(XElement assertion, Transformation outcome)

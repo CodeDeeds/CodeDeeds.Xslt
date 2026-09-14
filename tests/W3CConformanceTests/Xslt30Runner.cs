@@ -312,7 +312,14 @@ namespace CodeDeeds.Xslt.Conformance
                     }
                 }
 
-                SuiteResolver resolver = new SuiteResolver(m_catalog.Root);
+                // Schema-aware runs tell the resolver which documents the environment validates, so that a
+                // stylesheet reading two of them gets each as the catalog declares it.
+                SuiteResolver resolver = new SuiteResolver(m_catalog.Root)
+                {
+                    Validated = m_schemaAware && environment is not null
+                        ? new HashSet<string>(environment.ValidatedFiles, StringComparer.OrdinalIgnoreCase)
+                        : new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                };
 
                 // A library package may be declared on the environment or beside the principal one in the
                 // test itself, and most tests use the second. Reading only the environment left every one of
@@ -812,6 +819,13 @@ namespace CodeDeeds.Xslt.Conformance
                     + Path.DirectorySeparatorChar);
             }
 
+            /// <summary>
+            /// The documents the environment declares <c>validation="strict"</c>, by file name. Validation
+            /// is declared per source, so an environment may validate one document a stylesheet reads and
+            /// not another, and this is how the engine is told which.
+            /// </summary>
+            public HashSet<string> Validated { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
             public ResolvedResource? Resolve(string href, string? baseUri)
             {
                 Uri baseline = baseUri is null ? m_root : new Uri(baseUri);
@@ -826,7 +840,12 @@ namespace CodeDeeds.Xslt.Conformance
 
                 return new ResolvedResource(
                     new StreamReader(resolved.LocalPath, detectEncodingFromByteOrderMarks: true),
-                    resolved.AbsoluteUri);
+                    resolved.AbsoluteUri)
+                {
+                    Validation = Validated.Contains(Path.GetFileName(resolved.LocalPath))
+                        ? XsltValidation.Strict
+                        : null,
+                };
             }
         }
 

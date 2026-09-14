@@ -88,6 +88,24 @@ namespace CodeDeeds.Xslt
 
         /// <summary>Gets the stylesheet's absolute identity.</summary>
         public string Uri { get; }
+
+        /// <summary>
+        /// How a document this resolver supplies is to be validated, or <see langword="null"/> to read it
+        /// as it stands.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// For documents alone, and it is the one way a document the stylesheet fetches for itself gets
+        /// validated: <see cref="XsltOptions.InputValidation"/> speaks for the input the caller hands in,
+        /// and says nothing about what <c>document()</c> or <c>doc()</c> goes and finds. A resolver knows
+        /// what it is handing over, so it is the thing that can say whether the schemas apply to it.
+        /// </para>
+        /// <para>
+        /// Validation needs a schema-aware stylesheet with schemas in scope; where there are none this is
+        /// ignored, as it is for a module or any other resource that is not a document.
+        /// </para>
+        /// </remarks>
+        public XsltValidation? Validation { get; init; }
     }
 
     /// <summary>

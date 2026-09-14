@@ -231,14 +231,24 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="options">The transformation's options.</param>
         internal Model.TreeValidation? InputValidationFor(XsltOptions options)
         {
-            if (options.InputValidation is not (XsltValidation.Strict or XsltValidation.Lax) || Schemas is null)
+            return ValidationFor(options.InputValidation);
+        }
+
+        /// <summary>
+        /// What a document read under one validation mode is validated against, or null where it is read
+        /// as it stands: the mode asks for no validation, or the stylesheet has no schemas to apply.
+        /// </summary>
+        /// <param name="mode">The mode, as the caller's options or a resolver asked for it.</param>
+        internal Model.TreeValidation? ValidationFor(XsltValidation? mode)
+        {
+            if (mode is not (XsltValidation.Strict or XsltValidation.Lax) || Schemas is null)
             {
                 return null;
             }
 
             return new Model.TreeValidation(
                 Schemas.ValidatingSet,
-                strict: options.InputValidation == XsltValidation.Strict,
+                strict: mode == XsltValidation.Strict,
                 Schemas.TypeIdOf,
                 annotate: !StripInputTypeAnnotations);
         }

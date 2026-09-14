@@ -77,6 +77,16 @@ namespace CodeDeeds.Xslt.Conformance
         /// </summary>
         public bool ValidatesSources { get; private init; }
 
+        /// <summary>
+        /// The documents the catalog marks <c>validation="strict"</c> that are not the context document,
+        /// as the file names a <c>document()</c> call asks for them by.
+        /// </summary>
+        /// <remarks>
+        /// Validation is declared per source, so an environment may validate one document a stylesheet
+        /// reads and not another; the driver tells the engine which by marking what it resolves.
+        /// </remarks>
+        public HashSet<string> ValidatedFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
+
         /// <summary>A stylesheet the environment supplies, where the test case names none itself.</summary>
         public string? StylesheetFile { get; private init; }
 
@@ -177,19 +187,27 @@ namespace CodeDeeds.Xslt.Conformance
             string? sourceContent = null;
             string? sourceSelect = null;
             bool validates = false;
+            List<string> validatedFiles = new();
 
             foreach (XElement source in element.Elements(ns + "source"))
             {
-                // Strict validation is asked for per source; a transformation validates every document
-                // it reads or none, so one asking is every one being validated.
-                validates |= (string?)source.Attribute("validation") == "strict";
+                bool strict = (string?)source.Attribute("validation") == "strict";
 
                 if ((string?)source.Attribute("role") != ".")
                 {
                     // A source with no role is a document the stylesheet reaches through document(), which
                     // the driver's document resolver already serves out of the test-set's own directory.
+                    // Whether it is validated is its own business, declared on the source itself.
+                    if (strict && (string?)source.Attribute("file") is string validated)
+                    {
+                        validatedFiles.Add(validated);
+                    }
+
                     continue;
                 }
+
+                // The context document's own validation, which is what the transformation is given.
+                validates |= strict;
 
                 if ((string?)source.Attribute("streaming") == "true")
                 {
@@ -216,6 +234,11 @@ namespace CodeDeeds.Xslt.Conformance
             environment.Parameters.AddRange(element.Elements(ns + "param"));
             environment.Collections.AddRange(collections);
             environment.Schemas.AddRange(schemas);
+
+            foreach (string validated in validatedFiles)
+            {
+                environment.ValidatedFiles.Add(validated);
+            }
 
             foreach (XElement package in element.Elements(ns + "package"))
             {

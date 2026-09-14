@@ -629,6 +629,7 @@ namespace CodeDeeds.Xslt.Compiler
             // template is compiled — and the set it names may be declared anywhere at all.
             CheckAttributeSetsExist();
             CheckDeclaredModes();
+            CheckStrictlyTypedModePatterns();
             ExpandEveryModeTemplates();
 
             // Last, so that a mode named here is the one the rules were recorded under rather than a fresh
@@ -11251,7 +11252,8 @@ namespace CodeDeeds.Xslt.Compiler
                     new ModuleElement(m_tree, element),
                     onMultipleMatch,
                     visibility,
-                    typed));
+                    typed,
+                    typedSaid == "strict"));
         }
 
         /// <summary>
@@ -11377,7 +11379,8 @@ namespace CodeDeeds.Xslt.Compiler
                     by < 0 ? OnNoMatch.TextOnlyCopy : declarations[by].OnNoMatch!.Value,
                     warned >= 0 && declarations[warned].WarnOnNoMatch!.Value,
                     multiple >= 0 && declarations[multiple].OnMultipleMatch == "fail",
-                    typed >= 0 ? declarations[typed].Typed : null);
+                    typed >= 0 ? declarations[typed].Typed : null,
+                    typed >= 0 && declarations[typed].StrictlyTyped);
                 m_modeAccumulators[mode] = used < 0
                     ? AccumulatorSet.None
                     : AccumulatorsOf(declarations[used].Written);
@@ -11618,6 +11621,49 @@ namespace CodeDeeds.Xslt.Compiler
         }
 
         /// <summary>Checks every mode a package used against the ones it declared.</summary>
+        /// <summary>
+        /// Holds every template rule in a mode declared <c>typed="strict"</c> to a pattern whose first step
+        /// names an element the schemas in scope declare (§6.6.2, <c>XTSE3105</c>).
+        /// </summary>
+        /// <remarks>
+        /// A mode that takes only strictly validated nodes can only ever see elements the schema declares
+        /// at the top level, so a rule matching any other name could never fire; saying so when the
+        /// stylesheet is compiled is more use than never matching at run time.
+        /// </remarks>
+        private void CheckStrictlyTypedModePatterns()
+        {
+            if (m_schemas is null)
+            {
+                return;
+            }
+
+            foreach (TemplateRule rule in m_rules)
+            {
+                if (!m_modeRules.TryGetValue(rule.Mode, out ModeDeclaration mode) || !mode.StrictlyTyped)
+                {
+                    continue;
+                }
+
+                int slot = rule.Pattern.OutermostElementNameSlot;
+
+                if (slot < 0)
+                {
+                    continue;
+                }
+
+                ExpandedName name = m_names.GetName(slot);
+
+                if (m_schemas.FindElement(name.NamespaceUri, name.LocalName) is null)
+                {
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XTSE3105,
+                        $"A template rule in a mode declared typed=\"strict\" matches '{name.LocalName}', "
+                        + "and the schemas in scope declare no top-level element of that name. Only a node "
+                        + "the schema declares can be validated strictly, so the rule could never match.");
+                }
+            }
+        }
+
         private void CheckDeclaredModes()
         {
             foreach ((int mode, string written, int element) in m_modesToDeclare)
@@ -11674,7 +11720,8 @@ namespace CodeDeeds.Xslt.Compiler
             ModuleElement Written,
             string? OnMultipleMatch = null,
             string? Visibility = null,
-            bool? Typed = null);
+            bool? Typed = null,
+            bool StrictlyTyped = false);
 
         private int ResolveMode(int element, string? mode)
         {

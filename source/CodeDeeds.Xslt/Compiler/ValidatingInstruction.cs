@@ -101,6 +101,13 @@ namespace CodeDeeds.Xslt.Compiler
             XdmTree built = builder.Finish();
             NodeValidator validator = new NodeValidator(schemas);
 
+            // A document node is held to its own shape whether it is validated by a mode or against a
+            // named type: one element child and no text, or XTTE1550.
+            if (m_shape == ValidationShape.Document)
+            {
+                validator.RequireDocumentShape(built);
+            }
+
             TypeOverlay overlay = m_type is not null
                 ? validator.ValidateElementAgainstType(built, m_type)
                 : m_shape == ValidationShape.Element

@@ -144,14 +144,22 @@ namespace CodeDeeds.Xslt.Compiler
 
             string actual = schema.TargetNamespace ?? string.Empty;
 
-            if (targetNamespace is not null && !string.Equals(actual, targetNamespace, StringComparison.Ordinal))
+            // What the declaration says the schema is for has to be what the schema says it is for. An
+            // xsl:import-schema with no namespace attribute asks for the null namespace, so a document
+            // fetched by location must have no target namespace either; an inline schema is left to say
+            // for itself, which is how a stylesheet writes one without naming its namespace twice.
+            string? declared = targetNamespace ?? (location is not null ? string.Empty : null);
+
+            if (declared is not null && !string.Equals(actual, declared, StringComparison.Ordinal))
             {
                 // XTSE0215 is the inline case's own code, the declaration contradicting what it holds;
-                // a fetched schema that is not for the namespace asked for was not found (XTSE0165).
+                // a fetched schema for another namespace is one that does not fit what is in scope.
                 throw XsltErrors.Error(
-                    inlineSchema is not null ? XsltErrorCode.XTSE0215 : XsltErrorCode.XTSE0165,
-                    $"The xsl:import-schema names the namespace '{targetNamespace}', and the schema it "
-                    + $"imports has the target namespace '{actual}'.");
+                    inlineSchema is not null ? XsltErrorCode.XTSE0215 : XsltErrorCode.XTSE0220,
+                    $"The xsl:import-schema asks for the namespace "
+                    + (declared.Length == 0 ? "with no name" : $"'{declared}'")
+                    + $", and the schema it imports has the target namespace "
+                    + (actual.Length == 0 ? "with no name." : $"'{actual}'."));
             }
 
             // The same document again, already in scope from the caller or an earlier import, is nothing
@@ -548,10 +556,12 @@ namespace CodeDeeds.Xslt.Compiler
                     }
                 });
 
+                // Retrieved, and not a schema: that is a fault in the schema rather than in reaching it,
+                // which is what tells XTSE0220 from the XTSE0165 of a document nothing could fetch.
                 if (schema is null || problems.Count > 0)
                 {
                     throw XsltErrors.Error(
-                        XsltErrorCode.XTSE0165,
+                        XsltErrorCode.XTSE0220,
                         $"{Capitalized(what)} is not a schema document: {(problems.Count > 0 ? problems[0] : "nothing was read")}");
                 }
 
@@ -560,7 +570,7 @@ namespace CodeDeeds.Xslt.Compiler
             catch (Exception failed) when (failed is XmlException or XmlSchemaException)
             {
                 throw XsltErrors.Error(
-                    XsltErrorCode.XTSE0165, $"{Capitalized(what)} could not be read: {failed.Message}", failed);
+                    XsltErrorCode.XTSE0220, $"{Capitalized(what)} could not be read: {failed.Message}", failed);
             }
         }
 
