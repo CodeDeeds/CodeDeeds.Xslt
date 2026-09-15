@@ -42,6 +42,20 @@ namespace CodeDeeds.Xslt.Conformance
         public Func<XdmTree?>? Tree { get; init; }
 
         /// <summary>
+        /// The principal result serialized the way <c>assert-xml</c> is defined to be read, or null
+        /// where there is no result to serialize.
+        /// </summary>
+        /// <remarks>
+        /// The catalog says what that assertion is measured against in as many words: a serialization
+        /// of the result "using the default serialization parameters method=\"xml\" indent=\"no\"
+        /// omit-xml-declaration=\"yes\"" — the stylesheet's own <c>xsl:output</c> aside. <c>Result</c> is
+        /// what the stylesheet asked for, which every other assertion wants and this one does not: the
+        /// html and xhtml methods add a <c>meta</c> element the result tree never held, and write tags
+        /// that are not XML at all. Asked for only where the two differ, and it costs a second run.
+        /// </remarks>
+        public Func<string?>? AsXml { get; init; }
+
+        /// <summary>
         /// The schemas the environment declared, for an assertion that names one of their declarations:
         /// schema-element(E) in an assertion is a question the assertion cannot ask without them.
         /// </summary>
@@ -509,11 +523,46 @@ namespace CodeDeeds.Xslt.Conformance
                 ResultDocuments = results.Documents,
                 Directory = directory,
                 Tree = m_schemaAware && !compileOnly ? () => RunAgainIntoATree(compiled, source) : null,
+                AsXml = compileOnly ? null : () => RunAgainAsXml(compiled, source),
                 Schemas = m_schemaAware ? EnvironmentSchemas(environment, directory) : null,
                 Messages = messages.Written,
             };
         }
 
+
+        /// <summary>
+        /// The identity transformation, which serializes a tree with the default parameters and nothing
+        /// of any stylesheet's own. Compiled once: every <c>assert-xml</c> that has to look twice uses it.
+        /// </summary>
+        private static readonly Lazy<Xslt> s_plainXml = new Lazy<Xslt>(() => new Xslt(
+            "<xsl:stylesheet version=\"3.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\">"
+            + "<xsl:output method=\"xml\" indent=\"no\" omit-xml-declaration=\"yes\"/>"
+            + "<xsl:template match=\"/\"><xsl:copy-of select=\"node()\"/></xsl:template>"
+            + "</xsl:stylesheet>",
+            new XsltOptions { OmitXmlDeclaration = true }));
+
+        /// <summary>
+        /// Runs the transformation a second time into a tree and serializes that tree as XML, which is
+        /// what <c>assert-xml</c> compares against.
+        /// </summary>
+        private static string? RunAgainAsXml(Xslt stylesheet, string? source)
+        {
+            if (RunAgainIntoATree(stylesheet, source) is not XdmTree tree)
+            {
+                return null;
+            }
+
+            try
+            {
+                return s_plainXml.Value.Transform(tree);
+            }
+            catch (Exception)
+            {
+                // The first run produced a result; where this one cannot be serialized the assertion
+                // falls back to the text, and the test fails on what it measured rather than on this.
+                return null;
+            }
+        }
 
         /// <summary>
         /// Runs the transformation a second time into a tree, for an assertion that asks about the result

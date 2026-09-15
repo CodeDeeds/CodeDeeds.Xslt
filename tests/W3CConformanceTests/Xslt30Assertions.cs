@@ -362,14 +362,31 @@ namespace CodeDeeds.Xslt.Conformance
                 return Skip("the expected result is not well-formed XML");
             }
 
-            if (got is null)
+            if (got is not null && string.Equals(wanted, got, StringComparison.Ordinal))
             {
-                return Fail($"the result is not well-formed XML: {Flat(outcome.Result)}");
+                return Pass();
             }
 
-            return string.Equals(wanted, got, StringComparison.Ordinal)
-                ? Pass()
-                : Fail(Difference(wanted, got));
+            // The result as the stylesheet asked for it is not what this assertion is written against.
+            // The catalog defines it as a serialization with method="xml" indent="no"
+            // omit-xml-declaration="yes", and an html or xhtml method both adds a meta element that was
+            // never in the result tree and writes tags no XML parser will read. Asked here rather than
+            // first because it costs a second run, and because everything that agrees already agrees.
+            string? plain = outcome.AsXml?.Invoke() is string xml ? Canonical(xml, ignorePrefixes) : null;
+
+            if (plain is not null && string.Equals(wanted, plain, StringComparison.Ordinal))
+            {
+                return Pass();
+            }
+
+            if (got is null)
+            {
+                return plain is null
+                    ? Fail($"the result is not well-formed XML: {Flat(outcome.Result)}")
+                    : Fail(Difference(wanted, plain));
+            }
+
+            return Fail(Difference(wanted, got));
         }
 
         private static TestResult CheckStringValue(XElement assertion, Transformation outcome)

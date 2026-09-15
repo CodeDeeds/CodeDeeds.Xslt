@@ -311,6 +311,24 @@ The driver reports **where** the failures are as well as what they are. The two 
 the first is the one that decides what to do next: one absent instruction shows up as a dozen
 unrelated-looking reasons, while a reason shared across twenty files is nobody's next task.
 
+### What `assert-xml` is measured against
+
+Not the result as the stylesheet asked for it. The catalog says so in as many words: the assertion supplies
+"a serialization of the expression result using the default serialization parameters `method="xml"`
+`indent="no"` `omit-xml-declaration="yes"`". Everything else the driver asks — an XPath assertion, a string
+value, a serialization match — wants the stylesheet's own output, and that is what it runs with; but where
+the two differ, this assertion is settled by the first.
+
+The difference is the html and xhtml output methods. Both add a `meta` element to `head` that the result
+tree never held, and the html one writes `<META ...>` and `<BR>` with no closing tag, which no XML parser
+will read — so a test whose stylesheet has no `xsl:output` at all and happens to produce an `HTML` document
+element was being compared as HTML against an expectation written as XML. `bug-1901`, `sequence-0601` and
+`accumulator-040` are that, and their expected results have the `meta` element explicitly removed.
+
+So `assert-xml` looks twice: the result as it was serialized, and, where that does not match, the result
+tree serialized again with the default parameters. The second costs a second run of the transformation and
+is paid only by a test that would otherwise be reported as failing.
+
 ## The XPath run
 
 The 2.0 run stands at **14,144 of 14,173, 99.8%**, and the 3.1 run — `--31`, which takes in the tests marked
@@ -574,7 +592,6 @@ The largest clusters behind the current **99.5% of 5,622**, and no one cause dom
 | `decl/strip-space` | 2 |
 | `fn/collection` | 2 |
 | `insn/result-document` | 2 |
-| `insn/sequence` | 2 |
 | `misc/docbook` | 2 |
 | `misc/regex-syntax-xslt20` | 2 |
 
@@ -587,7 +604,7 @@ The largest skip left is not a failure either: **6,518 are XSLT 3.0 tests**, rea
 
 ## What the 3.0 run says
 
-That opt-in run measures the XSLT 3.0 half at **7,891 of 7,924, 99.6%**, from 4,994 of 6,427 when it was first
+That opt-in run measures the XSLT 3.0 half at **7,894 of 7,924, 99.6%**, from 4,994 of 6,427 when it was first
 taken. It reads more tests than it did as well as passing more of them, which is the part worth reading twice:
 opening a feature the suite writes *around* stops whole files being skipped, so the denominator moves too — and
 the percentage can fall while the work goes forward, which is why the two numbers are always given together.

@@ -5849,6 +5849,27 @@ The 3.0 run goes from 7,890 of 7,924 to **7,891** and the schema-aware run from 
 **8,452**; the 2.0 and XPath runs are unmoved, the two backends agree test for test, and nothing that was
 passing fails.
 
+### What the driver was comparing against
+
+Three failures that were the driver's reading of the tests and not the engine's of the language. The
+catalog defines `assert-xml` as a serialization of the result with the *default* parameters —
+`method="xml" indent="no" omit-xml-declaration="yes"` — and the driver was comparing the result as the
+stylesheet asked for it, which for every other assertion is the right thing and for this one is not.
+
+It matters where the output method is html or xhtml. Both add a `meta` element to `head` that the result
+tree never held, and html writes `<META>` with no closing tag, which no XML parser reads. A test needs no
+`xsl:output` to get there: the default method is html when the document element is `html` in no namespace,
+and xhtml when it is `html` in the XHTML namespace and the stylesheet does not say 1.0. `sequence-0601`
+produces `<HTML>` and `bug-1901` an XHTML `html`, and both expected results have the `meta` element removed
+by hand, which is the suite recording the same reading.
+
+`assert-xml` now looks twice: the result as it was serialized, and, where that does not match, the result
+tree serialized again with the default parameters. Nothing that matched before stops matching, and the
+second serialization costs a second run paid only by a test that would otherwise have been reported failing.
+
+The 3.0 run goes from 7,891 of 7,924 to **7,894**, the 2.0 run from 5,592 of 5,622 to **5,594** and the
+schema-aware run from 8,452 of 8,526 to **8,455**. The XPath runs read no XSLT and are unmoved.
+
 ### The rest of 3.0
 
 Where XSLT 3.0 stands here, as of 7 September 2026. The suite measures this half under `--xslt --30`, and it
