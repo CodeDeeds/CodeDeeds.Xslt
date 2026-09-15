@@ -565,14 +565,18 @@ tree** for the substring a branch processes, there being no atomic context item 
 written; there is one now, and a path written in a branch no longer walks a tree that was never in the
 stylesheet.
 
-The largest clusters behind the current **99.4% of 5,624**, and no one cause dominates:
+The largest clusters behind the current **99.5% of 5,622**, and no one cause dominates:
 
 | | |
 |---|---|
 | `decl/output` | 5 |
-| `misc/regex-syntax-xslt20` | 2 |
-| `misc/docbook` | 2 |
+| `decl/function` | 2 |
+| `decl/strip-space` | 2 |
 | `fn/collection` | 2 |
+| `insn/result-document` | 2 |
+| `insn/sequence` | 2 |
+| `misc/docbook` | 2 |
+| `misc/regex-syntax-xslt20` | 2 |
 
 The two in `fn/collection` are the suite's: `collection-005` is a `version="2.0"` stylesheet that writes
 `xsl:mode`, and `collection-006` is a package test, both marked as applying to a 2.0 processor, which
@@ -583,7 +587,7 @@ The largest skip left is not a failure either: **6,518 are XSLT 3.0 tests**, rea
 
 ## What the 3.0 run says
 
-That opt-in run measures the XSLT 3.0 half at **7,889 of 7,925, 99.5%**, from 4,994 of 6,427 when it was first
+That opt-in run measures the XSLT 3.0 half at **7,890 of 7,924, 99.6%**, from 4,994 of 6,427 when it was first
 taken. It reads more tests than it did as well as passing more of them, which is the part worth reading twice:
 opening a feature the suite writes *around* stops whole files being skipped, so the denominator moves too — and
 the percentage can fall while the work goes forward, which is why the two numbers are always given together.

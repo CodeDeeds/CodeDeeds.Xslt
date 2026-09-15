@@ -1799,13 +1799,13 @@ namespace CodeDeeds.Xslt.XPath
             {
                 case XPathTokenKind.Dot:
                     m_index++;
-                    return new ContextItemExpr(m_context.Version);
+                    return new ContextItemExpr();
 
                 // The unary lookup, which is the binary one with the context item on its left: inside a
                 // predicate over a sequence of maps, '?name' asks each of them in turn.
                 case XPathTokenKind.Question when AllowsMapsAndArrays:
                     m_index++;
-                    return ParseLookup(new ContextItemExpr(m_context.Version));
+                    return ParseLookup(new ContextItemExpr());
 
                 case XPathTokenKind.Variable:
                 {

@@ -575,8 +575,16 @@ namespace CodeDeeds.Xslt.Compiler
     /// values are compared by what they are: numbers as numbers, dates as dates, text by the collation or
     /// the language and case order asked for. Two that cannot be compared, an untyped value and a date say,
     /// are <c>XTDE1030</c>. <c>data-type="number"</c> reads every key as a number and <c>data-type="text"</c>
-    /// every key as text, and XSLT 1.0, which had no types to sort by, reads every key as text unless told
-    /// otherwise. The empty sequence sorts before everything.
+    /// every key as text. The empty sequence sorts before everything.
+    /// </para>
+    /// <para>
+    /// Backwards compatibility settles what the key is and not how it is compared. XSLT 1.0 had a single
+    /// key of a single value, so a sequence gives up everything after its first item rather than being
+    /// refused; but <c>data-type</c> is absent either way, and an absent one means the values are compared
+    /// by what they are. That is a real difference from a 1.0 processor and only a visible one where the
+    /// key is typed: a 1.0 stylesheet sorts on nodes, a node atomizes to untyped text, and untyped text is
+    /// collated. It takes something 1.0 could not write — <c>perform-sort</c> over <c>1 to 5</c>, say — to
+    /// hand the key a number, and then the number sorts as one.
     /// </para>
     /// <para>
     /// Every ordering attribute may be an attribute value template, settled by <see cref="Resolve"/> once per
@@ -600,15 +608,14 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="culture">The language to collate text in, or <see langword="null"/> for ordinal.</param>
         /// <param name="caseOrder">Where case falls when text is otherwise equal.</param>
         /// <param name="firstItemOnly">
-        /// Whether a sequence contributes only its first item, as 1.0 has it. A key that takes only its
-        /// first item is a key in a backwards-compatible stylesheet, where <c>data-type</c> defaults to
-        /// text — so it settles the comparison as well as the value.
+        /// Whether a sequence contributes only its first item, as 1.0 has it. It settles the value and
+        /// nothing about the comparison, which <c>data-type</c> settles on its own.
         /// </param>
         /// <param name="collation">The collation text is compared by, where one was named.</param>
         /// <param name="ordering">The ordering attributes still to be computed, where any is.</param>
         /// <param name="asText">
-        /// Whether values are compared as text whatever they are, which is <c>data-type="text"</c> and every
-        /// key under XSLT 1.0.
+        /// Whether values are compared as text whatever they are, which is what <c>data-type="text"</c>
+        /// asks for and the only thing that asks for it.
         /// </param>
         public SortKey(
             Expr select,
@@ -629,7 +636,7 @@ namespace CodeDeeds.Xslt.Compiler
             m_firstItemOnly = firstItemOnly;
             m_collation = collation;
             m_ordering = ordering;
-            m_asText = asText || firstItemOnly;
+            m_asText = asText;
         }
 
         /// <summary>Gets the expression producing the value to sort on.</summary>
@@ -772,7 +779,7 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 string trimmed = dataType.Trim();
                 numeric = trimmed == "number";
-                asText = trimmed == "text" || m_firstItemOnly;
+                asText = trimmed == "text";
 
                 if (!numeric && !asText && !trimmed.Contains(':'))
                 {
@@ -845,21 +852,23 @@ namespace CodeDeeds.Xslt.Compiler
         /// </summary>
         /// <remarks>
         /// A sort key yielding several values is <c>XTTE1020</c>, and under 1.0 the first is taken. A node
-        /// is atomized here, so what is compared is the value and not the node.
+        /// is atomized here either way, so what is compared is the value and not the node.
         /// </remarks>
         /// <param name="context">The context, positioned on the item.</param>
         public XPathValue Evaluate(ref DynamicContext context)
         {
             XPathValue value = Select.Evaluate(ref context);
 
+            // 1.0 gives up the rest of the sequence rather than refusing it. What is left is atomized
+            // like any other key: the value is what sorts, and a node sorts by its own.
             if (m_firstItemOnly)
             {
-                return XdmSequence.FirstItem(value);
+                value = XdmSequence.FirstItem(value);
             }
 
             List<XPathValue> items = XdmSequence.Atomize(XdmSequence.Items(value));
 
-            if (items.Count > 1)
+            if (items.Count > 1 && !m_firstItemOnly)
             {
                 throw XsltErrors.Error(
                     XsltErrorCode.XTTE1020,

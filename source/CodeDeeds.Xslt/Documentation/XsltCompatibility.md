@@ -13,17 +13,17 @@ implemented. The reasoning behind each decision, and the history of the conforma
 | Conformance level | Basic: not schema-aware, not streaming. |
 | Backends | Interpreted (default) and compiled to IL (`XsltOptions.Backend`), which produce the same results. |
 
-Conformance as last measured, on 14 September 2026, against the W3C suites (see `tests/W3CConformanceTests`):
+Conformance as last measured, on 15 September 2026, against the W3C suites (see `tests/W3CConformanceTests`):
 
 | Suite | Result |
 | --- | --- |
-| XSLT 3.0 test suite, 3.0 processor | 7,889 of 7,925, 99.5% |
-| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,590 of 5,624, 99.4% |
-| QT3 (XPath), 3.1 | 98.9% of 17,615 |
-| QT3 (XPath), 2.0 | 99.0% of 14,188 |
+| XSLT 3.0 test suite, 3.0 processor | 7,890 of 7,924, 99.6% |
+| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,592 of 5,622, 99.5% |
+| QT3 (XPath), 3.1 | 17,592 of 17,629, 99.8% |
+| QT3 (XPath), 2.0 | 14,144 of 14,173, 99.8% |
 
 The 2,900 streaming tests are skipped by design. The 686 schema-aware tests are read only by the driver's
-opt-in `--schema` run, which stands at 8,449 of 8,527 (99.1%), the same on both backends; the figures
+opt-in `--schema` run, which stands at 8,451 of 8,526 (99.1%), the same on both backends; the figures
 above are the run without it.
 
 ## Not implemented, and not planned

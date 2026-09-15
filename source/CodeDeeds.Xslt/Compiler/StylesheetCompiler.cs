@@ -10341,7 +10341,7 @@ namespace CodeDeeds.Xslt.Compiler
                     output.Add(new ForEachInstruction(
                         select,
                         CompileSortKeys(element),
-                        new Instruction[] { new SequenceInstruction(new ContextItemExpr(VersionOf(element))) }));
+                        new Instruction[] { new SequenceInstruction(new ContextItemExpr()) }));
 
                     return;
                 }
@@ -11199,12 +11199,12 @@ namespace CodeDeeds.Xslt.Compiler
 
                 string? dataTypeWritten = dataType?.ConstantValue?.Trim();
                 bool numeric = dataTypeWritten == "number";
-                // A backwards-compatible stylesheet sorts by text whatever the values are, XSLT 1.0's
-                // data-type defaulting to text. The suite's backwards-012 reads XSLT 2.0 §3.9 as changing
-                // only what the key is and not how it is compared, and wants a numeric key sorted
-                // numerically; a 1.0 processor does not, and neither does the oracle this engine's own
-                // sorting is held against. The stylesheet said 1.0 and gets 1.0.
-                bool asText = compatible || dataTypeWritten == "text";
+                // Backwards compatibility settles the key and not the comparison. XSLT 2.0 §13.1.2 keeps
+                // data-type for 1.0's sake and says the mode's whole effect on a sort is the sequence of
+                // more than one item, so an absent data-type compares the values by what they are whatever
+                // the version says. A 1.0 stylesheet sorts on nodes, which atomize to untyped text and are
+                // collated, so the difference shows only where something 1.0 could not write typed the key.
+                bool asText = dataTypeWritten == "text";
 
                 if (dataTypeWritten is not (null or "number" or "text") && !dataTypeWritten.Contains(':'))
                 {

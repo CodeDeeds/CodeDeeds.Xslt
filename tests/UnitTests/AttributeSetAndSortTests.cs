@@ -434,8 +434,10 @@ namespace CodeDeeds.Xslt.UnitTests
         [TestMethod]
         public void ASortKeyIsComparedByWhatItIs()
         {
-            // From 2.0 a number is a number without data-type saying so: 3 before 10. XSLT 1.0 had no types
-            // to sort by and ordered every key as text, so the same key puts 10 first there.
+            // From 2.0 a number is a number without data-type saying so: 3 before 10. Backwards
+            // compatibility does not put that back: XSLT 2.0 §13.1.2 keeps data-type as the one way to ask
+            // for 1.0's ordering, and the mode's whole effect on a sort is elsewhere. So the same key at
+            // version 1.0 answers the same, and it takes data-type="text" to put 10 first.
             const string Body =
                 "<xsl:template match=\"/\"><out><xsl:for-each select=\"/r/i\">"
                 + "<xsl:sort select=\"number(.)\"/><xsl:value-of select=\".\"/>,</xsl:for-each></out>"
@@ -443,7 +445,10 @@ namespace CodeDeeds.Xslt.UnitTests
             const string Input = "<r><i>10</i><i>3</i></r>";
 
             Assert.AreEqual("<out>3,10,</out>", Run(Xsl2 + Body, Input));
-            Assert.AreEqual("<out>10,3,</out>", Run(Sheet(string.Empty).Replace("</xsl:stylesheet>", Body), Input));
+            Assert.AreEqual("<out>3,10,</out>", Run(Sheet(string.Empty).Replace("</xsl:stylesheet>", Body), Input));
+            Assert.AreEqual(
+                "<out>10,3,</out>",
+                Run(Xsl2 + Body.Replace("number(.)\"/>", "number(.)\" data-type=\"text\"/>"), Input));
 
             // Two values that do not order against each other — an untyped attribute and a date — are
             // XTDE1030, where data-type="text" would have compared them as strings.

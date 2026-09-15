@@ -3010,8 +3010,10 @@ is what it is: the same function, reachable with one fewer argument in a later l
 A sort key is one value per item, atomized, and from 2.0 the values are compared by what they are: numbers
 as numbers, dates as dates, text by the collation named or the language and case order asked for. So
 `<xsl:sort select="number(.)"/>` puts 3 before 10 with nothing said about `data-type`, where XSLT 1.0, which
-had no types to sort by, orders every key as text unless `data-type="number"` says otherwise — and a 1.0
-stylesheet still gets that. Two values that do not order against each other, an untyped attribute beside a
+had no types to sort by, orders every key as text unless `data-type="number"` says otherwise. A 1.0
+stylesheet gets 2.0's reading here as well, `data-type` being what the language keeps for the other one
+(see *What compatibility settles about a sort, and what a context item may be*). Two values that do not
+order against each other, an untyped attribute beside a
 date, are `XTDE1030`; `data-type="text"` would have compared them as strings. NaN sorts before every other
 number and the empty sequence before everything. This engine had been comparing every key as text unless
 `data-type="number"` was written, whatever version the stylesheet claimed, which is the suite's `sort-013`
@@ -4873,10 +4875,11 @@ Such a document has no file of its own, and what it is relative to is the catalo
 `base-uri()` of a node in one now answers something rather than nothing.
 
 `misc/backwards` went from 4 failures to 1 on the 3.0 run and from 3 to 1 on the 2.0 one, and
-`expr/xpath-compat` and `misc/xslt-compat` came with it. The one left over is 012, which sorts a numeric
-key in a 1.0 stylesheet and wants it ordered as a number: XSLT 1.0 defaults `data-type` to text, a 1.0
-processor orders those keys as text, and so does the reference this engine's own sorting is held against —
-so the stylesheet that said 1.0 gets 1.0.
+`expr/xpath-compat` and `misc/xslt-compat` came with it. The one left over was 012, which sorts a numeric
+key in a 1.0 stylesheet and wants it ordered as a number. That was read here as the mode restoring XSLT
+1.0's default of `data-type="text"`, and it is not: the specification leaves `data-type` in the language
+for that very purpose and gives the mode one effect on a sort, which is a different one. Corrected under
+*What compatibility settles about a sort, and what a context item may be*.
 
 ### What may be said once, and what may not be said at all
 
@@ -5783,6 +5786,47 @@ written, already passing, already run twice a session — was never pointed at t
 report the same figures under either backend, and a diff of the two failure name-sets is empty at both
 versions.
 
+### What compatibility settles about a sort, and what a context item may be
+
+Two things the mode was taken to restore and does not. Both were one test each, and both came from reading
+*backwards-compatible behaviour* as *XSLT 1.0*, which §3.8 says in as many words that it is not.
+
+**A sort key without a `data-type` is compared by what it is, whatever version the stylesheet claims.**
+XSLT 2.0 §13.1.2 is explicit about which half of this the mode owns: the values are compared by the rules
+of their type, untyped ones cast to `xs:string`, and “for backwards compatibility with XSLT 1.0, the
+`data-type` attribute remains available”. The attribute is the compatibility. What the mode itself does to
+a sort is one rule and a different one — `XTTE1020`, a key that atomizes to more than one item, which is a
+type error at 2.0 and under the mode is the first item of the sequence.
+
+This engine had the mode force text instead, and with it the key was not atomized at all: it sorted the
+node. So `backwards-012`, which is `xsl:perform-sort` over `1 to 5` with a key of `(-., 'banana')`, gave up
+the banana as it should and then collated `-1` to `-5` as text, which is ascending. Taking the two apart
+— the first item for the value, `data-type` alone for the comparison — sorts it descending, as the test asks.
+
+That a 1.0 stylesheet sorts differently here from how a 1.0 processor sorts it is real, and is one of the
+incompatibilities XSLT 2.0 lists rather than an oversight. It is also nearly invisible: a stylesheet 1.0
+could have written sorts on nodes, a node atomizes to untyped text, and untyped text is collated. It takes
+a key something 1.0 could not write has typed — `number(.)`, or `perform-sort` over a range — for the
+difference to show, and `data-type="text"` asks for the old order in as many words.
+
+**And `.` under the mode is not known to be a node.** XPath 1.0 defines it as `self::node()`, which holds
+for exactly as long as a context item has nothing else it could be. A 1.0 stylesheet on a 2.0 processor can
+write `<xsl:for-each select="(3,1,2)"/>` and stand on an integer with the mode still on. `ContextItemExpr`
+claimed a node-set whenever the mode was enabled, which opened the 1.0 comparison fast paths and the
+`xsl:value-of` one that reads nodes' text straight off the tree — and then raised `XPTY0004` the moment the
+item turned out to be atomic, which is `xslt-compat-010`: a 1.0 stylesheet iterating `xs:double*` with
+`version="2.0"` on the one `xsl:sort` inside it.
+
+A promise that can be broken is not one, so the claim is gone. What it costs is the fast path for `.` and
+nothing beyond it: the context item is a single item, and one node atomized against a value answers what a
+node-set of one answers.
+
+The 3.0 run went from 7,888 of 7,924 to **7,890**, the 2.0 run from 5,590 of 5,622 to **5,592**, and the
+schema-aware run from 8,449 of 8,526 to **8,451**; the two backends agree test for test, the two XPath runs
+are unmoved, and nothing anywhere fails that was passing. One unit test changed with the code rather than
+against it: it had a 1.0 stylesheet sort `number(.)` as text, which is what a 1.0 processor does and not
+what this mode does.
+
 ### The rest of 3.0
 
 Where XSLT 3.0 stands here, as of 7 September 2026. The suite measures this half under `--xslt --30`, and it
@@ -6038,7 +6082,7 @@ the tests marked `XP30+` and `XP31+` as well, which is how the work above is mea
 dotnet run --project CodeDeeds.Xslt.Conformance -- --31 <path-to-qt3tests>
 ```
 
-That reads 17,573 tests where the 2.0 run reads 14,175, and stands at **98.9%** against 99.0% for 2.0. The
+That reads 17,629 tests where the 2.0 run reads 14,173, and both stand at **99.8%**. The
 gap is mostly the one 3.1 function listed as absent above — `fn:load-xquery-module` — and the
 schema-aware forms, which this engine will never have. The unbounded `xs:integer`, the years before the
 common era, the JSON options and the whole of `op/to` were all on this list and none of them is now;

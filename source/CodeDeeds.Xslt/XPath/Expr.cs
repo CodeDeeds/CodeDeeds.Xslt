@@ -439,30 +439,21 @@ namespace CodeDeeds.Xslt.XPath
     /// node-set is not something an integer can be put in.
     /// </para>
     /// <para>
-    /// A node context item still yields a node-set of one, so nothing about the 1.0 half changes — including
-    /// the comparison fast paths, which <see cref="ReturnsNodeSet"/> keeps open exactly where the language
-    /// guarantees a node.
+    /// Backwards compatibility does not bring the guarantee back. A 1.0 stylesheet on a 2.0 processor can
+    /// write <c>xsl:for-each select="(3,1,2)"</c> and stand on an atomic context item with the mode still
+    /// on, so <see cref="ReturnsNodeSet"/> is false whatever the version was: a promise that can be broken
+    /// is not one. What that costs is the comparison fast path for <c>.</c>, and it costs nothing else — the
+    /// context item is a single item, and one node atomized against a value answers what a node-set of one
+    /// answers.
     /// </para>
     /// </remarks>
     public sealed class ContextItemExpr : Expr
     {
-        private readonly XsltVersion m_version;
-
-
-        /// <summary>Initializes a context-item reference.</summary>
-        /// <param name="version">
-        /// The version this was compiled against, which decides whether the item is known to be a node.
-        /// </param>
-        public ContextItemExpr(XsltVersion version)
-        {
-            m_version = version;
-        }
-
         /// <summary>
-        /// True under 1.0, where the context item is a node by definition, and unknown under 2.0, where it
-        /// may be an atomic value.
+        /// False. The context item may be an atomic value under every version this engine compiles for,
+        /// the backwards-compatible ones included, so nothing here can be promised to be a node.
         /// </summary>
-        public override bool ReturnsNodeSet => m_version.IsBackwardsCompatible;
+        public override bool ReturnsNodeSet => false;
 
         /// <inheritdoc/>
         public override XPathValue Evaluate(ref DynamicContext context)
