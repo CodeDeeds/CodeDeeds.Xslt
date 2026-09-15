@@ -6182,6 +6182,23 @@ The 3.0 run goes from 7,902 of 7,924 to **7,903**, the 2.0 run from 5,597 of 5,6
 schema-aware run from 8,463 of 8,526 to **8,464**; the XPath runs declare no variables of this kind and
 are unmoved, the two backends agree test for test, and nothing that was passing fails.
 
+### What an xsl:sort orders where the selection is not nodes
+
+The same selection it orders anywhere else. From 3.0 an `xsl:apply-templates` may select things that are
+not nodes — a pattern can match an atomic value now — and such a selection is walked item by item rather
+than as a node-set, because a node-set cannot hold the parts of it that are not nodes. That path did not
+sort. The node path always had, so `xsl:sort` worked on everything except the one kind of selection that
+3.0 added.
+
+`current-output-uri-009` is the test, and what it is really about is something else entirely: it sorts
+`4,3,8,1,8` on the key `(., current-output-uri())` to find out whether that function answers with nothing
+inside a sort key. Either answer passes — nothing, and the key is one item and the numbers sort; a URI,
+and the key is two items, which is `XTTE1020` — and this engine gave a third: the five numbers in the
+order they were written.
+
+The 3.0 run goes from 7,903 of 7,924 to **7,904**; the 2.0, schema-aware and XPath runs are unmoved, the
+two backends agree test for test, and nothing that was passing fails.
+
 ### The rest of 3.0
 
 Where XSLT 3.0 stands here, as of 7 September 2026. The suite measures this half under `--xslt --30`, and it

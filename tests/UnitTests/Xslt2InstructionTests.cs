@@ -432,6 +432,33 @@ namespace CodeDeeds.Xslt.UnitTests
                     "<r><i/><i/><i/></r>"));
         }
 
+
+        [TestMethod]
+        public void ApplyingTemplatesToASequenceSortsItToo()
+        {
+            // From 3.0 the selection may hold things that are not nodes, and that path is walked item by
+            // item rather than as a node-set. It is still a selection an xsl:sort orders: the suite's
+            // current-output-uri-009 sorts five integers this way.
+            Assert.AreEqual(
+                "<out>13488</out>",
+                Run(
+                    Root("<xsl:apply-templates select=\"4,3,8,1,8\"><xsl:sort select=\".\"/>"
+                        + "</xsl:apply-templates>"),
+                    "<r/>",
+                    "3.0",
+                    implemented: XsltVersion.V30));
+
+            // Descending, to show the keys are being read rather than the order being a coincidence.
+            Assert.AreEqual(
+                "<out>88431</out>",
+                Run(
+                    Root("<xsl:apply-templates select=\"4,3,8,1,8\">"
+                        + "<xsl:sort select=\".\" order=\"descending\"/></xsl:apply-templates>"),
+                    "<r/>",
+                    "3.0",
+                    implemented: XsltVersion.V30));
+        }
+
         [TestMethod]
         public void EndlessRecursionIsReportedRatherThanExhaustingTheStack()
         {

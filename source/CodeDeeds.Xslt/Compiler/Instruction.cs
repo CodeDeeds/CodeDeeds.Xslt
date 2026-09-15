@@ -1629,9 +1629,17 @@ namespace CodeDeeds.Xslt.Compiler
                 // NodeSet cannot hold the parts of it that are not nodes.
                 if (m_allowsItems && !IsAllNodes(value))
                 {
-                    runtime.ApplyTemplatesToSequence(
-                        XdmSequence.Items(value), mode, parameters, ref context);
+                    List<XPathValue> items = XdmSequence.Items(value);
 
+                    // An xsl:sort orders what is processed whatever the items are. The node path below
+                    // has always sorted; this one had not, and the suite's current-output-uri-009 sorts
+                    // five integers.
+                    if (m_sortKeys.Length != 0)
+                    {
+                        SortKey.Sort(items, m_sortKeys, ref context);
+                    }
+
+                    runtime.ApplyTemplatesToSequence(items, mode, parameters, ref context);
                     return;
                 }
 
