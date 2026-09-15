@@ -172,6 +172,18 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
+        /// The expression this stands for, which is itself for everything but a compiled wrapper.
+        /// </summary>
+        /// <remarks>
+        /// The compiled backend rewrites a predicate array in place, so a predicate written as a
+        /// literal arrives wrapped in the emitted form of itself. Anything reading the <em>shape</em>
+        /// of an expression rather than its value has to look through that, or it sees the wrapper,
+        /// decides it does not recognise the shape, and quietly gives up an optimisation on one
+        /// backend while keeping it on the other.
+        /// </remarks>
+        internal virtual Expr Unwrapped => this;
+
+        /// <summary>
         /// Emits IL leaving this expression's value on the stack as a raw <see cref="double"/>.
         /// </summary>
         /// <remarks>
@@ -1332,7 +1344,14 @@ namespace CodeDeeds.Xslt.XPath
             // that already is a node-set takes the path below, which is the one every 1.0 expression goes down.
             if (primary.Kind is not XPathValueKind.NodeSet)
             {
-                return FilterSequence(XdmSequence.Items(primary), ref context);
+                // A range is filtered where it stands rather than laid out first. Its items are read
+                // one at a time by index and only the survivors are held, so a predicate over ten
+                // million positions costs the walk and not the memory.
+                return FilterSequence(
+                    primary.Kind == XPathValueKind.Sequence && primary.AsSequence().IsRange
+                        ? primary.AsSequence()
+                        : XdmSequence.Items(primary),
+                    ref context);
             }
 
             NodeSet nodes = primary.AsNodeSet();
@@ -1375,11 +1394,26 @@ namespace CodeDeeds.Xslt.XPath
         /// removes repeats because XPath 1.0 requires it of every node-set. A sequence is not a node-set:
         /// <c>($b, $a, $a)</c> is three items in that order and stays so.
         /// </remarks>
-        private XPathValue FilterSequence(List<XPathValue> items, ref DynamicContext context)
+        private XPathValue FilterSequence(IReadOnlyList<XPathValue> items, ref DynamicContext context)
         {
             foreach (Expr predicate in m_predicates)
             {
-                List<XPathValue> survivors = new List<XPathValue>(items.Count);
+                // A predicate that is simply a number names the one position it keeps, so the filter
+                // is an index rather than a walk. Over a range that is the difference between reading
+                // one item and reading ten million of them to reach it.
+                if (LiteralPosition(predicate, ref context) is double at)
+                {
+                    items = at >= 1 && at <= items.Count && at == Math.Floor(at)
+                        ? new[] { items[(int)at - 1] }
+                        : Array.Empty<XPathValue>();
+
+                    continue;
+                }
+
+                // Sized to the input, which is what a predicate keeping most of it wants, but only up
+                // to a point: a range of ten million is usually filtered down to one, and reserving
+                // room for all of them would be the allocation the range was avoiding.
+                List<XPathValue> survivors = new List<XPathValue>(Math.Min(items.Count, 1024));
 
                 for (int i = 0; i < items.Count; i++)
                 {
@@ -1410,6 +1444,26 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             return XdmSequence.Concatenate(items);
+        }
+
+        /// <summary>
+        /// The position a predicate picks where it is simply a number, or <see langword="null"/> where
+        /// it is anything else.
+        /// </summary>
+        /// <remarks>
+        /// Only the two literal forms are asked, because only they are known to give the same answer at
+        /// every position without being evaluated there — which is the whole of what makes the filter
+        /// an index. Anything else, <c>last()</c> and <c>position() - 1</c> included, is walked.
+        /// </remarks>
+        private static double? LiteralPosition(Expr predicate, ref DynamicContext context)
+        {
+            if (predicate.Unwrapped is not (NumberLiteralExpr or TypedLiteralExpr))
+            {
+                return null;
+            }
+
+            XPathValue value = predicate.Evaluate(ref context);
+            return value.Kind == XPathValueKind.Number ? value.ToNumber() : null;
         }
 
         /// <summary>

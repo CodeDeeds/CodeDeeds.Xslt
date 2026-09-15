@@ -19,26 +19,88 @@ namespace CodeDeeds.Xslt.XPath
     /// and nothing is allocated for it.
     /// </para>
     /// </remarks>
-    public sealed class XdmSequence
+    public sealed class XdmSequence : IReadOnlyList<XPathValue>
     {
-        private readonly XPathValue[] m_items;
+        private readonly XPathValue[]? m_items;
+        private readonly System.Numerics.BigInteger m_first;
+        private readonly int m_length;
 
         /// <summary>Initializes a sequence over items the caller no longer owns.</summary>
         /// <param name="items">The items, in order.</param>
         public XdmSequence(XPathValue[] items)
         {
             m_items = items;
+            m_length = items.Length;
         }
+
+        private XdmSequence(System.Numerics.BigInteger first, int length)
+        {
+            m_items = null;
+            m_first = first;
+            m_length = length;
+        }
+
+        /// <summary>
+        /// A run of consecutive integers, held as where it starts and how long it is.
+        /// </summary>
+        /// <remarks>
+        /// <c>1 to 10000000</c> is ten million items and two numbers, and which of those it costs
+        /// depends on what is asked of it. Counting it, or asking whether some number is among it,
+        /// needs neither the items nor the memory they would take; anything that genuinely wants them
+        /// one at a time gets them from the indexer, built as they are asked for.
+        /// </remarks>
+        /// <param name="first">The first integer.</param>
+        /// <param name="length">How many there are.</param>
+        internal static XdmSequence OfRange(System.Numerics.BigInteger first, int length)
+        {
+            return new XdmSequence(first, length);
+        }
+
+        /// <summary>Whether this is a range rather than an array of items.</summary>
+        internal bool IsRange => m_items is null;
+
+        /// <summary>
+        /// The most items a range will be expanded into, where something genuinely wants them all.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The limit is on laying a range out and not on having one, which is the distinction that
+        /// matters: <c>count(1 to 10000000)</c> and <c>5 = (1 to 10000000)</c> are answered from the
+        /// bounds, and only something like <c>for $i in 1 to 10000000</c> asks for the items.
+        /// </para>
+        /// <para>
+        /// Two to the twenty-second, an item being sixteen bytes here, so about sixty-four megabytes
+        /// held at once. It was a tenth of that while every range was built whether its items were
+        /// wanted or not, where a tight bound cost nothing; now that it is reached only by a caller
+        /// genuinely walking them, a million is a number a stylesheet can mean — building a name a
+        /// megabyte long is an ordinary enough thing to ask, and the W3C suite asks it.
+        /// </para>
+        /// </remarks>
+        internal const int ExpandableRange = 4_194_304;
 
         /// <summary>The sequence of no items, which is what <c>()</c> denotes.</summary>
         public static XdmSequence Empty { get; } = new XdmSequence(Array.Empty<XPathValue>());
 
         /// <summary>Gets the number of items.</summary>
-        public int Count => m_items.Length;
+        public int Count => m_length;
 
         /// <summary>Gets the item at a position.</summary>
         /// <param name="index">A zero-based index below <see cref="Count"/>.</param>
-        public XPathValue this[int index] => m_items[index];
+        public XPathValue this[int index] => m_items is not null
+            ? m_items[index]
+            : XPathValue.FromInteger(m_first + index);
+
+        /// <summary>Walks the items in order.</summary>
+        public IEnumerator<XPathValue> GetEnumerator()
+        {
+            for (int i = 0; i < Count; i++)
+            {
+                yield return this[i];
+            }
+        }
+
+        /// <inheritdoc/>
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 
         /// <summary>
         /// Builds the value denoting a list of items, collapsing the cases a sequence is not needed for.
@@ -75,13 +137,24 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>How many items a value flattens to.</summary>
-        private static int ItemCount(XPathValue value)
+        /// <summary>How many items a value holds, without expanding it to find out.</summary>
+        /// <param name="value">The value to count.</param>
+        internal static int ItemCount(XPathValue value)
         {
             switch (value.Kind)
             {
                 case XPathValueKind.Sequence:
                 {
                     XdmSequence sequence = value.AsSequence();
+
+                    // A range holds one integer at every position and nothing nested, so its length
+                    // is its count. Asking each of ten million positions what it holds is the whole
+                    // of what a range exists to avoid.
+                    if (sequence.IsRange)
+                    {
+                        return sequence.Count;
+                    }
+
                     int count = 0;
                     for (int i = 0; i < sequence.Count; i++)
                     {
@@ -139,6 +212,19 @@ namespace CodeDeeds.Xslt.XPath
                 case XPathValueKind.Sequence:
                 {
                     XdmSequence sequence = value.AsSequence();
+
+                    // Here is where a range costs what it looks like it costs, and where the limit
+                    // therefore sits: this is the one place a sequence is expanded into items that are
+                    // all held at once. A caller that only counted the range, or only asked whether a
+                    // number was among it, never reaches this.
+                    if (sequence.IsRange && sequence.Count > ExpandableRange)
+                    {
+                        throw XsltErrors.Error(
+                            XsltErrorCode.XPDY0130,
+                            $"A range of {sequence.Count} items is more than this engine will lay out "
+                            + "one at a time.");
+                    }
+
                     for (int i = 0; i < sequence.Count; i++)
                     {
                         Flatten(sequence[i], output);
@@ -693,24 +779,23 @@ namespace CodeDeeds.Xslt.XPath
             // Counted in a wide integer, because the bounds are: the count of 1 to 10^21 is no more a
             // long than its last item is, and subtracting them in one would wrap round to nonsense.
             System.Numerics.BigInteger length = to - from + 1;
-            if (length > 1_000_000)
+
+            if (length > int.MaxValue)
             {
-                // A limit this engine sets and not one the language does, which is what XPDY0130 is for: a
-                // range is built as an array of items here, so a caller asking for three billion of them is
-                // asking for something this processor will not do rather than something wrong. The code is
-                // what lets a stylesheet tell those apart, and what lets the suite accept either answer.
+                // A sequence is indexed by an int here, so a range of more items than an int counts
+                // has no position to ask about past the first two billion of them. That is a limit
+                // this engine sets and not one the language does, which is what XPDY0130 is for.
                 throw XsltErrors.Error(
                     XsltErrorCode.XPDY0130,
-                    $"The range {from} to {to} has {length} items, which is more than this engine will build.");
+                    $"The range {from} to {to} has {length} items, which is more than this engine "
+                    + "will count.");
             }
 
-            XPathValue[] items = new XPathValue[(int)length];
-            for (int i = 0; i < items.Length; i++)
-            {
-                items[i] = XPathValue.FromInteger(from + i);
-            }
-
-            return length == 1 ? items[0] : XPathValue.FromSequence(new XdmSequence(items));
+            // Held as its bounds. Nothing is built here however long it is: what it costs is decided
+            // by what is asked of it, and counting it or looking for a number in it costs nothing.
+            return length == 1
+                ? XPathValue.FromInteger(from)
+                : XPathValue.FromSequence(OfRange(from, (int)length));
         }
     }
 

@@ -127,6 +127,9 @@ namespace CodeDeeds.Xslt.Emit
         public Expr Source => m_source;
 
         /// <inheritdoc/>
+        internal override Expr Unwrapped => m_source;
+
+        /// <inheritdoc/>
         public override bool ReturnsNodeSet => m_source.ReturnsNodeSet;
 
         /// <inheritdoc/>

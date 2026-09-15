@@ -313,8 +313,8 @@ unrelated-looking reasons, while a reason shared across twenty files is nobody's
 
 ## The XPath run
 
-The 2.0 run stands at **14,109 of 14,172, 99.6%**, and the 3.1 run — `--31`, which takes in the tests marked
-`XP30+` and `XP31+` — at **17,487 of 17,589, 99.4%**. The second reads 3,417 more tests than the first and is
+The 2.0 run stands at **14,115 of 14,172, 99.6%**, and the 3.1 run — `--31`, which takes in the tests marked
+`XP30+` and `XP31+` — at **17,494 of 17,589, 99.5%**. The second reads 3,417 more tests than the first and is
 a fraction behind it, which is the shape to expect: what it takes in is the newer half, and the newer half
 is where the work is.
 
@@ -324,18 +324,18 @@ is where the work is.
 | `misc` | 31 / 31, 100% | 33 / 33, 100% |
 | `app` | 330 / 330, 100% | 774 / 777, 99.6% |
 | `prod` | 5,505 / 5,519, 99.7% | 5,927 / 5,944, 99.7% |
-| `fn` | 5,001 / 5,028, 99.5% | 6,983 / 7,033, 99.3% |
-| `op` | 3,173 / 3,191, 99.4% | 3,386 / 3,409, 99.3% |
+| `fn` | 5,003 / 5,028, 99.5% | 6,986 / 7,033, 99.3% |
+| `op` | 3,177 / 3,191, 99.6% | 3,390 / 3,409, 99.4% |
 | `xs` | 69 / 73, 94.5% | 113 / 117, 96.6% |
 | `map` | *3.1* | 110 / 112, 98.2% |
 | `array` | *3.1* | 31 / 34, 91.2% |
 
 The failures cluster in few places. `fn/parse-json` is the largest on the 3.1 run at 7, and then nothing
-reaches five: four apiece in `op/to`, `fn/collection`, `fn/document-uri` and the two gregorian equality
-sets. Casting led this list by some way not long ago, and `op/to` after it; the years before the common
-era and the bound on `xs:integer` were most of both, and neither is there now. What is left of `op/to`
-is a range of more items than this engine will build, which is a deliberate cap and says so with
-`XPDY0130`. The compatibility document keeps the account of what is behind each.
+reaches five: four apiece in `fn/collection`, `fn/document-uri` and the two gregorian equality sets.
+Casting led this list by some way not long ago, and `op/to` after it; the years before the common era,
+the bound on `xs:integer` and a range being built whether its items were wanted or not were behind all
+of it, and none of the three is there now — `op/to` has nothing left in it at all. The compatibility
+document keeps the account of what is behind each.
 
 ### Which XML Schema version a test asks for
 
@@ -1109,7 +1109,8 @@ whether the environment is visible or not. What the change did move was three QT
 evaluated before the question of visibility arises, so `environment-variable(1)`, `environment-variable(())`
 and `environment-variable(true())` are `XPTY0004` as the suite asks, where the old answer of nothing was
 given before the argument was looked at. The one test left in that set builds a name a million characters
-long with `1 to 1048576`, which is more items than this engine lets a range produce.
+long with `1 to 1048576`; that was more items than this engine would lay a range out into until a range
+stopped being laid out unless something walked it.
 
 Then collations, in two steps. First, `xsl:for-each-group`, `xsl:key` and `xsl:merge-key` take any
 collation the engine has, where they had refused everything but the code point one; grouping and keys

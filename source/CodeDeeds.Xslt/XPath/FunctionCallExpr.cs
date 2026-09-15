@@ -577,9 +577,12 @@ namespace CodeDeeds.Xslt.XPath
 
                 // Under XPath 2.0 the argument is a sequence, which may hold atomic values as well as nodes
                 // and is what every function returning one hands back.
+                // Counted rather than laid out and then measured: a list of ten million items to learn
+                // that there are ten million of them is the allocation nobody asked for, and for a
+                // range it is the one the range exists to avoid.
                 return value.Kind == XPathValueKind.NodeSet
                     ? value.AsNodeSet().Count
-                    : XdmSequence.Items(value).Count;
+                    : XdmSequence.ItemCount(value);
             }
 
             List<int> nodes = NodeListPool.Rent();

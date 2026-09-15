@@ -795,12 +795,10 @@ being year zero and zero divisible by 400; `-0004-02-29` is not, 4 BCE being yea
 proleptic Gregorian reading of XML Schema 1.0's own convention, where reading the digits would have made
 4 BCE leap for looking like 4 CE.
 
-**A range of more items than this engine will build** is what is left of `op/to`: all four of them, and
-`XPDY0130` is the code for exactly that. `xs:integer` being sixty-four bits was the other twelve until
-it stopped being sixty-four bits. The cap stands because a range is built as an array of items here,
-and the four ask for between a million and five hundred million of them while only wanting to know
-whether one number is among them; answering that without building the array means a lazy sequence,
-which is a change to how every sequence is held rather than anything about integers.
+**`op/to` has nothing left in it.** Half of it was `xs:integer` being sixty-four bits, and the rest was a
+range being built as an array of items: four tests asking for between a million and five hundred
+million of them while only wanting to know whether one number was among them. A range is now held as
+where it starts and how long it is, so that question costs nothing, and so does counting one.
 
 The rest is a long tail with no one cause behind it, `fn/doc` and `fn/subsequence` at 5 apiece being the
 largest of it.
@@ -5622,10 +5620,19 @@ reported. The driver declares the `olson-timezone` feature unsupported with it: 
 from `TimeZoneInfo`, the abbreviation — `EST`, `CET` — it has no API for, and half of that is worse than
 none of it.
 
-**A range too long to build refuses with `XPDY0130`.** A range is an array of items here, so `1 to
-3000000000` is this processor declining rather than the expression being wrong, and XPath 3.0 gives that its
-own code so a stylesheet can tell the two apart. The refusal was already there and carried no code, which
-left the suite unable to accept it — the tests offer either the answer or this code, and now take it.
+**A range is held as its bounds, and only laid out where something walks it.** `1 to 10000000` is
+ten million items and two numbers, and which of those it costs depends on what is asked: counting it
+is a subtraction, asking whether a number is among it walks the positions without building any of
+them, and indexing one is an index. A predicate that is simply a number is applied as an index too,
+so `(1 to 10000000)[5000000]` reads one item rather than five million.
+
+What is left to refuse is laying one out: 4,194,304 items, about sixty-four megabytes of them,
+and `XPDY0130` past that. XPath 3.0 gives that its own code so a stylesheet can tell a processor
+declining on grounds of scale from an expression being wrong, and the suite takes either the answer
+or the code. The cap was a tenth of its present size while every range was built whether its items
+were wanted or not; reached only by a caller walking them, a million is a number a stylesheet can
+mean, and the suite builds a name a megabyte long with one. A range longer than an `int` counts is
+refused where it is made, having no position it could be asked about.
 
 **And `fn:subsequence` rounds its positions the way `fn:round` does.** Halves go towards positive infinity,
 where `Math.Round` sends them to even, so a length of 2.5 took two items where the specification asks for

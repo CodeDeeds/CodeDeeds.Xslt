@@ -165,8 +165,8 @@ namespace CodeDeeds.Xslt.XPath
             XPathValue right,
             Func<XPathValue, XPathValue, bool> compare)
         {
-            List<XPathValue> lefts = Atomize(left);
-            List<XPathValue> rights = Atomize(right);
+            IReadOnlyList<XPathValue> lefts = Atomize(left);
+            IReadOnlyList<XPathValue> rights = Atomize(right);
 
             foreach (XPathValue a in lefts)
             {
@@ -183,8 +183,20 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>Reduces a value to the atomic items a comparison sees.</summary>
-        private static List<XPathValue> Atomize(XPathValue value)
+        /// <remarks>
+        /// A list rather than a stream, because the right-hand side is walked once for every item on
+        /// the left and re-atomizing nodes that many times would cost more than holding them. A range
+        /// is the exception and is handed back as it stands: its items are integers already, it needs
+        /// no atomizing, and it answers by index without ever being laid out — which is what lets
+        /// <c>5 = (1 to 10000000)</c> be a question about two numbers.
+        /// </remarks>
+        private static IReadOnlyList<XPathValue> Atomize(XPathValue value)
         {
+            if (value.Kind == XPathValueKind.Sequence && value.AsSequence().IsRange)
+            {
+                return value.AsSequence();
+            }
+
             List<XPathValue> items = new List<XPathValue>();
 
             switch (value.Kind)
