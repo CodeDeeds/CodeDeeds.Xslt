@@ -536,8 +536,8 @@ namespace CodeDeeds.Xslt
         /// <summary>An attribute in the XSLT namespace on a literal result element that XSLT does not define.</summary>
         XTSE0805,
 
-        /// <summary>A reserved namespace designated as an extension namespace.</summary>
-        XTSE0800,
+        /// <summary>A reserved namespace designated as an extension namespace, or named as one.</summary>
+        XTSE0085,
 
         /// <summary>Two <c>xsl:namespace-alias</c> of one precedence sending one namespace two ways.</summary>
         XTSE0810,

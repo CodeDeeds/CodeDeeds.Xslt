@@ -596,7 +596,23 @@ namespace CodeDeeds.Xslt.UnitTests
                 + "</xsl:template></xsl:stylesheet>";
 
             Assert.AreEqual(
-                "XTSE0800",
+                "XTSE0085",
+                Assert.ThrowsExactly<XsltException>(() => Run(stylesheet)).Code);
+        }
+
+        [TestMethod]
+        public void NamingOneAsAnExtensionNamespaceIsTheSameError()
+        {
+            // §24 states the rule twice under the one code: a reserved namespace in the name of an
+            // extension instruction, and a prefix bound to one in extension-element-prefixes. So the
+            // attribute is refused whether or not anything of that namespace is then written.
+            string stylesheet =
+                $"<xsl:stylesheet version=\"3.0\" {Xsl} xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+                + " extension-element-prefixes=\"xs\">"
+                + "<xsl:template match=\"/\"><out/></xsl:template></xsl:stylesheet>";
+
+            Assert.AreEqual(
+                "XTSE0085",
                 Assert.ThrowsExactly<XsltException>(() => Run(stylesheet)).Code);
         }
     }

@@ -379,5 +379,33 @@ namespace CodeDeeds.Xslt.UnitTests
             Assert.AreEqual(string.Empty, Compile(package, new Library(), initialTemplate: null, initialMode: "#default").TransformXml("<a>text</a>"));
             Assert.AreEqual("text", Compile(package, new Library(), initialTemplate: null, initialMode: "#unnamed").TransformXml("<a>text</a>"));
         }
+
+        [TestMethod]
+        public void ACircularityAnOverrideCreatesIsTheDynamicError()
+        {
+            // The library has no cycle: a uses b, and b uses nothing. The override gives b a use of a,
+            // and now a reaches itself — but neither package says so on its own, which is why XSLT 3.0
+            // dropped the static code for this and left the general circularity. A cycle written inside
+            // one package is still the static XTSE0720; see ModuleErrorCodeTests.
+            Library library = new Library().Add(
+                "urn:lib",
+                Package(
+                    "urn:lib",
+                    "<xsl:attribute-set name=\"a\" visibility=\"public\" use-attribute-sets=\"b\">"
+                    + "<xsl:attribute name=\"x\" select=\"'1'\"/></xsl:attribute-set>"
+                    + "<xsl:attribute-set name=\"b\" visibility=\"public\">"
+                    + "<xsl:attribute name=\"y\" select=\"'2'\"/></xsl:attribute-set>"));
+
+            Assert.AreEqual(
+                "XTDE0640",
+                Refuses(
+                    Using(
+                        Main("<out xsl:use-attribute-sets=\"a\"/>"),
+                        "<xsl:override>"
+                        + "<xsl:attribute-set name=\"b\" visibility=\"public\" use-attribute-sets=\"a\">"
+                        + "<xsl:attribute name=\"y\" select=\"'2o'\"/></xsl:attribute-set>"
+                        + "</xsl:override>"),
+                    library));
+        }
     }
 }

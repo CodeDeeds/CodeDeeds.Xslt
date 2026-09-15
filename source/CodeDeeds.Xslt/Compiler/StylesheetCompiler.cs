@@ -3942,6 +3942,7 @@ namespace CodeDeeds.Xslt.Compiler
                 precedence, ReadAttributeSetNames(element, resolve: false))
             {
                 IsAbstract = ReadVisibility(element) == Visibility.Abstract,
+                IsOverride = IsOverriding(element),
             };
 
             m_components.Add(Component("attribute-set", expanded, -1, element));
@@ -4218,12 +4219,27 @@ namespace CodeDeeds.Xslt.Compiler
         /// Walks the graph of <c>use-attribute-sets</c> references looking for a set that reaches itself,
         /// which would otherwise recurse without end at run time.
         /// </summary>
-        private void CheckForAttributeSetCycle(AttributeSet set, HashSet<AttributeSet> visiting)
+        /// <remarks>
+        /// Which error it is depends on where the cycle is. XSLT 2.0 made self-reference among attribute
+        /// sets a static error, <c>XTSE0720</c>, and XSLT 3.0 dropped that code — because, as its own note
+        /// says, attribute sets bind to each other across package boundaries and the circularity is then
+        /// not there to be seen in either package. That is the reading taken here: a cycle written inside
+        /// one package is the static error it always was, and one that exists only once an
+        /// <c>xsl:override</c> has been bound is <c>XTDE0640</c>, the general circularity, reported at
+        /// analysis time under the provision the specification makes for exactly that.
+        /// </remarks>
+        /// <param name="set">The set to walk from.</param>
+        /// <param name="visiting">The sets on the path to it, which is what a repeat is looked for in.</param>
+        /// <param name="overridden">Whether the path to here ran through a declaration in an xsl:override.</param>
+        private void CheckForAttributeSetCycle(
+            AttributeSet set,
+            HashSet<AttributeSet> visiting,
+            bool overridden = false)
         {
             if (!visiting.Add(set))
             {
                 throw XsltErrors.Error(
-                    XsltErrorCode.XTSE0720,
+                    overridden ? XsltErrorCode.XTDE0640 : XsltErrorCode.XTSE0720,
                     $"The attribute set '{set.Name.LocalName}' uses itself, directly or indirectly.");
             }
 
@@ -4233,7 +4249,8 @@ namespace CodeDeeds.Xslt.Compiler
                 {
                     if (m_attributeSets.TryGetValue(used, out AttributeSet? referenced))
                     {
-                        CheckForAttributeSetCycle(referenced, visiting);
+                        CheckForAttributeSetCycle(
+                            referenced, visiting, overridden || declaration.IsOverride);
                     }
                 }
             }
@@ -8586,7 +8603,7 @@ namespace CodeDeeds.Xslt.Compiler
                         if (Array.IndexOf(XsltElements.Reserved, NamespaceIn(m_tree, node)) >= 0)
                         {
                             throw XsltErrors.Error(
-                                XsltErrorCode.XTSE0800,
+                                XsltErrorCode.XTSE0085,
                                 $"'{QualifiedNameOf(node)}' is named in '{NamespaceIn(m_tree, node)}', which "
                                 + "the specifications reserve, and is written where an extension instruction "
                                 + "would go. An extension namespace has to be one nothing else has claimed.");
@@ -8857,6 +8874,13 @@ namespace CodeDeeds.Xslt.Compiler
         /// <c>exclude-result-prefixes</c>, <c>XTSE0809</c> for <c>#default</c> there with no default
         /// namespace in scope, and <c>XTSE1430</c> for either on <c>extension-element-prefixes</c>.
         /// </para>
+        /// <para>
+        /// A prefix that <em>is</em> bound has one thing more to answer for on
+        /// <c>extension-element-prefixes</c>: the namespace it names must not be one the specifications
+        /// have reserved (§24, <c>XTSE0085</c>). Designating one as an extension namespace would be saying
+        /// that an element in it means whatever this processor decides, and those namespaces mean what
+        /// their own specification says.
+        /// </para>
         /// </remarks>
         /// <param name="element">The element carrying the attribute.</param>
         /// <param name="attributeName">Which attribute it is.</param>
@@ -8866,8 +8890,18 @@ namespace CodeDeeds.Xslt.Compiler
             bool extension = attributeName == "extension-element-prefixes";
             bool isDefault = token == "#default";
 
-            if (m_tree.ResolvePrefix(element, isDefault ? string.Empty : token) is { Length: > 0 })
+            if (m_tree.ResolvePrefix(element, isDefault ? string.Empty : token) is { Length: > 0 } bound)
             {
+                if (extension && Implements30 && Array.IndexOf(XsltElements.Reserved, bound) >= 0)
+                {
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XTSE0085,
+                        $"'extension-element-prefixes' names the prefix '{token}', which is bound to "
+                        + $"'{bound}'. That namespace is one the specifications reserve, and an element in "
+                        + "it means what its own specification says rather than whatever a processor "
+                        + "decides.");
+                }
+
                 return;
             }
 

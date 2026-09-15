@@ -110,6 +110,9 @@ namespace CodeDeeds.Xslt.UnitTests
             Assert.AreEqual("XTSE0740", Refuses(Sheet("<xsl:function name=\"f\"/>")));
             Assert.AreEqual("XTSE0740", Refuses(Sheet("<xsl:function name=\"Q{}f\"/>")));
 
+            // A set written to use itself is there in the text for its author to see, and is the static
+            // error it has always been. A cycle that exists only once an xsl:override has been bound is
+            // in neither package on its own, and is XTDE0640; see OverrideTests.
             Assert.AreEqual(
                 "XTSE0720",
                 Refuses(Sheet("<xsl:attribute-set name=\"a\" use-attribute-sets=\"a\"/>")));

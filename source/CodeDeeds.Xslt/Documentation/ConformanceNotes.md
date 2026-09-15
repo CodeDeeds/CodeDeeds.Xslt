@@ -4751,16 +4751,11 @@ since adding a half to the double just below one carries into the next integer.
 nothing else, so a stylesheet at 1.0 reads all three as the words they are and answers NaN — which is also
 what the cast answers when it fails, that being the one thing the function keeps from 1.0.
 
-`expr/math` went from 6 failures to 2 on the 3.0 run and from 3 to none on the 2.0 one. The two left are
-both about something other than arithmetic. 3601 rounds a twenty-one-digit integer, which the engine now
-holds; what it still does not do is keep it through `math:pow`, which works in doubles and hands back
-`1.2345678901234578E20` where the digits were wanted. 3702 writes
-`extension-element-prefixes="xs"` with `xs` bound to the schema namespace and wants `XTSE0085` for it —
-and the suite asks for three different codes for that one construct: `XTSE0800` from
-`fn/extension-functions`'s 0105, where an element in that namespace is then used as an instruction, and
-`XPST0017` from `decl/function`'s 1023, where the declaration is incidental and a later expression is what
-the test is about. This engine raises the error where the extension element is used, which is what the two
-of the three that are *about* the construct ask for.
+`expr/math` went from 6 failures to 2 on the 3.0 run and from 3 to none on the 2.0 one, and 3702 has
+since gone as well (see *What code a reserved extension namespace is*). The one left is 3601, which
+rounds a twenty-one-digit integer: the engine holds that now, and what it still does not do is keep it
+through `math:pow`, which works in doubles and hands back `1.2345678901234578E20` where the digits were
+wanted.
 
 ### What being available as a stream means to an engine that does not stream
 
@@ -5415,15 +5410,8 @@ reporting without a code. Two tests in `misc/error` are about that code alone, o
 **A reserved namespace cannot be an extension namespace.** The specifications have already given those
 namespaces a meaning — the XSLT one, the function and math and map ones, `xml`, the schema ones — so an
 element in one is what they say it is rather than an instruction some processor might implement, and an
-`xsl:fallback` does not make it otherwise. It is a static error, `XTSE0800`, raised before the fallback is
-even looked for.
-
-What is *not* implemented is the companion rule the suite's `math-3702` asks for: `XTSE0085` for an
-`extension-element-prefixes` that names a reserved namespace, where no element of that namespace is then
-used. The two rules collide on `extension-functions-0105`, which designates the schema namespace *and* uses
-an element from it: the attribute is read before the body, so an engine raising `XTSE0085` reports that,
-where the suite wants `XTSE0800`. Both tests were written by the same author four years apart and this
-engine can satisfy either but not both; it takes the one that describes what the stylesheet actually did.
+`xsl:fallback` does not make it otherwise. It is a static error, raised before the fallback is even
+looked for, and the code is `XTSE0085` (see *What code a reserved extension namespace is*).
 
 `fn/extension-functions` went from 1 failure to none on the 3.0 run and `misc/xslt-compat` from 1 to none on
 both, with three more tests out of the skips.
@@ -6007,6 +5995,48 @@ settled on.
 The 3.0 run goes from 7,898 of 7,924 to **7,899**, the 2.0 run from 5,595 of 5,622 to **5,596** and the
 schema-aware run from 8,459 of 8,526 to **8,460**; the XPath runs read no system properties and are
 unmoved, and nothing that was passing fails.
+
+### Which circularity among attribute sets is which error
+
+XSLT 2.0 made an attribute set that reaches itself through `use-attribute-sets` a *static* error,
+`XTSE0720`. XSLT 3.0 does not have the code at all, and says why in a note of its own: "in XSLT 3.0 it is
+not always detectable statically, because attribute sets can bind to each other across package
+boundaries". What is left is `XTDE0640`, the general circularity, which the same note says a processor may
+report during analysis where it can see it.
+
+So which error it is depends on where the cycle is, and the engine now says so. A cycle written inside one
+package is in the text for its author to read and is the static error it always was. A cycle that exists
+only once an `xsl:override` has been bound is in neither package on its own — which is the case the note
+describes — and is `XTDE0640`. That is `override-as-003`: a base package where `as-public` uses
+`as-private` uses `as-base`, and a using package whose override gives `as-base` a use of `as-public`.
+
+The suite is not of one mind here. `decl/attribute-set`'s `0106a` carries the comment "error XTSE0720 was
+dropped in XSLT 3.0" and `override-as-003` wants `XTDE0640`, while four tests in `misc/error` written in
+2012 are marked `XSLT20+` and want `XTSE0720` on both runs. Reading the code as gone at 3.0 outright would
+trade those four for these two. The split above satisfies all six, and it is the specification's own
+reason for the change rather than a line drawn to fit.
+
+### What code a reserved extension namespace is
+
+`XTSE0085`, and it was `XTSE0800`, which is not a code any version of XSLT defines. It had been adopted to
+satisfy `fn/extension-functions`'s 0105, which asks for it; that test names an error the specification does
+not have.
+
+XSLT 3.0 §24 states the rule twice under the one code: "It is a static error to use a reserved namespace in
+the name of any extension function or extension instruction" and "It is a static error to use a prefix
+bound to a reserved namespace in the [xsl:]extension-element-prefixes attribute". The engine enforced the
+first and not the second. It enforces both now, which is what `math-3702` asks for — it designates the
+schema namespace as an extension namespace and never writes an element in it.
+
+The two halves cannot be told apart by which fires first: the attribute is on the stylesheet element and is
+read before any body, so `extension-functions-0105`, which does both, reports the attribute. That test is
+the one this costs, and what it asks for is a code from nowhere. The second rule is checked only for a 3.0
+processor: neither `XTSE0085` nor any reserved-namespace rule for extension namespaces is in XSLT 2.0, and
+`decl/function`'s 1023 is a 2.0 test that writes the same attribute and is about something else entirely.
+
+The 3.0 run goes from 7,899 of 7,924 to **7,900** and the schema-aware run from 8,460 of 8,526 to
+**8,461**: `math-3702` and `override-as-003` gained, `extension-functions-0105` given up. The 2.0 and XPath
+runs are unmoved, and the two backends agree test for test.
 
 ### The rest of 3.0
 

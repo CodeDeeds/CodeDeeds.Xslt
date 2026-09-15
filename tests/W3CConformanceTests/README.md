@@ -613,7 +613,7 @@ The largest skip left is not a failure either: **6,518 are XSLT 3.0 tests**, rea
 
 ## What the 3.0 run says
 
-That opt-in run measures the XSLT 3.0 half at **7,899 of 7,924, 99.7%**, from 4,994 of 6,427 when it was first
+That opt-in run measures the XSLT 3.0 half at **7,900 of 7,924, 99.7%**, from 4,994 of 6,427 when it was first
 taken. It reads more tests than it did as well as passing more of them, which is the part worth reading twice:
 opening a feature the suite writes *around* stops whole files being skipped, so the denominator moves too — and
 the percentage can fall while the work goes forward, which is why the two numbers are always given together.
@@ -1007,7 +1007,7 @@ compatibility document.
 Then what an extension instruction falls back to: an empty `xsl:fallback` is still a fallback, saying to do
 nothing rather than saying nothing; reaching an unimplemented extension instruction with no fallback is
 `XTDE1450`, which it had been reporting without a code; and a reserved namespace cannot be an extension
-namespace, which is `XTSE0800` and static. `fn/extension-functions` went from 1 failure to none on the 3.0
+namespace, which is `XTSE0085` and static. `fn/extension-functions` went from 1 failure to none on the 3.0
 run and `misc/xslt-compat` from 1 to none on both, with three more tests out of the skips on each. See
 *What an extension instruction falls back to* in the compatibility document.
 

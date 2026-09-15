@@ -35,6 +35,15 @@ namespace CodeDeeds.Xslt.Compiler
         /// </summary>
         public bool IsAbstract { get; set; }
 
+        /// <summary>Whether the declaration is an <c>xsl:override</c> of one in a used package.</summary>
+        /// <remarks>
+        /// Read when a circularity is found, and for nothing else. A cycle written inside one package is
+        /// there in the text for its author to see; one that exists only once an override has been bound
+        /// is in neither package on its own, and is the reason XSLT 3.0 stopped calling this a static
+        /// error at all.
+        /// </remarks>
+        public bool IsOverride { get; set; }
+
         /// <summary>
         /// How many slots the declaration's own local variables need.
         /// </summary>
