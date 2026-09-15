@@ -6038,6 +6038,58 @@ The 3.0 run goes from 7,899 of 7,924 to **7,900** and the schema-aware run from 
 **8,461**: `math-3702` and `override-as-003` gained, `extension-functions-0105` given up. The 2.0 and XPath
 runs are unmoved, and the two backends agree test for test.
 
+### Which error codes the suite asks for and does not get
+
+What is left of the error-code failures on both XSLT runs, and why each one stands. None of them is a
+code the engine has not got: in every case it raises an error, and the question is which.
+
+**Two fixtures that are malformed.** `package-021err` declares `<xsl:function name="me:function1#0">` and
+`package-022err` writes `component="function#0" names="pkg:function1"` on an `xsl:accept`. The arity
+belongs on the name and not on the kind, which the very next module in the same test writes correctly;
+both were edited in 2020 for an erratum that put arities into `xsl:accept`, and the edit landed in the
+wrong attribute. Each test wants `XTSE3050` for a diamond of `xsl:include`s that accepts one component
+twice. The engine never reaches the diamond: a name with a `#` in it is not a name, and `function#0` is
+not a kind of component a package offers. It reports what is actually written, which is `XTSE0020`.
+
+**Two tests that ask for opposite codes.** `package-200` writes `package-version="'1.0.0'"`, apostrophes
+and all, and wants `XTSE3000` — no package of that name and version. `decl/use-package`'s 291 to 294 write
+`TotallyInvalid`, `-3.6` and `-alpha` and want `XTSE0020` — an attribute whose value is not one the
+attribute may take. Nothing separates the two cases: an apostrophe is no more a version than a letter is.
+Four tests against one, and the engine says `XTSE0020` to all five.
+
+**A test that contradicts a rule the engine must obey.** `json-to-xml-typed-010` runs only where the
+processor is *not* schema-aware, and wants `XTDE3245` — which is what `fn:json-to-xml` raises when asked
+to validate and unable to. Its stylesheet also carries an `xsl:import-schema`, and §3.14 is not optional
+about that: "a non-schema-aware processor **must** signal a static error if a package includes an
+`xsl:import-schema` declaration". The declaration is not even needed for what the test measures — the same
+specification says "it is not necessary that the containing stylesheet should import the relevant schema"
+— but it is there, and it is refused before anything runs.
+
+**Two errors in one stylesheet, and the suite names the other one.** `iterate-024` puts
+`xsl:on-completion` outside the `xsl:iterate` it belongs to, which is `XTSE0010` and what the test asks
+for. The same `xsl:iterate` also declares `<xsl:param export="yes"/>`, and `export` is an attribute
+`xsl:param` does not have, which is `XTSE0090`. Both are static errors, the specification requires that
+one of them be signalled and not that it be a particular one, and the engine reads the stylesheet in
+document order — where the parameter comes first.
+
+**Two tests marked `XSLT20+` that need 3.0.** `system-property-022` writes `xsl:evaluate` and wants
+`XTDE3160`; `number-1004` writes `xsl:iterate` and wants `XTTE0990`. Both stylesheets say
+`version="2.0"`, so there is no forwards-compatible processing to carry the unknown element, and an XSLT
+element a 2.0 processor does not define is `XTSE0010`. Both pass on the 3.0 run, where the elements exist.
+
+**An entry point this API cannot take apart.** `strip-space-023` supplies `/a/b/text()` as the initial
+match selection over a document whose whitespace is stripped, so the selection is empty, so there is no
+global context item, so `select="."` in a global variable is `XPDY0002`. XSLT 3.0 makes the initial match
+selection and the global context item two values a caller supplies independently; this engine takes one
+source document and derives both from it, which is the legacy shape the specification describes and
+allows — and which derives the global context item from the document rather than from the selection.
+
+**And one that reaches no error at all.** `error-0640o-2` declares two static parameters whose defaults
+name each other, supplies the first from outside, and wants `XPST0008` for the forward reference in the
+default that was replaced. `decl/static`'s 003a says of the same shape that such a reference "is not an
+error anymore" once a value has been supplied. One of the two has to be wrong, and the engine takes the
+one that says a replaced default is not analysed.
+
 ### The rest of 3.0
 
 Where XSLT 3.0 stands here, as of 7 September 2026. The suite measures this half under `--xslt --30`, and it
