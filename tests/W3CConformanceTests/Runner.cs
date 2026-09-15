@@ -142,6 +142,7 @@ namespace CodeDeeds.Xslt.Conformance
             {
                 Version = m_version,
                 CollationResolver = SuiteCollations.Instance,
+                StaticBaseUri = StaticBaseUriFor(environment),
             };
 
             if (environment is not null)
@@ -564,6 +565,37 @@ namespace CodeDeeds.Xslt.Conformance
                 : new StreamReader(path, System.Text.Encoding.GetEncoding(encoding));
 
             return reader.ReadToEnd();
+        }
+
+        /// <summary>
+        /// The base URI an expression in this test is written at.
+        /// </summary>
+        /// <remarks>
+        /// The environment's own where it declares one, nothing where it declares the URI undefined,
+        /// and otherwise the test set's own file — which is where the expression is written, and is
+        /// what the specification makes the default.
+        /// </remarks>
+        /// <param name="environment">The environment the test runs in, if it has one.</param>
+        private string? StaticBaseUriFor(Environment? environment)
+        {
+            if (environment?.BaseUriIsUndefined == true)
+            {
+                return null;
+            }
+
+            if (environment?.StaticBaseUri is string declared)
+            {
+                return declared;
+            }
+
+            if (m_testSetDirectory is null)
+            {
+                return null;
+            }
+
+            return new Uri(Path.GetFullPath(
+                Path.Combine(m_catalog.Root, m_testSetDirectory) + Path.DirectorySeparatorChar))
+                .AbsoluteUri;
         }
 
         private XdmTree LoadContext(Environment? environment)

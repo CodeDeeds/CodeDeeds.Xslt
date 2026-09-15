@@ -67,6 +67,12 @@ namespace CodeDeeds.Xslt.Conformance
         /// </summary>
         public bool BaseUriIsUndefined { get; private init; }
 
+        /// <summary>
+        /// The static base URI the environment declares, or <see langword="null"/> where it declares
+        /// none and the test set's own location stands in for it.
+        /// </summary>
+        public string? StaticBaseUri { get; private init; }
+
         public List<(string Prefix, string Uri)> Namespaces { get; } = new();
 
         /// <summary>
@@ -147,6 +153,9 @@ namespace CodeDeeds.Xslt.Conformance
                 Unsupported = unsupported,
                 BaseUriIsUndefined = element.Elements(Ns_(element, "static-base-uri"))
                     .Any(static declared => (string?)declared.Attribute("uri") == "#UNDEFINED"),
+                StaticBaseUri = element.Elements(Ns_(element, "static-base-uri"))
+                    .Select(static declared => (string?)declared.Attribute("uri"))
+                    .FirstOrDefault(static uri => uri is not null and not "#UNDEFINED"),
             };
 
             environment.Variables.AddRange(variables);

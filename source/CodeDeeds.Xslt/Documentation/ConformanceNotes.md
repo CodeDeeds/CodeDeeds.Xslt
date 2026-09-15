@@ -2153,6 +2153,18 @@ wrong. JSON insists on escaping a quotation mark inside a string, so a rule of "
 escaped" looks right and passes most of the suite; it then fails `json-to-xml-escape-003`, which asks
 outright for `Data with " within it`. The rule is about what XML will carry, not about what JSON will.
 
+**The document `fn:json-to-xml()` builds carries the base URI of the call.** It came from nowhere — no
+file was read and no parser saw a location — so the only base URI it can have is where the expression
+that made it stands, which is what the specification says of it and what lets a relative reference
+inside the JSON mean what one written beside it would.
+
+That is the *static* base URI, a property of where an expression is written rather than of the
+transformation running it: a module read from elsewhere, or an `xml:base`, moves the first and leaves
+the second. `IXPathStaticContext.StaticBaseUri` is where it now lives, so the XPath parser hands it to
+every call that asks rather than the compiler remembering each such call by name — which is also how
+`fn:static-base-uri()` came to answer with the transformation's base URI instead of the expression's,
+the two being the same often enough for it to pass unnoticed.
+
 Three things are worth knowing about the mapping:
 
 - **`null` is the empty sequence.** The data model has no null, and inventing one would put a value into every

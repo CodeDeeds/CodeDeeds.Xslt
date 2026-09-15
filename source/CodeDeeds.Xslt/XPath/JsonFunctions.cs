@@ -42,6 +42,12 @@ namespace CodeDeeds.Xslt.XPath
         private readonly Expr[] m_arguments;
         private readonly string m_name;
 
+        /// <summary>
+        /// Gets or sets the base URI the call was written at, which <c>fn:json-to-xml()</c> puts on
+        /// the document it builds. Null where the caller named none.
+        /// </summary>
+        internal string? StaticBaseUri { get; set; }
+
         private JsonFunctionExpr(JsonFunction function, Expr[] arguments, string name)
         {
             m_function = function;
@@ -180,6 +186,11 @@ namespace CodeDeeds.Xslt.XPath
 
                 XdmTree tree = JsonTreeBuilder.FromJson(
                     text, settings, context.Runtime is null ? null : context.Tree.NameTable);
+
+                // The result is a document that came from nowhere, so its base URI is the one the
+                // call was written at — which is what the specification says of it, and what lets
+                // a relative reference inside the JSON be resolved the way one in the stylesheet is.
+                tree.BaseUri = StaticBaseUri ?? context.Runtime?.BaseUri;
 
                 if (validate)
                 {

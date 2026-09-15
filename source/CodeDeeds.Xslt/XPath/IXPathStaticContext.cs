@@ -106,6 +106,18 @@ namespace CodeDeeds.Xslt.XPath
         string DefaultElementNamespace => string.Empty;
 
         /// <summary>
+        /// Gets the base URI an expression's own relative references resolve against, or
+        /// <see langword="null"/> where none is known.
+        /// </summary>
+        /// <remarks>
+        /// The static base URI of the XPath static context, which is what <c>fn:static-base-uri()</c>
+        /// answers and what <c>fn:json-to-xml()</c> stamps on the tree it builds. In a stylesheet it
+        /// comes from the module and <c>xml:base</c>, and the compiler sets it per expression; a
+        /// caller evaluating an expression on its own sets it here or has none.
+        /// </remarks>
+        string? StaticBaseUri => null;
+
+        /// <summary>
         /// Resolves a variable reference to the slot holding its value.
         /// </summary>
         /// <param name="namespaceUri">The variable's namespace URI, usually empty.</param>
@@ -245,6 +257,12 @@ namespace CodeDeeds.Xslt.XPath
         /// different question and one XPath does not read that binding for.
         /// </summary>
         public string DefaultElementNamespace { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Gets or sets the base URI expressions compiled against this context are written at.
+        /// Defaults to none.
+        /// </summary>
+        public string? StaticBaseUri { get; set; }
 
         /// <summary>Binds a prefix to a namespace URI for the expressions compiled against this context.</summary>
         /// <param name="prefix">The prefix to bind.</param>

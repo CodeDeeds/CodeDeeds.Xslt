@@ -874,7 +874,7 @@ namespace CodeDeeds.Xslt.Compiler
 
                 // The base URI is this element's, which is what a relative reference resolves against — the
                 // same base doc() reads one against.
-                return new StreamAvailableExpr(arguments[0], StaticBaseUri(m_scopeElement));
+                return new StreamAvailableExpr(arguments[0], StaticBaseUriAt(m_scopeElement));
             }
 
             if (name == "transform" && Implements30)
@@ -890,7 +890,7 @@ namespace CodeDeeds.Xslt.Compiler
                 // Built here rather than in the function library because running a transformation means
                 // reaching the resolvers the caller configured, and the library knows of no caller. The base
                 // URI is this element's, which is what a stylesheet-location resolves against.
-                return new TransformExpr(arguments[0], m_options, StaticBaseUri(m_scopeElement));
+                return new TransformExpr(arguments[0], m_options, StaticBaseUriAt(m_scopeElement));
             }
 
             if (name == "system-property")
@@ -952,13 +952,13 @@ namespace CodeDeeds.Xslt.Compiler
                 // Static, as the name says: the base URI where the call is written, known now. Folding it
                 // here is also what makes it answerable from a use-when, which is answered before any
                 // transformation runs and so has no runtime to ask.
-                return StaticBaseUri(m_scopeElement) is string baseUri
+                return StaticBaseUriAt(m_scopeElement) is string baseUri
                     ? new TypedLiteralExpr(XPathValue.FromAnyUri(baseUri))
                     : new EmptySequenceExpr();
             }
 
             if (name == "resolve-uri" && arguments.Length == 1
-                && StaticBaseUri(m_scopeElement) is string against)
+                && StaticBaseUriAt(m_scopeElement) is string against)
             {
                 // The base a one-argument call resolves against is the static one — where the expression was
                 // written, which xml:base may have moved — rather than wherever the transformation started.
@@ -973,7 +973,7 @@ namespace CodeDeeds.Xslt.Compiler
                 // A relative reference resolves against the base URI where the call is written, which an
                 // xml:base may have moved — the same base document() reads one against. The library form
                 // has no stylesheet to ask, so the base is handed to it here.
-                reading.StaticBaseUri = StaticBaseUri(m_scopeElement);
+                reading.StaticBaseUri = StaticBaseUriAt(m_scopeElement);
                 reading.Package = CurrentPackage;
                 return reading;
             }
@@ -993,7 +993,7 @@ namespace CodeDeeds.Xslt.Compiler
 
                 if (asking is CollectionFunctionExpr call)
                 {
-                    call.StaticBaseUri = StaticBaseUri(m_scopeElement);
+                    call.StaticBaseUri = StaticBaseUriAt(m_scopeElement);
                     call.Package = CurrentPackage;
                     return call;
                 }
@@ -1186,7 +1186,7 @@ namespace CodeDeeds.Xslt.Compiler
 
                 return new DocumentExpr(
                     arguments[0],
-                    StaticBaseUri(m_scopeElement),
+                    StaticBaseUriAt(m_scopeElement),
                     arguments.Length == 2 ? arguments[1] : null,
                     CurrentPackage);
             }
@@ -1897,7 +1897,7 @@ namespace CodeDeeds.Xslt.Compiler
                 }
             }
 
-            m_schemas!.Import(targetNamespace, location, inline, StaticBaseUri(element) ?? moduleUri);
+            m_schemas!.Import(targetNamespace, location, inline, StaticBaseUriAt(element) ?? moduleUri);
         }
 
         /// <summary>
@@ -1923,7 +1923,7 @@ namespace CodeDeeds.Xslt.Compiler
                 // it writes being things 1.0 had no way to ask for and no way to decline.
                 m_isPackage = IsXsltElement(stylesheetElement, out string outermostName)
                     && outermostName == "package";
-                m_stylesheetBaseUri = StaticBaseUri(stylesheetElement);
+                m_stylesheetBaseUri = StaticBaseUriAt(stylesheetElement);
                 m_outputSettings.MayInferXhtml = !VersionOf(stylesheetElement).IsBackwardsCompatible;
             }
 
@@ -3178,7 +3178,7 @@ namespace CodeDeeds.Xslt.Compiler
                 function.ParameterSlots = slots.ToArray();
                 function.ParameterTypes = parameterTypes.ToArray();
                 function.Body = CompileSequenceSkippingParameters(source.Element);
-                function.BaseUri = StaticBaseUri(source.Element);
+                function.BaseUri = StaticBaseUriAt(source.Element);
                 function.FrameSize = m_frameSlotCount;
 
                 // A body that is nothing but xsl:sequence returns that value as it is, rather than as the
@@ -5097,7 +5097,7 @@ namespace CodeDeeds.Xslt.Compiler
         {
             if (OutputAttribute(element, "parameter-document") is not string href
                 || m_options.StylesheetResolver is null
-                || m_options.StylesheetResolver.Resolve(href.Trim(), StaticBaseUri(element)) is not ResolvedResource resolved)
+                || m_options.StylesheetResolver.Resolve(href.Trim(), StaticBaseUriAt(element)) is not ResolvedResource resolved)
             {
                 return;
             }
@@ -5425,7 +5425,7 @@ namespace CodeDeeds.Xslt.Compiler
                     FrameSize = m_frameSlotCount,
                     IsAbstract = declared.IsAbstract,
                     InLibrary = PackageOf(source.Tree) != 0,
-                    BaseUri = StaticBaseUri(source.Element),
+                    BaseUri = StaticBaseUriAt(source.Element),
                 };
             }
 
@@ -7742,7 +7742,7 @@ namespace CodeDeeds.Xslt.Compiler
                     ParseExpression(child, selected),
                     keys,
                     MergeKeyOrderings(child),
-                    StaticBaseUri(child),
+                    StaticBaseUriAt(child),
                     sortFirst,
                     ReadUseAccumulators(child)));
 
@@ -7897,7 +7897,7 @@ namespace CodeDeeds.Xslt.Compiler
                 xpath,
                 resultType,
                 baseUri,
-                StaticBaseUri(element),
+                StaticBaseUriAt(element),
                 withParams,
                 contextItem,
                 namespaceContext,
@@ -8203,7 +8203,7 @@ namespace CodeDeeds.Xslt.Compiler
             return new TemplateParameter(
                 expanded, slot, select, body, ReadDeclarationFlag(element, "tunnel"), required, declared)
             {
-                BaseUri = StaticBaseUri(element),
+                BaseUri = StaticBaseUriAt(element),
             };
         }
 
@@ -8926,7 +8926,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// one of them means what it meant there.
         /// </remarks>
         /// <param name="element">The element the expression is written on.</param>
-        private string? StaticBaseUri(int element)
+        private string? StaticBaseUriAt(int element)
         {
             List<string>? declared = null;
 
@@ -9005,6 +9005,15 @@ namespace CodeDeeds.Xslt.Compiler
 
         /// <inheritdoc/>
         public string DefaultElementNamespace => DefaultElementNamespaceAt(m_scopeElement);
+
+        /// <inheritdoc/>
+        /// <remarks>
+        /// Where the expression is written and not where the transformation was started: a module
+        /// read from elsewhere, or an <c>xml:base</c>, moves this and leaves that. Offering it on the
+        /// static context is what lets the XPath parser hand it to every call that asks, rather than
+        /// each such call needing the compiler to remember it by name.
+        /// </remarks>
+        public string? StaticBaseUri => StaticBaseUriAt(m_scopeElement);
 
         /// <summary>
         /// The namespace an unprefixed name test is in where it is written, which is what
@@ -10270,7 +10279,7 @@ namespace CodeDeeds.Xslt.Compiler
                     output.Add(new SourceDocumentInstruction(
                         RequireAttributeValueTemplate(element, "href"),
                         CompileSequence(element),
-                        StaticBaseUri(element),
+                        StaticBaseUriAt(element),
                         ReadUseAccumulators(element)));
                     return;
 
@@ -10491,7 +10500,7 @@ namespace CodeDeeds.Xslt.Compiler
                     // A variable is in scope for what follows it, so it is declared after its own value is
                     // compiled — a variable cannot refer to itself.
                     m_scope.Add(new VariableBinding(expanded, slot, false));
-                    output.Add(new VariableInstruction(slot, select, body, declared, StaticBaseUri(element)));
+                    output.Add(new VariableInstruction(slot, select, body, declared, StaticBaseUriAt(element)));
                     return;
                 }
 
@@ -10556,7 +10565,7 @@ namespace CodeDeeds.Xslt.Compiler
                 case "document":
                     output.Add(WithValidation(
                         element,
-                        new DocumentInstruction(CompileSequence(element), StaticBaseUri(element)),
+                        new DocumentInstruction(CompileSequence(element), StaticBaseUriAt(element)),
                         ValidationShape.Document));
                     return;
 
@@ -11307,7 +11316,7 @@ namespace CodeDeeds.Xslt.Compiler
                 parameters.Add(
                     new WithParameter(expanded, select, body, tunnel, ReadDeclaredType(child))
                     {
-                        BaseUri = StaticBaseUri(child),
+                        BaseUri = StaticBaseUriAt(child),
                     });
             }
 
@@ -12586,7 +12595,7 @@ namespace CodeDeeds.Xslt.Compiler
             }
 
             return new ValidatingInstruction(
-                inner, shape, mode == "strict", type, StaticBaseUri(element), NamespacesOn(element));
+                inner, shape, mode == "strict", type, StaticBaseUriAt(element), NamespacesOn(element));
         }
 
         /// <summary>

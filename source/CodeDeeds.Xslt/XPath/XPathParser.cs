@@ -2252,6 +2252,23 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="built">The call, which may be null or may be some other kind of expression.</param>
         private Expr? WithDefaultCollation(Expr? built)
         {
+            // Where the expression is written, for the two kinds of call that ask. A stylesheet has
+            // the compiler set this per expression, the module and any xml:base deciding it; an
+            // expression evaluated on its own takes whatever its caller put on the static context.
+            if (m_context.StaticBaseUri is string baseUri)
+            {
+                switch (built)
+                {
+                    case Xpath2FunctionExpr reading:
+                        reading.StaticBaseUri = baseUri;
+                        break;
+
+                    case JsonFunctionExpr json:
+                        json.StaticBaseUri = baseUri;
+                        break;
+                }
+            }
+
             if (m_context.DefaultCollation is not string collation
                 || collation == Collation.CodepointUri)
             {

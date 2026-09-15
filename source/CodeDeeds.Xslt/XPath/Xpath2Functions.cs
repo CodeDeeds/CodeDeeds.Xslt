@@ -795,7 +795,11 @@ namespace CodeDeeds.Xslt.XPath
                     return UriOfNode(ref context);
 
                 case Xpath2Function.StaticBaseUri:
-                    return UriOrEmpty(context.Runtime?.BaseUri);
+                    // Where the expression was written, which is not the same as where the
+                    // transformation was started: a module read from elsewhere, or an xml:base, moves
+                    // the first and leaves the second. The transformation's own is the fallback for an
+                    // expression that came with no base of its own.
+                    return UriOrEmpty(StaticBaseUri ?? context.Runtime?.BaseUri);
 
                 case Xpath2Function.ResolveUri:
                     return ResolveUri(ref context);

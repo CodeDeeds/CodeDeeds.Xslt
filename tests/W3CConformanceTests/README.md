@@ -313,8 +313,8 @@ unrelated-looking reasons, while a reason shared across twenty files is nobody's
 
 ## The XPath run
 
-The 2.0 run stands at **14,115 of 14,173, 99.6%**, and the 3.1 run — `--31`, which takes in the tests marked
-`XP30+` and `XP31+` — at **17,546 of 17,631, 99.5%**. The second reads 3,458 more tests than the first and is
+The 2.0 run stands at **14,116 of 14,173, 99.6%**, and the 3.1 run — `--31`, which takes in the tests marked
+`XP30+` and `XP31+` — at **17,548 of 17,631, 99.5%**. The second reads 3,458 more tests than the first and is
 a fraction behind it, which is the shape to expect: what it takes in is the newer half, and the newer half
 is where the work is.
 
@@ -324,7 +324,7 @@ is where the work is.
 | `misc` | 31 / 31, 100% | 33 / 33, 100% |
 | `app` | 330 / 330, 100% | 774 / 777, 99.6% |
 | `prod` | 5,505 / 5,520, 99.7% | 5,927 / 5,944, 99.7% |
-| `fn` | 5,003 / 5,028, 99.5% | 7,038 / 7,075, 99.5% |
+| `fn` | 5,004 / 5,028, 99.5% | 7,040 / 7,075, 99.5% |
 | `op` | 3,177 / 3,191, 99.6% | 3,390 / 3,409, 99.4% |
 | `xs` | 69 / 73, 94.5% | 113 / 117, 96.6% |
 | `map` | *3.1* | 110 / 112, 98.2% |
