@@ -311,6 +311,15 @@ The driver reports **where** the failures are as well as what they are. The two 
 the first is the one that decides what to do next: one absent instruction shows up as a dozen
 unrelated-looking reasons, while a reason shared across twenty files is nobody's next task.
 
+### What an XPath assertion is put to
+
+The result tree, where the serialized result answers no. An assertion such as `/out = 'true'` is about
+the result as a data model instance, and the text is that result after a serializer has been over it:
+`indent="yes"` puts whitespace between elements that the tree never held, and a string value read back
+out of the text carries it. The driver already ran the transformation a second time into a tree for a
+schema-aware run, where a type annotation cannot survive the round trip either; it does so on every run
+now, and only for an assertion that has something to gain by asking again.
+
 ### What `assert-xml` is measured against
 
 Not the result as the stylesheet asked for it. The catalog says so in as many words: the assertion supplies
@@ -583,7 +592,7 @@ tree** for the substring a branch processes, there being no atomic context item 
 written; there is one now, and a path written in a branch no longer walks a tree that was never in the
 stylesheet.
 
-The largest clusters behind the current **99.5% of 5,622**, and no one cause dominates:
+The largest clusters behind the current **5,595 of 5,622, 99.5%**, and no one cause dominates:
 
 | | |
 |---|---|

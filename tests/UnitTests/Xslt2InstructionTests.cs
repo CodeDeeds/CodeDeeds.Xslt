@@ -151,14 +151,29 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
-        public void TheGroupingFunctionsAreAnErrorOutsideAGroupingBody()
+        public void TheGroupingFunctionsOutsideAGroupingBodyDependOnTheProcessor()
         {
-            // Outside any xsl:for-each-group there is no current group, and the specification makes asking
-            // for one XTDE1061 rather than an empty answer — the suite's error-1061a.
+            // Outside any xsl:for-each-group there is no current group. XSLT 3.0 makes asking for one
+            // XTDE1061 — the suite's error-1061a — and 2.0 answered with the empty sequence, which is
+            // what the suite's for-each-group-081a and 081b assert of the two processors in turn.
+            const string Asking = "<n><xsl:value-of select=\"count(current-group())\"/></n>";
+
+            Assert.AreEqual("<out><n>0</n></out>", Run(Root(Asking), "<r/>"));
+
             XsltException error = Assert.ThrowsExactly<XsltException>(
-                () => Run(Root("<n><xsl:value-of select=\"count(current-group())\"/></n>"), "<r/>"));
+                () => Run(Root(Asking), "<r/>", "3.0", implemented: XsltVersion.V30));
 
             Assert.AreEqual("XTDE1061", error.Code);
+
+            // And the key with it: a 3.0 processor refuses, a 2.0 one says nothing.
+            const string Keyed = "<n><xsl:value-of select=\"count(current-grouping-key())\"/></n>";
+
+            Assert.AreEqual("<out><n>0</n></out>", Run(Root(Keyed), "<r/>"));
+
+            error = Assert.ThrowsExactly<XsltException>(
+                () => Run(Root(Keyed), "<r/>", "3.0", implemented: XsltVersion.V30));
+
+            Assert.AreEqual("XTDE1071", error.Code);
         }
 
         [TestMethod]

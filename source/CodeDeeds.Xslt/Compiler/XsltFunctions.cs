@@ -1570,18 +1570,19 @@ namespace CodeDeeds.Xslt.Compiler
         /// <summary>Initializes a call.</summary>
         /// <param name="name">The function's name.</param>
         /// <param name="argument">Its argument, where it takes one.</param>
-        /// <param name="keyRequired">
-        /// Whether a group made without a key — by group-starting-with or group-ending-with — refuses
-        /// current-grouping-key(), which XSLT 3.0 does and 2.0 answers with nothing.
+        /// <param name="refuses">
+        /// Whether asking for a group that is not there is an error, which XSLT 3.0 made it and 2.0
+        /// answered with nothing. It covers both halves of the same change: no current group at all,
+        /// and a group made by group-starting-with or group-ending-with, which has no key.
         /// </param>
-        public ContextualFunctionExpr(string name, Expr? argument, bool keyRequired = true)
+        public ContextualFunctionExpr(string name, Expr? argument, bool refuses = true)
         {
             m_name = name;
             m_argument = argument;
-            m_keyRequired = keyRequired;
+            m_refuses = refuses;
         }
 
-        private readonly bool m_keyRequired;
+        private readonly bool m_refuses;
 
         /// <summary>
         /// The group being merged, or the error for asking where no merge action is running.
@@ -1635,14 +1636,19 @@ namespace CodeDeeds.Xslt.Compiler
             switch (m_name)
             {
                 case "current-group":
-                    // Outside a grouping body there is no group, and the specification makes asking for
-                    // one an error rather than an empty answer.
-                    return runtime.CurrentGroup is { } inGroup
-                        ? inGroup.Group
-                        : throw XsltErrors.Error(
+                    // Outside a grouping body there is no group. XSLT 3.0 makes asking for one an error;
+                    // 2.0 answered with the empty sequence, and a 2.0 processor goes on doing so.
+                    if (runtime.CurrentGroup is { } inGroup)
+                    {
+                        return inGroup.Group;
+                    }
+
+                    return m_refuses
+                        ? throw XsltErrors.Error(
                             XsltErrorCode.XTDE1061,
                             "current-group() is called outside any xsl:for-each-group, where there is no "
-                            + "current group.");
+                            + "current group.")
+                        : XPathValue.FromSequence(XdmSequence.Empty);
 
                 case "current-output-uri":
                     // The base output URI, or the result document being written — and nothing at all in
@@ -1657,14 +1663,19 @@ namespace CodeDeeds.Xslt.Compiler
 
                 case "current-grouping-key":
                     // A group made by group-starting-with or group-ending-with has no key, which is the same
-                    // error as having no group at all.
-                    return runtime.CurrentGroup is { } keyed
-                        && (!m_keyRequired || !Xpath2FunctionExpr.IsEmptySequence(keyed.Key))
-                        ? keyed.Key
-                        : throw XsltErrors.Error(
+                    // error as having no group at all — and under 2.0 the same empty answer.
+                    if (runtime.CurrentGroup is { } keyed
+                        && (!m_refuses || !Xpath2FunctionExpr.IsEmptySequence(keyed.Key)))
+                    {
+                        return keyed.Key;
+                    }
+
+                    return m_refuses
+                        ? throw XsltErrors.Error(
                             XsltErrorCode.XTDE1071,
                             "current-grouping-key() is called where there is no current grouping key: "
-                            + "outside any xsl:for-each-group, or in a group that was not made by a key.");
+                            + "outside any xsl:for-each-group, or in a group that was not made by a key.")
+                        : XPathValue.FromSequence(XdmSequence.Empty);
 
                 case "current-merge-group":
                 {

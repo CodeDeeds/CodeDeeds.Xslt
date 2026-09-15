@@ -5933,6 +5933,28 @@ surrogate pair a pair, which a character-at-a-time loop would not.
 The 3.0 run goes from 7,896 of 7,924 to **7,897** and the schema-aware run from 8,457 of 8,526 to
 **8,458**; the 2.0 and XPath runs are unmoved and nothing that was passing fails.
 
+### What there is no current group to be asked for
+
+`current-group()` outside any `xsl:for-each-group` is `XTDE1061` in XSLT 3.0 and was the empty sequence
+in 2.0, and `current-grouping-key()` the same with `XTDE1071`. The engine raised the error whichever
+version it had been asked to be. The suite says which is which in as many words: its
+`for-each-group-081a` and `081b` run one stylesheet twice, under a 2.0 processor and a 3.0 one, and want
+`empty(current-group())` to be true in the first and the error in the second.
+
+The distinction already existed a step further in — a group made by `group-starting-with` has no key, and
+3.0 refuses `current-grouping-key()` there where 2.0 answered with nothing — so what this needed was the
+flag that carried it extended to cover the group's absence as well as the key's.
+
+**And an XPath assertion in the driver goes to the result tree where the text answers no.** That is what
+`081a` actually turned on: the stylesheet writes `indent="yes"`, so the serialized result has whitespace
+between the elements that the result tree never held, and `/out = 'true'` reads a string value with the
+indentation in it. The driver already ran the transformation a second time into a tree for a schema-aware
+run, a type annotation being another thing the round trip through text cannot carry; it does so on every
+run now, at the cost of a second run paid only by an assertion the first rendering answered no.
+
+The 2.0 run goes from 5,594 of 5,622 to **5,595**. The 3.0, schema-aware and XPath runs are unmoved,
+the two backends agree test for test, and nothing that was passing fails.
+
 ### The rest of 3.0
 
 Where XSLT 3.0 stands here, as of 7 September 2026. The suite measures this half under `--xslt --30`, and it

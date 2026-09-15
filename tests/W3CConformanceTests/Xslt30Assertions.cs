@@ -292,10 +292,12 @@ namespace CodeDeeds.Xslt.Conformance
                     return Pass();
                 }
 
-                // Serialized output carries no type annotations, so an assertion about them is answered
-                // no by any reparse however the transformation went. Where the run can offer the result
-                // as the transformation left it, the question is put again to that. The two are the same
-                // result in two renderings, and one the engine satisfies in either it satisfies.
+                // The text is the result after a serializer has been over it, and an XPath assertion is
+                // about the result. Type annotations do not survive the round trip, and indentation is
+                // added by it: whitespace between elements that the result tree never held, which an
+                // assertion reading a string value sees. So the question is put again to the tree the
+                // transformation produced. The two are one result in two renderings, and an assertion the
+                // engine satisfies in either it satisfies.
                 return AskTheResultTree(compiled, staticContext, outcome)
                     ? Pass()
                     : Fail($"assertion is false: {Flat(assertion.Value)}");

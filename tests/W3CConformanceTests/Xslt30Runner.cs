@@ -31,13 +31,16 @@ namespace CodeDeeds.Xslt.Conformance
 
         /// <summary>
         /// The principal result as a tree, for an assertion that asks about it as a document rather than
-        /// as text; null where the run has no schemas in scope and the question cannot arise.
+        /// as text.
         /// </summary>
         /// <remarks>
-        /// A type annotation is in the tree and not in the text, so an assertion such as
+        /// Two things are in the tree and not in the text. A type annotation is one: an assertion such as
         /// <c>not(/* instance of element(*, xs:untyped))</c> cannot be answered from serialized output at
-        /// all: everything parsed back out of XML is untyped. Asked for only when an assertion wants it,
-        /// and it costs a second run of the transformation, which is why it is offered rather than kept.
+        /// all, because everything parsed back out of XML is untyped. The other is everything the
+        /// serializer added on the way out — <c>indent="yes"</c> puts whitespace between elements that the
+        /// result tree never held, and an XPath assertion reading a string value sees it. Asked for only
+        /// when an assertion the serialized result answered no has something to gain by asking again, and
+        /// it costs a second run of the transformation, which is why it is offered rather than kept.
         /// </remarks>
         public Func<XdmTree?>? Tree { get; init; }
 
@@ -513,8 +516,8 @@ namespace CodeDeeds.Xslt.Conformance
                 };
             }
 
-            // Offered rather than taken: a schema-aware run is the only one where the result can carry
-            // annotations, and the second transformation it costs is paid only by an assertion that asks.
+            // Offered rather than taken: the second transformation a tree costs is paid only by an
+            // assertion that asks for one, and only after the serialized result has answered no.
             Xslt compiled = stylesheet!;
 
             return new Transformation
@@ -522,7 +525,7 @@ namespace CodeDeeds.Xslt.Conformance
                 Result = output.ToString(),
                 ResultDocuments = results.Documents,
                 Directory = directory,
-                Tree = m_schemaAware && !compileOnly ? () => RunAgainIntoATree(compiled, source) : null,
+                Tree = compileOnly ? null : () => RunAgainIntoATree(compiled, source),
                 AsXml = compileOnly ? null : () => RunAgainAsXml(compiled, source),
                 Schemas = m_schemaAware ? EnvironmentSchemas(environment, directory) : null,
                 Messages = messages.Written,
