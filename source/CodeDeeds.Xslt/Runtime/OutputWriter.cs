@@ -1468,6 +1468,18 @@ namespace CodeDeeds.Xslt.Runtime
         }
 
         /// <inheritdoc/>
+        /// <remarks>
+        /// Nothing is written for the document node itself, and that is the point of overriding this: it
+        /// is an item all the same, so a run of atomic values ends here and the next one takes no
+        /// separator. Sequence normalization puts the separator between adjacent strings, and a document
+        /// node between two of them is what stops them being adjacent, even where it is empty.
+        /// </remarks>
+        public override void StartDocumentCopy()
+        {
+            m_lastWasAtomic = false;
+        }
+
+        /// <inheritdoc/>
         public override bool IsFinalOutput => true;
 
         /// <summary>Writes character data, escaping it as the output method requires.</summary>

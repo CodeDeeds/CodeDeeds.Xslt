@@ -165,5 +165,48 @@ namespace CodeDeeds.Xslt.UnitTests
 
             Assert.AreEqual("XTTE0570", error.Code);
         }
+
+        [TestMethod]
+        public void ADocumentNodeBetweenTwoAtomicValuesKeepsThemApart()
+        {
+            // The space goes between two atomic values that are adjacent, and a document node between
+            // them is an item: they never were. What it contributes is its children, and an empty one
+            // contributes nothing at all, which is what made this easy to lose.
+            Assert.AreEqual(
+                "<out>1x2</out>",
+                Run(Root(
+                    "<xsl:sequence select=\"1\"/><xsl:document>x</xsl:document>"
+                    + "<xsl:sequence select=\"2\"/>")));
+
+            Assert.AreEqual(
+                "<out>12</out>",
+                Run(Root(
+                    "<xsl:sequence select=\"1\"/><xsl:document><xsl:text/></xsl:document>"
+                    + "<xsl:sequence select=\"2\"/>")));
+
+            // An xsl:document with no content at all is the same node and does the same.
+            Assert.AreEqual(
+                "<out>12</out>",
+                Run(Root("<xsl:sequence select=\"1\"/><xsl:document/><xsl:sequence select=\"2\"/>")));
+
+            // With nothing between them they are adjacent, which is the control.
+            Assert.AreEqual(
+                "<out>1 2</out>",
+                Run(Root("<xsl:sequence select=\"1\"/><xsl:sequence select=\"2\"/>")));
+        }
+
+        [TestMethod]
+        public void TheSameHoldsWhereTheSequenceIsSerializedRatherThanBuilt()
+        {
+            // Sequence normalization says it the other way round and means the same: the separator goes
+            // between adjacent strings, and only an atomic value becomes a string at that point. A
+            // document node and a zero-length text node are both nodes, and both end the run.
+            Assert.AreEqual(
+                "12 34",
+                Run("<xsl:output method=\"text\"/><xsl:template match=\"/\">"
+                    + "<xsl:sequence select=\"1\"/><xsl:document/><xsl:sequence select=\"2\"/>"
+                    + "<xsl:sequence select=\"3\"/><xsl:text/><xsl:sequence select=\"4\"/>"
+                    + "</xsl:template>"));
+        }
     }
 }

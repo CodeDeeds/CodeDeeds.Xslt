@@ -542,6 +542,9 @@ namespace CodeDeeds.Xslt.Runtime
 
             if (!top)
             {
+                // Its children are all it contributes, but it is an item, so two atomic values it
+                // stands between are not adjacent and take no space between them.
+                m_builder!.EndAtomicRun();
                 return;
             }
 

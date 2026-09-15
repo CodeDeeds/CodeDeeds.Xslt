@@ -1530,6 +1530,20 @@ namespace CodeDeeds.Xslt.Model
             m_lastWasAtomic = true;
         }
 
+        /// <summary>
+        /// Ends a run of adjacent atomic values, an item having come between them that adds nothing to
+        /// the tree.
+        /// </summary>
+        /// <remarks>
+        /// A document node copied in is such an item: its children are what it contributes, and where it
+        /// has none it contributes nothing at all — but it stood between the two values, so they were
+        /// never adjacent and no space goes between them.
+        /// </remarks>
+        public void EndAtomicRun()
+        {
+            m_lastWasAtomic = false;
+        }
+
         /// <summary>Adds a comment node.</summary>
         /// <param name="text">The comment's character data.</param>
         public void AddComment(string text)

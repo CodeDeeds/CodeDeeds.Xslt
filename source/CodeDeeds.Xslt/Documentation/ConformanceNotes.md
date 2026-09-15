@@ -5827,6 +5827,28 @@ are unmoved, and nothing anywhere fails that was passing. One unit test changed 
 against it: it had a 1.0 stylesheet sort `number(.)` as text, which is what a 1.0 processor does and not
 what this mode does.
 
+### What a document node contributes, and what it still is
+
+A space goes between two atomic values that a sequence constructor produces one after the other, and any
+node between them ends the run — a zero-length text node included, which is discarded but discarded after
+the space has been decided. The engine had that, and the suite's `on-empty-113a` is why. What it did not
+have is the document node, which is the one item it wrote nothing at all for.
+
+`xsl:document` with empty content returned before writing anything, on the reasoning that an empty
+document node contributes nothing. It contributes no *children*. It is still an item, which is what a
+declaration of `document-node()` asks for and what two atomic values on either side of it are not adjacent
+across. Neither the serializer nor the tree builder noted the boundary for a document node with content
+either, so a document holding one empty text node was invisible in the same way.
+
+`seqtor-017` is a test of exactly this: a hundred iterations, each wrapping its value between two
+`xsl:document` instructions that are empty except at the two ends. It wants `-- START --12 {3} 45 {6}`,
+where the spaces fall only where nothing stood between two values, and read `-- START --1 2 { 3 } 4 5`
+with a space everywhere.
+
+The 3.0 run goes from 7,890 of 7,924 to **7,891** and the schema-aware run from 8,451 of 8,526 to
+**8,452**; the 2.0 and XPath runs are unmoved, the two backends agree test for test, and nothing that was
+passing fails.
+
 ### The rest of 3.0
 
 Where XSLT 3.0 stands here, as of 7 September 2026. The suite measures this half under `--xslt --30`, and it

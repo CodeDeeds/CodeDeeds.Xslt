@@ -2040,9 +2040,14 @@ namespace CodeDeeds.Xslt.Compiler
         /// <inheritdoc/>
         public override void Execute(ref DynamicContext context, XsltRuntime runtime)
         {
+            // An empty document node contributes no children, and is an item all the same: it is what a
+            // declared document-node() asks for, and between two atomic values it is what keeps them
+            // apart. Writing nothing at all lost both, so the node is announced and closed with nothing
+            // between, which is the whole of what it is.
             if (m_body.Length == 0)
             {
-                // An empty document node contributes nothing; building one would prove that at some cost.
+                runtime.Output.StartDocumentCopy();
+                runtime.Output.EndDocumentCopy();
                 return;
             }
 
