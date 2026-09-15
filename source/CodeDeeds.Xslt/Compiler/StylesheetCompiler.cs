@@ -1219,6 +1219,18 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 ExpandedName extension = ResolveQualifiedName(m_scopeElement, name);
 
+                // The EXSLT Common module, the one extension namespace this engine implements. Answered
+                // first, ahead of the use-when refusal below and of what the stylesheet declares: neither
+                // function reads the source document or the state of a run, so there is nothing a static
+                // expression lacks for it, and a name this engine provides is not one a stylesheet may take
+                // for its own — function-available() says the name is here, and it has to be the same
+                // function that is here.
+                if (ExsltFunctionExpr.TryCreate(extension.NamespaceUri, extension.LocalName, arguments)
+                    is { } exslt)
+                {
+                    return exslt;
+                }
+
                 if (m_inUseWhen)
                 {
                     // Neither what the stylesheet declares nor what an extension might supply is in reach

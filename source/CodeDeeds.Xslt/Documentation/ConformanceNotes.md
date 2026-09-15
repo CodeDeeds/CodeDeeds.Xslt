@@ -6199,6 +6199,70 @@ order they were written.
 The 3.0 run goes from 7,903 of 7,924 to **7,904**; the 2.0, schema-aware and XPath runs are unmoved, the
 two backends agree test for test, and nothing that was passing fails.
 
+### What a 1.0 stylesheet asks an extension library for
+
+`docbook-002` transforms a real article through the real DocBook 1.79.1 stylesheets to XSL-FO and counts
+what comes out: 619 elements and 1,717 attributes wanted. The attributes matched exactly and the elements
+came to 628. Three thousand lines of stylesheet and one number nine too high is not a diagnosis, so the
+first thing to get was a second opinion: .NET's own `XslCompiledTransform` runs those same stylesheets and
+produces exactly 619 and 1,717. That turns the question from *what is wrong* into *what differs*, with both
+outputs in hand to compare.
+
+The difference was entirely `fo:block`, 238 against 229, every other element name equal. All nine extras
+were empty, carried no attributes, and each was the last child of an `fo:block` inside `fo:flow` — one
+shape, so one template, and it is the one every title page goes through:
+
+```xml
+<xsl:variable name="verso.content">...</xsl:variable>
+<xsl:variable name="verso.elements.count">
+  <xsl:choose>
+    <xsl:when test="function-available('exsl:node-set')">
+      <xsl:value-of select="count(exsl:node-set($verso.content)/*)"/></xsl:when>
+    <xsl:otherwise>1</xsl:otherwise>
+  </xsl:choose>
+</xsl:variable>
+<xsl:if test="(normalize-space($verso.content) != '') or ($verso.elements.count &gt; 0)">
+  <fo:block><xsl:copy-of select="$verso.content"/></fo:block>
+</xsl:if>
+```
+
+The verso of an article's title page is empty. Asked how many elements are on it, a processor that has
+`exsl:node-set()` says none and the wrapper is not written; a processor without it takes the `otherwise`,
+which assumes one, and writes an `fo:block` around nothing. Nine title pages, nine blocks, 628.
+
+So nothing was wrong with the counting or the copying. What was wrong was the answer this engine gives when
+a stylesheet asks what it is running on. EXSLT is not a W3C specification; it is the extension library XSLT
+1.0 processors converged on, and its Common module is the one every 1.0 stylesheet of any size reaches for,
+because XSLT 1.0 had a type a stylesheet could build and could not then look inside. `exsl:node-set()`
+turned a result tree fragment into a node-set. XSLT 2.0 removed the restriction, so here the function is
+very nearly the identity — which is exactly why it is worth having: it costs a hundred lines, and the
+branch a 1.0 stylesheet writes for a processor that has it is the branch that was tested. The other branch
+is where the odd corners live.
+
+`exsl:object-type()` comes with it, the module's other function. Its answers are XPath 1.0's type names,
+and the one it can never give here is `RTF`: what a 1.0 processor would call a result tree fragment is an
+ordinary document node, so it answers `node-set` — the same answer any 2.0 processor gives, and the one
+the usual test is written to act on. An argument that is not nodes at all becomes a single text node
+holding its string, which is what the module says and what makes `string(exsl:node-set(3 + 4))` come out as
+`7` rather than as an error.
+
+Both are answered for at every version. Neither depends on one, and a 2.0 stylesheet importing a 1.0 module
+inherits its calls.
+
+`exsl:document` is the module's third part and is an extension *element*, a secondary result named by an
+`href` — `xsl:result-document` before there was one. It is not implemented, and it is now the whole of what
+stands between this engine and `docbook-001`, the XHTML half of the same pair. That test got no further than
+its first `exsl:node-set()` before; it now runs the entire DocBook chunker and stops on
+`element-available('exsl:document')`, which is false here, as `saxon:output` and Xalan's `redirect:write`
+are, so the chunker takes its last branch and terminates. Implementing extension elements is a larger
+decision than implementing two functions, and is left as one.
+
+The 3.0 run goes from 7,904 of 7,924 to **7,905**, the 2.0 run from 5,598 of 5,622 to **5,599** and the
+schema-aware run from 8,465 of 8,526 to **8,466**. That last baseline had moved by one of its own since the
+previous round: `call-template-1001` is a recursion-depth test that lands either side of the limit from run
+to run. The XPath runs are unmoved at 17,592 and 14,144, the two backends agree test for test, and nothing
+that was passing fails. Seven new unit tests, 2,769 in all.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error
@@ -6232,11 +6296,12 @@ what it declared.
 template called `main` and its stylesheet declares none — it has one template, and it matches `root`.
 `collection-006` asks for one called `a`.
 
-**And the two DocBook runs.** `docbook-001` calls `exsl:node-set()`, an extension function, and this
-engine has no way to register one. `docbook-002` transforms a real document through the real DocBook 1.79
-stylesheets to XSL-FO and counts what comes out: 619 elements wanted. It is three thousand lines of
-stylesheet and the count is close but not equal, which says only that something differs somewhere. It is
-the one failure on either run with no diagnosis at all.
+**And one of the two DocBook runs.** `docbook-001` transforms a real article through the real DocBook
+1.79.1 stylesheets to XHTML, and those stylesheets write each chunk with `exsl:document`. This engine
+implements no extension elements, so `element-available('exsl:document')` is false, as it is for
+`saxon:output` and for Xalan's `redirect:write`, and the chunker's last branch terminates the
+transformation outright. Its XSL-FO twin, `docbook-002`, passes — see *What a 1.0 stylesheet asks an
+extension library for*.
 
 ### The rest of 3.0
 

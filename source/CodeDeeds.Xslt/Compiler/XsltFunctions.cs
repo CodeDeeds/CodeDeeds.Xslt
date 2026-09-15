@@ -1349,10 +1349,16 @@ namespace CodeDeeds.Xslt.Compiler
                 return Xpath30FunctionExpr.TakesArityInMath(localName, -1);
             }
 
+            if (namespaceUri == ExsltFunctionExpr.CommonNamespace)
+            {
+                return ExsltFunctionExpr.TakesArity(namespaceUri, localName, -1);
+            }
+
             // The core library lives in the function namespace, and that is where a name written without a
             // prefix has already been sent, so fn:doc and doc ask the same question. Any other namespace
-            // names an extension function, and none are implemented — a name that says outright it is in no
-            // namespace, which only Q{} can say, therefore names nothing here.
+            // names an extension function, and the EXSLT Common module just above is the only one this
+            // engine provides — a name that says outright it is in no namespace, which only Q{} can say,
+            // therefore names nothing here.
             return namespaceUri == XdmType.FunctionNamespace
                 && (s_functions.ContainsKey(localName)
                     || localName == FunctionLookup
@@ -1423,6 +1429,11 @@ namespace CodeDeeds.Xslt.Compiler
             if (namespaceUri == Xpath30FunctionExpr.MathNamespace)
             {
                 return Xpath30FunctionExpr.TakesArityInMath(localName, arity);
+            }
+
+            if (namespaceUri == ExsltFunctionExpr.CommonNamespace)
+            {
+                return ExsltFunctionExpr.TakesArity(namespaceUri, localName, arity);
             }
 
             if (namespaceUri != XdmType.FunctionNamespace)
