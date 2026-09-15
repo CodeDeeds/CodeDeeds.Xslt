@@ -777,7 +777,15 @@ namespace CodeDeeds.Xslt.XPath
                 }
 
                 case Xpath2Function.UnparsedText:
-                    return XPathValue.FromString(ReadUnparsedText(ref context));
+                {
+                    // Declared xs:string?, so nothing in is nothing out: fn:unparsed-text(()) is the
+                    // empty sequence and reads nothing, which is also what fn:json-doc(()) rests on.
+                    XPathValue href = m_arguments[0].Evaluate(ref context);
+
+                    return IsEmptySequence(href)
+                        ? href
+                        : XPathValue.FromString(ReadUnparsedText(ref context));
+                }
 
                 case Xpath2Function.UnparsedTextAvailable:
                     return XPathValue.FromBoolean(IsUnparsedTextAvailable(ref context));
@@ -1019,13 +1027,57 @@ namespace CodeDeeds.Xslt.XPath
 
         private string ReadUnparsedText(ref DynamicContext context)
         {
-            XsltRuntime runtime = context.Runtime
-                ?? throw new XsltException(
-                    "unparsed-text() can only be called while a transformation is running.");
+            string href = Text(0, ref context);
+            string? encoding = m_arguments.Length > 1 ? Text(1, ref context) : null;
 
-            return RequireXmlCharacters(runtime.LoadText(
-                Text(0, ref context),
-                m_arguments.Length > 1 ? Text(1, ref context) : null));
+            // A fragment names part of a document, and there is no part of a text file to name. Asked
+            // here rather than only of the resolver, so that a lent loader is not left to know it.
+            if (href.IndexOf('#') >= 0)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.FOUT1170,
+                    $"unparsed-text() was given '{href}', which carries a fragment identifier.");
+            }
+
+            if (context.Runtime is XsltRuntime runtime)
+            {
+                return RequireXmlCharacters(runtime.LoadText(href, encoding));
+            }
+
+            // No transformation behind this one, which is where a caller evaluating an expression on
+            // its own may lend a loader, as it may for doc().
+            return context.TextLoader is Func<string, string?, string> load
+                ? RequireXmlCharacters(ReadThrough(load, href, encoding))
+                : throw new XsltException(
+                    "unparsed-text() can only be called while a transformation is running, or where "
+                    + "the caller supplies a text loader.");
+        }
+
+        /// <summary>Reads through a loader the caller lent, in this function's own terms.</summary>
+        /// <remarks>
+        /// A resource that will not open is <c>FOUT1170</c> whoever went looking for it, so whatever
+        /// the loader raises becomes that. It matters more than it looks:
+        /// <c>fn:unparsed-text-available()</c> is defined as this function not raising, and answers by
+        /// catching what it does — so a loader failing in its own words is not a false answer but no
+        /// answer at all, the exception going past the catch and out of the transformation.
+        /// </remarks>
+        /// <param name="load">The loader.</param>
+        /// <param name="href">The reference as written.</param>
+        /// <param name="encoding">The encoding the call named, or null for none.</param>
+        private static string ReadThrough(
+            Func<string, string?, string> load, string href, string? encoding)
+        {
+            try
+            {
+                return load(href, encoding);
+            }
+            catch (Exception failed) when (failed is not XsltException)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.FOUT1170,
+                    $"unparsed-text() could not read '{href}': {failed.Message}",
+                    failed);
+            }
         }
 
         /// <summary>

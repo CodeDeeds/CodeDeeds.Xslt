@@ -206,6 +206,18 @@ namespace CodeDeeds.Xslt.Runtime
         public Func<string, string?, Model.XdmTree>? DocumentLoader;
 
         /// <summary>
+        /// What answers <c>unparsed-text()</c> where no transformation is running, or
+        /// <see langword="null"/> where nothing does. Given the reference as written and the encoding
+        /// the call named, or null for none.
+        /// </summary>
+        /// <remarks>
+        /// The companion of <see cref="DocumentLoader"/>, and there for the same reason: an
+        /// expression evaluated on its own has no transformation behind it and so no resolver of its
+        /// own, and a caller that means it to read something lends it one.
+        /// </remarks>
+        public Func<string, string?, string>? TextLoader;
+
+        /// <summary>
         /// The caller's collations where no transformation is running to carry them — a static expression
         /// at compile time, or an expression evaluated on its own — or <see langword="null"/> where there
         /// are none. A running transformation answers from its own options instead.

@@ -60,6 +60,13 @@ namespace CodeDeeds.Xslt.Conformance
         /// <summary>The file supplying the context item, relative to the catalog root.</summary>
         public string? ContextFile { get; private init; }
 
+        /// <summary>
+        /// Whether the environment declares the static base URI to be undefined, which is what
+        /// <c>uri="#UNDEFINED"</c> says. A relative reference then resolves against nothing and the
+        /// functions that take one have to say so rather than guessing at a base.
+        /// </summary>
+        public bool BaseUriIsUndefined { get; private init; }
+
         public List<(string Prefix, string Uri)> Namespaces { get; } = new();
 
         /// <summary>
@@ -138,6 +145,8 @@ namespace CodeDeeds.Xslt.Conformance
                 Name = (string?)element.Attribute("name"),
                 ContextFile = contextFile,
                 Unsupported = unsupported,
+                BaseUriIsUndefined = element.Elements(Ns_(element, "static-base-uri"))
+                    .Any(static declared => (string?)declared.Attribute("uri") == "#UNDEFINED"),
             };
 
             environment.Variables.AddRange(variables);

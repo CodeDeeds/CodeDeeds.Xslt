@@ -283,6 +283,18 @@ to `timezone-from-time`), `current-date`, `current-time`, `current-dateTime`, `i
 `dateTime`. Arithmetic between dates and durations is implemented, as are `format-date`, `format-time`,
 `format-dateTime` and the `adjust-*-to-timezone` family, all described below.
 
+**`fn:unparsed-text()` can be answered without a transformation.** It needs a resolver and a base URI,
+which a transformation brings and an expression evaluated on its own does not, so it used to refuse
+outright — which made nine QT3 tests fail for want of a file rather than for anything about the
+function. `DynamicContext.TextLoader` is what a caller lends it, the companion of the `DocumentLoader`
+that already answered `doc()` for a static expression at compile time. Whatever the loader raises
+becomes `FOUT1170`: `fn:unparsed-text-available()` is defined as this function not raising and answers
+by catching what it does, so a loader failing in its own words would be no answer at all rather than a
+false one.
+
+And `fn:unparsed-text(())` reads nothing and returns nothing, which `fn:json-doc(())` rests on: json-doc
+is parse-json over unparsed-text, so an empty argument has to travel the whole way.
+
 The functions that reach outside the expression: `doc` and `doc-available`, `unparsed-text` and
 `unparsed-text-available`, `base-uri`, `document-uri`, `static-base-uri` and `resolve-uri`. All of them go
 through `XsltOptions.DocumentResolver`, since reading a file as text is reading data by another name and a
@@ -2123,6 +2135,23 @@ reads one. `fn:xml-to-json()` writes the structure back out.
 
 This engine had the second direction before it had maps: `Xslt.TransformJson` has built exactly that structure
 since the JSON support landed, so `fn:json-to-xml()` is that builder given a name.
+
+**Both read the same options and now answer alike about a string.** `escape` and `fallback` are defined
+once and apply to either, and only the shape each builds differs — but `fn:parse-json()` reads through
+a different parser, and checked the two options without ever consulting them. An option that is accepted
+and then does nothing is worse than one that is refused, and it took the W3C suite to notice.
+
+What `escape` keeps is the escape a character arrived in, for the characters that would not survive
+being written into XML as themselves. Those are the ones XML cannot carry at all — the C0 controls
+other than tab, newline and return, and an unpaired surrogate — together with tab, newline and return
+themselves, which are valid and still at risk: attribute-value normalization turns each of them into a
+space, and a parser normalizes line endings in content. The backslash is doubled for a different reason,
+XML doing nothing to it but a lone one reading as the start of an escape that is not there.
+
+The quotation mark is not kept, and the distinction is worth naming because the obvious reading gets it
+wrong. JSON insists on escaping a quotation mark inside a string, so a rule of "keep what JSON needs
+escaped" looks right and passes most of the suite; it then fails `json-to-xml-escape-003`, which asks
+outright for `Data with " within it`. The rule is about what XML will carry, not about what JSON will.
 
 Three things are worth knowing about the mapping:
 

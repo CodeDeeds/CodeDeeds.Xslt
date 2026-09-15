@@ -405,7 +405,7 @@ namespace CodeDeeds.Xslt.Model
 
                 case JsonTokenType.String:
                 {
-                    string text = Represent(JsonText.Read(ref reader), settings, out bool escaped);
+                    string text = Represent(JsonText.Read(ref reader), settings.Escape, settings.Fallback, out bool escaped);
                     StartElement(builder, "string", key, settings);
 
                     if (escaped)
@@ -453,7 +453,7 @@ namespace CodeDeeds.Xslt.Model
                 return;
             }
 
-            string written = Represent(key, settings, out bool escaped);
+            string written = Represent(key, settings.Escape, settings.Fallback, out bool escaped);
 
             if (escaped)
             {
@@ -477,11 +477,12 @@ namespace CodeDeeds.Xslt.Model
         /// <param name="value">The string as JSON meant it, with the escapes already read.</param>
         /// <param name="settings">What the call said.</param>
         /// <param name="escaped">Set where something was left escaped.</param>
-        private static string Represent(string value, JsonToXmlOptions settings, out bool escaped)
+        internal static string Represent(
+            string value, bool escape, Func<string, string>? fallback, out bool escaped)
         {
             escaped = false;
 
-            if (!NeedsRepresenting(value, settings.Escape))
+            if (!NeedsRepresenting(value, escape))
             {
                 return value;
             }
@@ -491,15 +492,10 @@ namespace CodeDeeds.Xslt.Model
             for (int i = 0; i < value.Length; i++)
             {
                 char character = value[i];
+                bool keepEscaped = escape
+                    && (!IsXmlCharacter(value, i) || KeptEscaped(character));
 
-                if (character == '\\' && settings.Escape)
-                {
-                    result.Append("\\\\");
-                    escaped = true;
-                    continue;
-                }
-
-                if (IsXmlCharacter(value, i))
+                if (!keepEscaped && IsXmlCharacter(value, i))
                 {
                     result.Append(character);
                     continue;
@@ -507,17 +503,40 @@ namespace CodeDeeds.Xslt.Model
 
                 string sequence = EscapeOf(character);
 
-                if (settings.Escape)
+                if (keepEscaped)
                 {
                     result.Append(sequence);
                     escaped = true;
                     continue;
                 }
 
-                result.Append(settings.Fallback is null ? "\uFFFD" : settings.Fallback(sequence));
+                result.Append(fallback is null ? "\uFFFD" : fallback(sequence));
             }
 
             return result.ToString();
+        }
+
+        /// <summary>
+        /// Whether a character keeps the escape it arrived in, where <c>escape</c> was asked for.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Tab, newline and return are valid XML characters and are still at risk: attribute-value
+        /// normalization turns each of them into a space, and a parser normalizes line endings in
+        /// content. Keeping the escape is what carries them through unchanged. The backslash is here
+        /// for a different reason — XML does nothing to it, but a lone one in the result would read
+        /// as the start of an escape that is not there, so it is doubled.
+        /// </para>
+        /// <para>
+        /// The quotation mark is deliberately absent. JSON needs it escaped inside a string and XML
+        /// does not, and it is XML the result is being written into: the suite asks outright for
+        /// <c>Data with " within it</c> and not for the escape it was written with. The characters
+        /// XML cannot carry at all are handled beside this rather than in it.
+        /// </para>
+        /// </remarks>
+        private static bool KeptEscaped(char character)
+        {
+            return character is '\t' or '\n' or '\r' or '\\';
         }
 
         /// <summary>Whether a string holds anything the representation has to do something about.</summary>
@@ -525,7 +544,7 @@ namespace CodeDeeds.Xslt.Model
         {
             for (int i = 0; i < value.Length; i++)
             {
-                if (!IsXmlCharacter(value, i) || (escape && value[i] == '\\'))
+                if (!IsXmlCharacter(value, i) || (escape && KeptEscaped(value[i])))
                 {
                     return true;
                 }
@@ -554,10 +573,16 @@ namespace CodeDeeds.Xslt.Model
         /// <summary>The JSON escape sequence naming one character, in the shortest form JSON has for it.</summary>
         private static string EscapeOf(char character)
         {
+            // The five the grammar gives a two-character form. Written that way rather than as a
+            // \u0000-style escape because that is how they came in and how anything reading the
+            // result back will expect them.
             return character switch
             {
                 '\b' => "\\b",
                 '\f' => "\\f",
+                '\n' => "\\n",
+                '\r' => "\\r",
+                '\t' => "\\t",
                 '\\' => "\\\\",
                 _ => "\\u" + ((int)character).ToString("X4", System.Globalization.CultureInfo.InvariantCulture),
             };

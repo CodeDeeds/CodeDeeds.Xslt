@@ -205,8 +205,14 @@ namespace CodeDeeds.Xslt.XPath
                 return XPathValue.FromNodeSet(NodeSet.Singleton(tree, XdmTree.RootNode));
             }
 
+            // The same two options json-to-xml() reads, and for the same reason: a string is a string
+            // whichever of the two shapes it is being read into.
             return ParseJson(
-                text, liberal, Duplicates(options, "use-first", "reject", "use-first", "use-last", "use-any"));
+                text,
+                liberal,
+                Duplicates(options, "use-first", "reject", "use-first", "use-last", "use-any"),
+                Flag(options, "escape", false),
+                Fallback(options, ref context));
         }
 
         // ---- Options -----------------------------------------------------------------------------------
@@ -382,7 +388,12 @@ namespace CodeDeeds.Xslt.XPath
         /// means. The cost is that a map entry bound to <c>null</c> is indistinguishable from one bound to
         /// nothing, which <c>map:contains()</c> can still tell apart.
         /// </remarks>
-        private static XPathValue ParseJson(string text, bool liberal, string duplicates)
+        private static XPathValue ParseJson(
+            string text,
+            bool liberal,
+            string duplicates,
+            bool escape,
+            Func<string, string>? fallback)
         {
             JsonReaderOptions options = new JsonReaderOptions
             {
@@ -399,7 +410,7 @@ namespace CodeDeeds.Xslt.XPath
                     throw XsltErrors.Error(XsltErrorCode.FOJS0001, "The JSON text is empty.");
                 }
 
-                XPathValue value = ReadValue(ref reader, duplicates);
+                XPathValue value = ReadValue(ref reader, duplicates, escape, fallback);
 
                 if (reader.Read())
                 {
@@ -420,7 +431,11 @@ namespace CodeDeeds.Xslt.XPath
             }
         }
 
-        private static XPathValue ReadValue(ref Utf8JsonReader reader, string duplicates)
+        private static XPathValue ReadValue(
+            ref Utf8JsonReader reader,
+            string duplicates,
+            bool escape,
+            Func<string, string>? fallback)
         {
             switch (reader.TokenType)
             {
@@ -431,11 +446,15 @@ namespace CodeDeeds.Xslt.XPath
 
                     while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
                     {
-                        string key = JsonText.Read(ref reader);
+                        // The key is represented like any other string, which is also what decides
+                        // whether two of them are the same key: "\u000a" and "\n" name one character
+                        // and arrive at one text, so a map cannot hold both.
+                        string key = Represented(JsonText.Read(ref reader), escape, fallback);
                         reader.Read();
 
                         entries.Add(new KeyValuePair<XPathValue, XPathValue>(
-                            XPathValue.FromString(key), ReadValue(ref reader, duplicates)));
+                            XPathValue.FromString(key),
+                            ReadValue(ref reader, duplicates, escape, fallback)));
                     }
 
                     return XPathValue.FromMap(XdmMap.Build(entries, duplicates));
@@ -447,7 +466,7 @@ namespace CodeDeeds.Xslt.XPath
 
                     while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
                     {
-                        members.Add(ReadValue(ref reader, duplicates));
+                        members.Add(ReadValue(ref reader, duplicates, escape, fallback));
                     }
 
                     return XPathValue.FromArray(
@@ -455,7 +474,8 @@ namespace CodeDeeds.Xslt.XPath
                 }
 
                 case JsonTokenType.String:
-                    return XPathValue.FromString(JsonText.Read(ref reader));
+                    return XPathValue.FromString(
+                        Represented(JsonText.Read(ref reader), escape, fallback));
 
                 case JsonTokenType.Number:
                     // Every JSON number becomes an xs:double, whatever it looks like: JSON has one numeric
@@ -476,6 +496,20 @@ namespace CodeDeeds.Xslt.XPath
                     throw XsltErrors.Error(
                         XsltErrorCode.FOJS0001, $"'{reader.TokenType}' is not where a JSON value can start.");
             }
+        }
+
+        /// <summary>
+        /// The text a JSON string stands for, once the two options about escaping have had their say.
+        /// </summary>
+        /// <remarks>
+        /// <c>fn:parse-json()</c> and <c>fn:json-to-xml()</c> read the same options and are defined to
+        /// answer alike about a string; only the shape they build it into differs. So the rule lives in
+        /// one place and is asked here too, where these two used to diverge in silence: an escape
+        /// option handed to parse-json was read, checked, and then never consulted.
+        /// </remarks>
+        private static string Represented(string value, bool escape, Func<string, string>? fallback)
+        {
+            return JsonTreeBuilder.Represent(value, escape, fallback, out _);
         }
 
         private static double ReadNumber(ref Utf8JsonReader reader)

@@ -112,7 +112,7 @@ namespace CodeDeeds.Xslt.Conformance
 
                     try
                     {
-                        result = runner.Run(testCase, testSet);
+                        result = runner.Run(testCase, testSet, Path.GetDirectoryName(file));
                     }
                     catch (Exception exception)
                     {

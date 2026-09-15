@@ -41,6 +41,16 @@ namespace CodeDeeds.Xslt.Conformance
         /// </remarks>
         private readonly NameTable m_names = new();
 
+        /// <summary>
+        /// Where the test set being run lives, relative to the catalog, for the references inside it.
+        /// </summary>
+        /// <remarks>
+        /// A test writes unparsed-text('parse-json/data001.json'), which is relative to the file the
+        /// test is written in and not to the catalog: the same name means a different file in two
+        /// test sets, so the directory has to come along with the case.
+        /// </remarks>
+        private string? m_testSetDirectory;
+
         public Runner(Catalog catalog, XsltVersion version)
         {
             m_catalog = catalog;
@@ -98,8 +108,10 @@ namespace CodeDeeds.Xslt.Conformance
             "olson-timezone",
         };
 
-        public TestResult Run(XElement testCase, XElement testSet)
+        public TestResult Run(XElement testCase, XElement testSet, string? testSetDirectory = null)
         {
+            m_testSetDirectory = testSetDirectory;
+
             if (!IsApplicable(testCase, testSet, out string? why))
             {
                 return new TestResult(Outcome.Skipped, why!);
@@ -194,6 +206,7 @@ namespace CodeDeeds.Xslt.Conformance
                 {
                     Globals = globals,
                     Collations = SuiteCollations.Instance,
+                    TextLoader = environment?.BaseUriIsUndefined == true ? WithoutABase : ReadSuiteText,
                 };
 
                 value = compiled.Evaluate(ref context);
@@ -247,6 +260,11 @@ namespace CodeDeeds.Xslt.Conformance
                         }
 
                         break;
+
+                    case "remote_http":
+                        // This driver reads the suite's own files and nothing over the network.
+                        why = "needs a remote HTTP resource";
+                        return false;
 
                     case "xml-version":
                         if (satisfied && value.Contains("1.1", StringComparison.Ordinal))
@@ -504,6 +522,48 @@ namespace CodeDeeds.Xslt.Conformance
             }
 
             return globals;
+        }
+
+        /// <summary>
+        /// Refuses a relative reference where the environment declared the static base URI undefined.
+        /// </summary>
+        /// <remarks>
+        /// There is nothing to resolve against, so there is no file to look for; the engine turns
+        /// whatever a loader raises into FOUT1170, which is what the suite asks for here.
+        /// </remarks>
+        /// <param name="href">The reference as the test wrote it.</param>
+        /// <param name="encoding">The encoding the call named, which does not come into it.</param>
+        private string WithoutABase(string href, string? encoding)
+        {
+            return Uri.TryCreate(href, UriKind.Absolute, out _)
+                ? ReadSuiteText(href, encoding)
+                : throw new InvalidOperationException(
+                    $"'{href}' is relative and this environment declares no static base URI.");
+        }
+
+        /// <summary>
+        /// Answers <c>unparsed-text()</c> from the suite's own files, there being no transformation
+        /// running to bring a resolver of its own.
+        /// </summary>
+        /// <param name="href">The reference as the test wrote it, relative to its test set.</param>
+        /// <param name="encoding">The encoding the call named, or null for none.</param>
+        private string ReadSuiteText(string href, string? encoding)
+        {
+            // Nothing outside the suite directory is read, and nothing over the network: a test that
+            // wants either declares a dependency the driver skips on.
+            if (href.Contains("://", StringComparison.Ordinal))
+            {
+                throw new IOException($"This driver reads the suite's own files, and not '{href}'.");
+            }
+
+            string path = Path.GetFullPath(
+                Path.Combine(m_catalog.Root, m_testSetDirectory ?? string.Empty, href));
+
+            using StreamReader reader = encoding is null
+                ? new StreamReader(path)
+                : new StreamReader(path, System.Text.Encoding.GetEncoding(encoding));
+
+            return reader.ReadToEnd();
         }
 
         private XdmTree LoadContext(Environment? environment)
