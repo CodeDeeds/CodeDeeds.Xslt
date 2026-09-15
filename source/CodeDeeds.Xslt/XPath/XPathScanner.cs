@@ -479,6 +479,14 @@ namespace CodeDeeds.Xslt.XPath
                             continue;
                         }
 
+                        // A name and not merely name characters: $2 is no more a variable than 2 is
+                        // an element, a digit being unable to start an XML name. The scan below reads
+                        // name characters and would take it.
+                        if (index >= expression.Length || !IsNameStart(expression[index]))
+                        {
+                            throw Error(expression, start, "'$' must be followed by a variable name.");
+                        }
+
                         (string prefix, string local) = ScanQualifiedName(expression, ref index, allowWildcard: false);
                         if (local.Length == 0)
                         {
@@ -728,6 +736,18 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             ScanExponent(expression, ref index);
+
+            // A number and a name that follows it have to be separated, which is what makes '10div 3'
+            // a syntax error rather than ten divided by three. The grammar says so outright, and it
+            // has to: without the rule there is no telling '10div' from a number named 10div.
+            if (index < expression.Length && IsNameStart(expression[index]))
+            {
+                throw Error(
+                    expression,
+                    index,
+                    $"A number and the name after it need whitespace between them, and '" +
+                        expression[start..index] + "' runs straight into one");
+            }
 
             string lexical = expression[start..index];
             double value = double.Parse(lexical, NumberStyles.Float, CultureInfo.InvariantCulture);

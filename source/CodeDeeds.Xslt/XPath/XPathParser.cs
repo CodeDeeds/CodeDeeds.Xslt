@@ -503,6 +503,15 @@ namespace CodeDeeds.Xslt.XPath
                 {
                     Comparing = Comparing,
                 };
+
+                // XPath 1.0 chains these and 2.0 does not: there, ComparisonExpr has room for one
+                // operator and no more, so a second is a syntax error rather than a comparison of
+                // whatever the first one answered. '2 < 3 < 4' is ((2 < 3) < 4) under 1.0, which asks
+                // whether false is less than 4 and says yes; under 2.0 it says so.
+                if (!m_context.LegacySyntax)
+                {
+                    return left;
+                }
             }
         }
 
@@ -634,6 +643,15 @@ namespace CodeDeeds.Xslt.XPath
                 {
                     Comparing = Comparing,
                 };
+
+                // XPath 1.0 chains these and 2.0 does not: there, ComparisonExpr has room for one
+                // operator and no more, so a second is a syntax error rather than a comparison of
+                // whatever the first one answered. '2 < 3 < 4' is ((2 < 3) < 4) under 1.0, which asks
+                // whether false is less than 4 and says yes; under 2.0 it says so.
+                if (!m_context.LegacySyntax)
+                {
+                    return left;
+                }
             }
         }
 
