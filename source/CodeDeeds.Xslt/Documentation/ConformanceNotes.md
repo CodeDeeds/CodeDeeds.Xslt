@@ -43,7 +43,7 @@ Everything not listed below is implemented and verified against `System.Xml.Xsl.
 | `function-available('id')` | Reports `true`, since `id()` is there and answers for `xml:id` and for what a document type declaration types. It reported `false` while the function was absent altogether, which was what let a stylesheet fall back to `key()`. |
 | `element-available('xsl:result-document')` | Reports `true` even when no result resolver is configured, so a stylesheet that guards the instruction still writes one and is told plainly what to set if the caller permitted nothing: a destination is the caller's decision, taken after the stylesheet was compiled and changeable through `Xslt.With` without compiling it again. |
 | Indentation detail | Where exactly an indented result breaks lines is left to the processor by the specification, and this engine does not reproduce another's choices. It uses `\n` rather than `\r\n`, and indents uniformly where the framework's HTML writer suppresses breaks around some elements. Which elements are indented at all follows the specification: never one containing text. |
-| `xsl:vendor-url` | Reported as an empty string, which is the specified answer for a property the processor does not provide. No public address for this engine has been settled on, and inventing one would be worse than saying nothing. `xsl:vendor` reports `CodeDeeds`; both are constants in `SystemProperty`. |
+| `xsl:vendor-url` | Reported as `https://github.com/CodeDeeds/CodeDeeds.Xslt`, the repository this engine is published from. It was an empty string — the specified answer for a property the processor does not provide — for as long as there was no address to give. `xsl:vendor` reports `CodeDeeds`; both are constants in `SystemProperty`. |
 | `xsl:sort` without `lang` | Text is compared ordinally. Collating by the machine's current culture would make one stylesheet and one input produce different orderings on different machines; writing `lang` asks for a named language's collation and gets it. |
 | Document order between documents | A node-set may hold nodes from several documents — `document()` given several URIs, or a union of two loaded documents. The specification requires such a set to have a consistent order but leaves the order itself to the processor; this engine orders by the sequence documents were built in, so the nodes of each document stay together and earlier-loaded documents come first. It is stable within a transformation, which is what `<` and `>` on node-sets, and the string-value of a node-set, depend on. |
 
@@ -1140,7 +1140,8 @@ where a stylesheet can read them:
 | `xsl:xsd-version` | `1.0` | |
 | `xsl:vendor` | `CodeDeeds` | |
 | `xsl:product-name` | `CodeDeeds.Xslt` | |
-| `xsl:vendor-url`, `xsl:product-version` | *empty* | The specified answer for a property the processor does not provide. Neither an address nor a version has been settled on, and inventing one to satisfy a test would be worse than answering honestly. |
+| `xsl:vendor-url` | `https://github.com/CodeDeeds/CodeDeeds.Xslt` | The repository this engine is published from. |
+| `xsl:product-version` | *empty* | The specified answer for a property the processor does not provide. No version has been settled on, and inventing one to satisfy a test would be worse than answering honestly. |
 | `xsl:supports-serialization` | `yes` | |
 | `xsl:supports-backwards-compatibility` | `yes` | |
 | `xsl:supports-higher-order-functions` | `yes` | |
@@ -4721,9 +4722,9 @@ each module's declarations, which stops at an element the attribute removes: wha
 element is never read at all, which is the whole point of the attribute.
 
 `attr/use-when` went from 4 failures to 1 on the 3.0 run and from 6 to 1, with `fn/function-lookup`'s 003
-on the same line. The one left on each is 0106, which turns on `system-property('xsl:vendor-url')`
-containing `http`: this engine answers the empty string, there being no public address for it to give, and
-that is a choice recorded above rather than a rule it gets wrong.
+on the same line. The one left on each was 0106, which turns on `system-property('xsl:vendor-url')`
+containing `http`: this engine answered the empty string, there being no public address for it to give.
+There is one now — see *What address a processor gives for itself* — and the test passes.
 
 ### What a double really is when it is rounded
 
@@ -5986,6 +5987,26 @@ one level too deep and cut them off from the namespaces of the element they were
 The 3.0 run goes from 7,897 of 7,924 to **7,898** and the schema-aware run from 8,458 of 8,526 to
 **8,459**; the 2.0 and XPath runs are unmoved, the two backends agree test for test, and nothing that was
 passing fails.
+
+### What address a processor gives for itself
+
+`system-property('xsl:vendor-url')` answers `https://github.com/CodeDeeds/CodeDeeds.Xslt`. It answered an
+empty string before, which is the specified answer for a property a processor does not provide, on the
+reasoning that no public address had been settled on and inventing one would be worse than saying nothing.
+The reasoning stands; the premise does not, the repository being where this engine is published.
+
+`use-when-0106` is the test, and it is worth saying what it actually asks: whether the vendor URL contains
+`http`. That is not a rule any specification states — the property is implementation-defined, and an empty
+string is a conforming answer to it — so the test was left alone for as long as answering it would have
+meant making something up. Answering it with the address the project already has is not making anything
+up, and the empty string was never the better answer once there was a real one.
+
+`xsl:product-version` is still empty, and for the reason the other one no longer has: no version has been
+settled on.
+
+The 3.0 run goes from 7,898 of 7,924 to **7,899**, the 2.0 run from 5,595 of 5,622 to **5,596** and the
+schema-aware run from 8,459 of 8,526 to **8,460**; the XPath runs read no system properties and are
+unmoved, and nothing that was passing fails.
 
 ### The rest of 3.0
 

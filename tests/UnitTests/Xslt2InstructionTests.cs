@@ -4677,7 +4677,7 @@ namespace CodeDeeds.Xslt.UnitTests
             // Empty for a property no value has been settled on, which is the specified answer and better
             // than a fabricated one. The product version is the assembly's, in three parts, which is also a
             // package version for a stylesheet that sets one from the other.
-            Assert.AreEqual(string.Empty, PropertyOf("xsl:vendor-url"));
+            Assert.AreEqual("https://github.com/CodeDeeds/CodeDeeds.Xslt", PropertyOf("xsl:vendor-url"));
             StringAssert.Matches(
                 PropertyOf("xsl:product-version"),
                 new System.Text.RegularExpressions.Regex("^[0-9]+\\.[0-9]+\\.[0-9]+$"));

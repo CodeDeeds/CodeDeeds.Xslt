@@ -539,13 +539,13 @@ namespace CodeDeeds.Xslt.UnitTests
         public void AvailableSystemPropertiesNamesEveryPropertyTheProcessorAnswers()
         {
             // Each is a QName in the XSLT namespace, and system-property() answers for every one of them —
-            // the two it answers with an empty string included, which is the specified answer for a property
+            // the one it answers with an empty string included, which is the specified answer for a property
             // it does not provide a value for. The function is reached by its namespace as well as bare.
             const string Every =
                 "every $p in available-system-properties() satisfies ("
                 + "namespace-uri-from-QName($p) = 'http://www.w3.org/1999/XSL/Transform' and "
                 + "(system-property('xsl:' || local-name-from-QName($p)) != '' "
-                + "or local-name-from-QName($p) = ('product-version', 'vendor-url')))";
+                + "or local-name-from-QName($p) = 'product-version'))";
 
             // A 3.0 function, so the processor has to claim 3.0 for it to exist.
             string Writes30(string expression) => new Xslt(

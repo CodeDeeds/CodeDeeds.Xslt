@@ -547,11 +547,11 @@ namespace CodeDeeds.Xslt.Compiler
         /// The value reported for <c>xsl:vendor-url</c>.
         /// </summary>
         /// <remarks>
-        /// Empty because no public address for this engine has been settled on. An empty string is the
-        /// specified answer for a property the processor does not provide, so a stylesheet asking for it gets
-        /// a defined result rather than a fabricated one.
+        /// The repository, which is where this engine is published and so the address a stylesheet asking
+        /// who wrote it is asking for. It was reported as an empty string — the specified answer for a
+        /// property the processor does not provide — for as long as there was no address to give.
         /// </remarks>
-        public const string VendorUrl = "";
+        public const string VendorUrl = "https://github.com/CodeDeeds/CodeDeeds.Xslt";
 
         /// <summary>
         /// The version of XPath this engine offers, reported as <c>xsl:xpath-version</c>.
