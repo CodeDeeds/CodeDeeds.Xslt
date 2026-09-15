@@ -381,16 +381,6 @@ namespace CodeDeeds.Xslt.Compiler
     }
 
     /// <summary>
-    /// XSLT's <c>current()</c> function, giving the node the innermost <c>xsl:for-each</c> or template is
-    /// processing.
-    /// </summary>
-    /// <remarks>
-    /// Inside a predicate the context node is whichever candidate is being tested, so <c>.</c> cannot refer
-    /// back to the item being processed. That is what <c>current()</c> is for, and it is what makes a
-    /// cross-reference such as <c>codes/code[@id = current()/@ref]</c> expressible at all.
-    /// </remarks>
-
-    /// <summary>
     /// <c>fn:function-lookup</c>, which finds a function by a name and an arity that are values.
     /// </summary>
     /// <remarks>
@@ -1732,14 +1722,6 @@ namespace CodeDeeds.Xslt.Compiler
     }
 
     /// <summary>
-    /// <c>current()</c>: the item the innermost instruction is processing.
-    /// </summary>
-    /// <remarks>
-    /// An <em>item</em> since XSLT 2.0, not a node: inside <c>xsl:matching-substring</c> it is the piece of
-    /// text the branch was given, which no tree holds. Everywhere else it is still a node, so the node-set
-    /// form is the one that has to stay cheap.
-    /// </remarks>
-    /// <summary>
     /// A call to <c>unparsed-entity-uri()</c> or <c>unparsed-entity-public-id()</c>: what the document's
     /// type declaration declared the entity to be.
     /// </summary>
@@ -1843,6 +1825,14 @@ namespace CodeDeeds.Xslt.Compiler
         }
     }
 
+    /// <summary>
+    /// <c>current()</c>: the item the innermost instruction is processing.
+    /// </summary>
+    /// <remarks>
+    /// An <em>item</em> since XSLT 2.0, not a node: inside <c>xsl:matching-substring</c> it is the piece of
+    /// text the branch was given, which no tree holds. Everywhere else it is still a node, so the node-set
+    /// form is the one that has to stay cheap.
+    /// </remarks>
     internal sealed class CurrentExpr : Expr
     {
         private readonly XsltVersion m_version;
