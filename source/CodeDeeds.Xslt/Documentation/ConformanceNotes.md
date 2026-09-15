@@ -6077,18 +6077,43 @@ document order — where the parameter comes first.
 `version="2.0"`, so there is no forwards-compatible processing to carry the unknown element, and an XSLT
 element a 2.0 processor does not define is `XTSE0010`. Both pass on the 3.0 run, where the elements exist.
 
-**An entry point this API cannot take apart.** `strip-space-023` supplies `/a/b/text()` as the initial
-match selection over a document whose whitespace is stripped, so the selection is empty, so there is no
-global context item, so `select="."` in a global variable is `XPDY0002`. XSLT 3.0 makes the initial match
-selection and the global context item two values a caller supplies independently; this engine takes one
-source document and derives both from it, which is the legacy shape the specification describes and
-allows — and which derives the global context item from the document rather than from the selection.
-
 **And one that reaches no error at all.** `error-0640o-2` declares two static parameters whose defaults
 name each other, supplies the first from outside, and wants `XPST0008` for the forward reference in the
 default that was replaced. `decl/static`'s 003a says of the same shape that such a reference "is not an
 error anymore" once a value has been supplied. One of the two has to be wrong, and the engine takes the
 one that says a replaced default is not analysed.
+
+### What a global reads as the context item
+
+`XsltOptions.GlobalContextItem`, an XPath expression, and it is a caller's to say. XSLT 3.0 §2.3 makes
+this and the initial match selection two values supplied independently: one is what templates are first
+applied to and the other is what a global declaration reads as `.`, and nothing ties them together. The
+specification's own note says the two "can in principle be completely independent of each other", and
+that the relationship earlier versions had — one node supplied, its tree's root used for the globals — is
+"likely to be found for compatibility reasons in a transformation API designed to work with earlier
+versions". This API had exactly that and no way past it.
+
+A caller who says nothing still gets it: the source document, as before. What is new is being able to say
+something else, and in particular to say *nothing at all* — `()` selects no item, and then a global that
+reads the context item is `XPDY0002` rather than quietly reading the document. That is the one thing no
+arrangement of the old API could express.
+
+The expression is evaluated once, before any global, with the source document as its context item where
+there is one. It must give one item or none: more than one is `XTTE0590` against the `item()` that
+`xsl:global-context-item` requires when it says nothing else — and where it does say something, the type
+is now held up against the item the caller supplied rather than against the source document, which is the
+point of being able to supply one. The item need not be a node and need not come from the source document
+at all.
+
+`strip-space-023` is the test that wanted this, on both runs. Its environment names `/a/b/text()` as the
+initial context node and the stylesheet strips whitespace, so by the time the tree exists the path selects
+nothing; there is no context node, and `select="."` in a global variable is `XPDY0002`. The driver hands
+the catalog's `select` over as both values, which is what the catalog describes it as: "a path expression
+to select the initial context node within the document", the one node earlier versions gave both jobs to.
+
+The 3.0 run goes from 7,900 of 7,924 to **7,901**, the 2.0 run from 5,596 of 5,622 to **5,597** and the
+schema-aware run from 8,461 of 8,526 to **8,462**; the XPath runs read no stylesheet options and are
+unmoved, the two backends agree test for test, and nothing that was passing fails.
 
 ### The rest of 3.0
 

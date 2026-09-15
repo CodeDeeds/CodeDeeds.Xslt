@@ -463,6 +463,13 @@ namespace CodeDeeds.Xslt.Conformance
                     InitialMatchSelection = (string?)test.Element(Xslt30Catalog.Ns + "initial-mode")?.Attribute("select")
                         ?? environment?.SourceSelect,
 
+                    // And what a global reads as the context item. The catalog's select on a source is
+                    // "a path expression to select the initial context node within the document", which is
+                    // the one node earlier versions of XSLT gave both jobs to — so it is supplied as both.
+                    // A test whose selection is empty has no initial context node, and then a global that
+                    // reads one is an error rather than reading the document instead.
+                    GlobalContextItem = environment?.SourceSelect,
+
                     // Where the input came from, which is not where the stylesheet is.
                     InputUri = SourcePath(environment, directory) is string path && File.Exists(path)
                         ? new Uri(path).AbsoluteUri

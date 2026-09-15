@@ -592,7 +592,7 @@ tree** for the substring a branch processes, there being no atomic context item 
 written; there is one now, and a path written in a branch no longer walks a tree that was never in the
 stylesheet.
 
-The largest clusters behind the current **5,596 of 5,622, 99.5%**, and no one cause dominates:
+The largest clusters behind the current **5,597 of 5,622, 99.6%**, and no one cause dominates:
 
 | | |
 |---|---|
@@ -613,7 +613,7 @@ The largest skip left is not a failure either: **6,518 are XSLT 3.0 tests**, rea
 
 ## What the 3.0 run says
 
-That opt-in run measures the XSLT 3.0 half at **7,900 of 7,924, 99.7%**, from 4,994 of 6,427 when it was first
+That opt-in run measures the XSLT 3.0 half at **7,901 of 7,924, 99.7%**, from 4,994 of 6,427 when it was first
 taken. It reads more tests than it did as well as passing more of them, which is the part worth reading twice:
 opening a feature the suite writes *around* stops whole files being skipped, so the denominator moves too — and
 the percentage can fall while the work goes forward, which is why the two numbers are always given together.

@@ -32,6 +32,9 @@ namespace CodeDeeds.Xslt.Runtime
         /// <summary>Whether xsl:global-context-item said the globals are to see no context item.</summary>
         private bool m_globalContextAbsent;
 
+        /// <summary>The item the caller supplied as the global context item, where one was.</summary>
+        private XPathValue? m_globalContextItem;
+
         /// <summary>A global that has not been evaluated yet.</summary>
         private const byte GlobalPending = 0;
 
@@ -591,17 +594,15 @@ namespace CodeDeeds.Xslt.Runtime
 
             m_globalState[slot] = GlobalEvaluating;
 
-            // Globals see no template's local variables, and their context item is the global one: the root
-            // of the source document, or nothing where there is no source document — an xsl:copy in one is
-            // then XTTE0945, as it is in a template reached with no focus. A library's globals have none
-            // either way: the global context item is the top-level package's (§2.3.2). They may declare local variables
-            // of their own, though, so the frame is the one their body was compiled against rather than
-            // none at all.
+            // Globals see no template's local variables, and their context item is the global one: what
+            // the caller supplied, or the root of the source document, or nothing — an xsl:copy with
+            // nothing is then XTTE0945, as it is in a template reached with no focus. A library's globals
+            // have none either way: the global context item is the top-level package's (§2.3.2). They may
+            // declare local variables of their own, though, so the frame is the one their body was
+            // compiled against rather than none at all.
             DynamicContext globalContext = new DynamicContext(
                 InputTree,
-                HasSourceDocument && !global.InLibrary && !m_globalContextAbsent
-                    ? XdmTree.RootNode
-                    : DynamicContext.NotANode,
+                DynamicContext.NotANode,
                 GetFingerprintMap(InputTree))
             {
                 Globals = m_globals,
@@ -610,6 +611,11 @@ namespace CodeDeeds.Xslt.Runtime
                     ? Array.Empty<XPathValue>()
                     : new XPathValue[global.FrameSize],
             };
+
+            if (!global.InLibrary && GlobalContextValue is XPathValue focus)
+            {
+                globalContext = globalContext.WithItem(focus);
+            }
 
             m_globals[slot] = VariableInstruction.Evaluate(
                 global.Select,
@@ -2870,6 +2876,76 @@ namespace CodeDeeds.Xslt.Runtime
         /// template ones because a caller can act on these and cannot act on those — this is about what was
         /// handed to the transformation.
         /// </remarks>
+        /// <summary>
+        /// The item global variables and parameters read as the context item, or null where there is
+        /// none.
+        /// </summary>
+        /// <remarks>
+        /// Three answers in order of precedence: what <c>xsl:global-context-item</c> said was absent, what
+        /// the caller supplied, and the source document. The last is the relationship every earlier
+        /// version of XSLT had between the one node a caller handed over and what a global read, and it is
+        /// still what a caller who says nothing about it gets.
+        /// </remarks>
+        private XPathValue? GlobalContextValue
+        {
+            get
+            {
+                if (m_globalContextAbsent)
+                {
+                    return null;
+                }
+
+                if (m_globalContextItem is XPathValue supplied)
+                {
+                    return supplied;
+                }
+
+                return HasSourceDocument
+                    ? XPathValue.FromNode(InputTree, XdmTree.RootNode)
+                    : null;
+            }
+        }
+
+        /// <summary>
+        /// Settles the global context item the caller asked for, before a global can read one.
+        /// </summary>
+        /// <remarks>
+        /// An expression rather than a value, for the reason <see cref="XsltOptions.InitialMatchSelection"/>
+        /// is one: a caller outside the engine has no way to build an item of the data model to hand over.
+        /// Nothing selected is a caller saying there is to be none, which is a thing only this can say —
+        /// leaving it out asks for the source document instead.
+        /// </remarks>
+        /// <param name="context">The context to evaluate it in, which is the source document's.</param>
+        private void SettleSuppliedGlobalContextItem(ref DynamicContext context)
+        {
+            if (m_options.GlobalContextItem is not string expression)
+            {
+                return;
+            }
+
+            Expr compiled = CompileCallerExpression(expression, "global context item");
+            context.FingerprintMap = GetFingerprintMap(context.Tree);
+
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(compiled.Evaluate(ref context));
+
+            if (items.Count > 1)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTTE0590,
+                    $"The global context item was given as '{expression}', which selected {items.Count} "
+                    + "items. It is one item or none: a global reads it as the context item, and a "
+                    + "context item is a single item.");
+            }
+
+            if (items.Count == 0)
+            {
+                m_globalContextAbsent = true;
+                return;
+            }
+
+            m_globalContextItem = items[0];
+        }
+
         private void ApplyGlobalContextItem(ref DynamicContext context)
         {
             ContextItemDeclaration declared = m_stylesheet.GlobalContextItem;
@@ -2892,14 +2968,14 @@ namespace CodeDeeds.Xslt.Runtime
                 return;
             }
 
-            if (!HasSourceDocument)
+            if (GlobalContextValue is not XPathValue item)
             {
                 if (declared.Use == ContextItemUse.Required)
                 {
                     throw XsltErrors.Error(
                         XsltErrorCode.XTDE3086,
-                        "The stylesheet declares that it needs a source document, and the transformation was "
-                        + "started without one.");
+                        "The stylesheet declares that it needs a global context item, and the "
+                        + "transformation was started without one.");
                 }
 
                 return;
@@ -2909,10 +2985,7 @@ namespace CodeDeeds.Xslt.Runtime
             {
                 // XTTE0590 and not XTTE3086: the mismatch is between the type the stylesheet declared and
                 // what the caller handed it, which is the caller's mistake and reported to the caller.
-                XdmTypeConversion.Apply(
-                    XPathValue.FromNode(InputTree, XdmTree.RootNode),
-                    declared.Type,
-                    XsltErrorCode.XTTE0590);
+                XdmTypeConversion.Apply(item, declared.Type, XsltErrorCode.XTTE0590);
             }
         }
 
@@ -3209,6 +3282,11 @@ namespace CodeDeeds.Xslt.Runtime
                         : AccumulatorSet.None);
             }
 
+            // What the caller said a global reads as the context item, before the stylesheet's own
+            // declaration is held up against it: the declaration is about the item the transformation was
+            // given, and this is where that item is settled.
+            SettleSuppliedGlobalContextItem(ref context);
+
             // Checked before the globals are forced, because what the globals are allowed to read is exactly
             // what this settles: a stylesheet declaring use="absent" is one whose globals cannot name the
             // source document, and one declaring a type is entitled to be told before it starts.
@@ -3497,7 +3575,29 @@ namespace CodeDeeds.Xslt.Runtime
         private void ApplyToInitialSelection(string selection, ref DynamicContext context)
         {
             int mode = StartingMode();
+            Expr compiled = CompileCallerExpression(selection, "initial match selection");
 
+            // Compiling may have given a name its first slot, which the mapping the context carries does
+            // not reach; the runtime rebuilds its copy when it is behind.
+            context.FingerprintMap = GetFingerprintMap(context.Tree);
+
+            ApplyToItems(XdmSequence.Items(compiled.Evaluate(ref context)), mode, ref context);
+        }
+
+        /// <summary>
+        /// Compiles an XPath expression the caller wrote rather than the stylesheet.
+        /// </summary>
+        /// <remarks>
+        /// Against the principal module — its namespaces, functions and decimal formats — because that is
+        /// the only scope a caller could have written against. The collation is the code point one and not
+        /// whatever the stylesheet put in scope: there is no point in an expression outside the stylesheet
+        /// for a <c>default-collation</c> to have been declared at. The caller's own collations are there,
+        /// though, since the caller wrote it.
+        /// </remarks>
+        /// <param name="expression">The expression as written.</param>
+        /// <param name="what">What it was supplied as, for the message where it will not parse.</param>
+        private Expr CompileCallerExpression(string expression, string what)
+        {
             DynamicStaticContext scope = new DynamicStaticContext(
                 m_stylesheet.Names,
                 m_stylesheet.Version,
@@ -3507,34 +3607,21 @@ namespace CodeDeeds.Xslt.Runtime
                 new List<ExpandedName>(),
                 m_stylesheet.Functions,
                 m_stylesheet.DecimalFormats,
-
-                // The code point collation, and not whatever the stylesheet put in scope: this expression
-                // was written by the caller rather than in the stylesheet, so there is no point in it for a
-                // default-collation to have been declared at. The caller's own collations, though, since
-                // the caller wrote it.
                 Collation.CodepointUri,
                 m_options.CollationResolver,
                 m_stylesheet.Schemas);
 
-            Expr compiled;
-
             try
             {
-                compiled = XPathParser.Parse(selection, scope);
+                return XPathParser.Parse(expression, scope);
             }
             catch (XsltException failed) when (failed.Code is null)
             {
                 throw XsltErrors.Error(
                     XsltErrorCode.XPST0003,
-                    $"The initial match selection '{selection}' is not an expression: {failed.Message}",
+                    $"The {what} '{expression}' is not an expression: {failed.Message}",
                     failed);
             }
-
-            // Compiling may have given a name its first slot, which the mapping the context carries does
-            // not reach; the runtime rebuilds its copy when it is behind.
-            context.FingerprintMap = GetFingerprintMap(context.Tree);
-
-            ApplyToItems(XdmSequence.Items(compiled.Evaluate(ref context)), mode, ref context);
         }
 
         /// <summary>

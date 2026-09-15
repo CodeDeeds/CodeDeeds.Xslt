@@ -17,13 +17,13 @@ Conformance as last measured, on 15 September 2026, against the W3C suites (see 
 
 | Suite | Result |
 | --- | --- |
-| XSLT 3.0 test suite, 3.0 processor | 7,900 of 7,924, 99.7% |
-| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,596 of 5,622, 99.5% |
+| XSLT 3.0 test suite, 3.0 processor | 7,901 of 7,924, 99.7% |
+| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,597 of 5,622, 99.6% |
 | QT3 (XPath), 3.1 | 17,592 of 17,629, 99.8% |
 | QT3 (XPath), 2.0 | 14,144 of 14,173, 99.8% |
 
 The 2,900 streaming tests are skipped by design. The 686 schema-aware tests are read only by the driver's
-opt-in `--schema` run, which stands at 8,461 of 8,526 (99.2%), the same on both backends; the figures
+opt-in `--schema` run, which stands at 8,462 of 8,526 (99.2%), the same on both backends; the figures
 above are the run without it.
 
 ## Not implemented, and not planned
@@ -90,7 +90,7 @@ above are the run without it.
 | `XsltOptions.OmitXmlDeclaration` | `null` follows the stylesheet, `true` suppresses the declaration, `false` forces it. `Xslt.With` gives a differently configured instance without compiling again. |
 | `Xslt.OutputMethod`, `OutputEncoding`, `OutputMediaType` | What the stylesheet's `xsl:output` settled, for a caller setting a `Content-Type` header. |
 | `XsltOptions.BaseUri`, `InputUri`, `BaseOutputUri` | Where the stylesheet, the input and the principal result are, which relative references resolve against. |
-| `XsltOptions.InitialTemplate`, `InitialMode`, `InitialMatchSelection`, `InitialFunction`, `FunctionArguments` | Where the transformation starts, which XSLT 3.0 gives three answers to. With none of them it processes the source document and the patterns decide. `InitialTemplate` calls a named template; `InitialMode` says which mode templates are applied in and `InitialMatchSelection` an expression whose items they are applied to in place of the document; `InitialFunction` calls a stylesheet function with `FunctionArguments` and makes what it returns the whole result. A template or function must be public, a package's private component being no way into it, and a name that is not there is `XTDE0040` for a template and `XTDE0041` for a function. `TemplateParameters` and `TunnelParameters` are the arguments of the call a template entry point makes. |
+| `XsltOptions.InitialTemplate`, `InitialMode`, `InitialMatchSelection`, `InitialFunction`, `FunctionArguments`, `GlobalContextItem` | Where the transformation starts, which XSLT 3.0 gives three answers to. With none of them it processes the source document and the patterns decide. `InitialTemplate` calls a named template; `InitialMode` says which mode templates are applied in and `InitialMatchSelection` an expression whose items they are applied to in place of the document; `InitialFunction` calls a stylesheet function with `FunctionArguments` and makes what it returns the whole result. A template or function must be public, a package's private component being no way into it, and a name that is not there is `XTDE0040` for a template and `XTDE0041` for a function. `TemplateParameters` and `TunnelParameters` are the arguments of the call a template entry point makes. `GlobalContextItem` is an expression for what global variables and parameters read as the context item, which XSLT 3.0 makes a value of its own rather than a consequence of the others; a caller who says nothing gets the source document, as every earlier version had it, and `()` says there is to be none. |
 | `XsltOptions.DynamicEvaluation` | `xsl:evaluate` is on by default and can be switched off, which makes `element-available('xsl:evaluate')` false. |
 | `XsltOptions.EnvironmentVariablesEnabled` | Off by default, so `environment-variable()` and `available-environment-variables()` answer nothing. On, they read the process's environment as it stood when the transformation first asked. |
 | `XsltOptions.CollationResolver` | Collations of the caller's own, as `XsltCollation` subclasses under URIs of the caller's choosing, for `xsl:sort`, `xsl:for-each-group`, `xsl:key`, `default-collation` and every function that takes a collation. The three collations the specification defines are provided without one (see *Collations* under Partly implemented for the UCA parameters); any other URI is `FOCH0002`. A caller's collation that makes no key cannot group, key or `distinct-values()`, and one that does not match substrings cannot `contains()`; both are `FOCH0004`. |

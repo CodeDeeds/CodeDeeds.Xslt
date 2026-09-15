@@ -267,5 +267,108 @@ namespace CodeDeeds.Xslt.UnitTests
                         implemented: XsltVersion.V20,
                         declared: "2.0")).Code);
         }
+
+        // ---- the global context item ---------------------------------------------------------------
+
+        /// <summary>Runs a 3.0 stylesheet over one document, saying what a global reads as the context item.</summary>
+        private static string Globally(string body, string? globalContextItem, string? selection = null)
+        {
+            const string Source = "<a><b>bee</b><c>see</c></a>";
+
+            string stylesheet =
+                $"<xsl:stylesheet version=\"3.0\" {Xsl} expand-text=\"yes\">{body}</xsl:stylesheet>";
+
+            XsltOptions For(XsltBackend backend) => new XsltOptions
+            {
+                Backend = backend,
+                OmitXmlDeclaration = true,
+                Version = XsltVersion.V30,
+                InitialTemplate = "main",
+                InitialMatchSelection = selection,
+                GlobalContextItem = globalContextItem,
+            };
+
+            string interpreted = new Xslt(stylesheet, For(XsltBackend.Interpreted)).TransformXml(Source);
+            string compiled = new Xslt(stylesheet, For(XsltBackend.Compiled)).TransformXml(Source);
+
+            Assert.AreEqual(interpreted, compiled, "the compiled backend disagreed with the interpreter");
+            return interpreted;
+        }
+
+        private const string ReadsIt =
+            "<xsl:variable name=\"seen\" select=\".\"/>"
+            + "<xsl:template name=\"main\"><out>{name($seen)}|{$seen}</out></xsl:template>";
+
+        [TestMethod]
+        public void TheCallerMaySayWhatAGlobalReadsAsTheContextItem()
+        {
+            // §2.3 makes the global context item and the initial match selection two values a caller
+            // supplies independently. Earlier versions had one node doing both jobs, and a caller who says
+            // nothing still gets that: the source document.
+            Assert.AreEqual("<out>|beesee</out>", Globally(ReadsIt, null));
+            Assert.AreEqual("<out>b|bee</out>", Globally(ReadsIt, "/a/b"));
+
+            // It need not be a node, and it need not come from the source document at all.
+            Assert.AreEqual(
+                "<out>17</out>",
+                Globally(
+                    "<xsl:variable name=\"seen\" select=\".\"/>"
+                    + "<xsl:template name=\"main\"><out>{$seen}</out></xsl:template>",
+                    "17"));
+        }
+
+        [TestMethod]
+        public void SelectingNothingIsHowACallerSaysThereIsNone()
+        {
+            // Which is the one thing only this can say: leaving it out asks for the source document, and
+            // there is no other way to hand a transformation a document and no global context item.
+            XsltException error = Assert.ThrowsExactly<XsltException>(
+                () => Globally(ReadsIt, "()"));
+
+            Assert.AreEqual("XPDY0002", error.Code);
+
+            // A selection that finds nothing says the same thing, which is what makes a caller able to
+            // hand over a node chosen by a path that the stripping of whitespace has removed.
+            error = Assert.ThrowsExactly<XsltException>(() => Globally(ReadsIt, "/a/nowhere"));
+
+            Assert.AreEqual("XPDY0002", error.Code);
+        }
+
+        [TestMethod]
+        public void ItIsOneItemAndTheStylesheetMaySayWhichKind()
+        {
+            // A context item is a single item, so a selection of two is the caller's mistake against the
+            // item() that xsl:global-context-item requires when it says nothing else.
+            XsltException error = Assert.ThrowsExactly<XsltException>(
+                () => Globally(ReadsIt, "/a/*"));
+
+            Assert.AreEqual("XTTE0590", error.Code);
+
+            // And a declared type is held up against the item the caller supplied rather than against the
+            // source document, which is the point of being able to supply one.
+            Assert.AreEqual(
+                "<out>b|bee</out>",
+                Globally("<xsl:global-context-item as=\"element(b)\"/>" + ReadsIt, "/a/b"));
+
+            error = Assert.ThrowsExactly<XsltException>(
+                () => Globally("<xsl:global-context-item as=\"element(b)\"/>" + ReadsIt, "/a/c"));
+
+            Assert.AreEqual("XTTE0590", error.Code);
+        }
+
+        [TestMethod]
+        public void TheSelectionTemplatesStartOnIsADifferentValue()
+        {
+            // The two are supplied separately and neither follows the other: templates are applied to the
+            // c element while a global reads the b element.
+            Assert.AreEqual(
+                "<out>b|bee</out><got>c</got>",
+                Globally(
+                    "<xsl:variable name=\"seen\" select=\".\"/>"
+                    + "<xsl:template name=\"main\"><out>{name($seen)}|{$seen}</out>"
+                    + "<xsl:apply-templates select=\"/a/c\"/></xsl:template>"
+                    + "<xsl:template match=\"c\"><got>{name()}</got></xsl:template>",
+                    "/a/b"));
+        }
     }
 }

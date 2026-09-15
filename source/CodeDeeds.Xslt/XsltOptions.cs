@@ -497,6 +497,28 @@ namespace CodeDeeds.Xslt
         public string? InitialMatchSelection { get; init; }
 
         /// <summary>
+        /// Gets the global context item: an XPath expression whose value global variables and parameters
+        /// see as the context item, or <see langword="null"/> for the source document.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// XSLT 3.0 makes this and <see cref="InitialMatchSelection"/> two values a caller supplies
+        /// independently (§2.3): one is what templates are first applied to and the other is what a global
+        /// declaration reads as <c>.</c>, and nothing ties them together. Earlier versions had one node
+        /// serving both, and a caller who says nothing here still gets that — the source document.
+        /// </para>
+        /// <para>
+        /// The expression is evaluated once, before any global, with the source document as its context
+        /// item where there is one and in the namespaces declared on the stylesheet's outermost element.
+        /// It must yield one item or none: <c>()</c> is how a caller says there is to be no global
+        /// context item at all, which makes a global that reads one <c>XPDY0002</c>, and more than one
+        /// item is <c>XTTE0590</c> against the <c>item()</c> that <c>xsl:global-context-item</c> requires
+        /// by default.
+        /// </para>
+        /// </remarks>
+        public string? GlobalContextItem { get; init; }
+
+        /// <summary>
         /// Gets the name of a stylesheet function to call as the whole of the transformation, or
         /// <see langword="null"/> to start in one of the other ways.
         /// </summary>
@@ -565,6 +587,7 @@ namespace CodeDeeds.Xslt
                 InitialTemplate = InitialTemplate,
                 InitialMode = InitialMode,
                 InitialMatchSelection = InitialMatchSelection,
+                GlobalContextItem = GlobalContextItem,
             };
         }
     }
