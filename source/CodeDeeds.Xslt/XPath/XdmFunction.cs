@@ -516,7 +516,9 @@ namespace CodeDeeds.Xslt.XPath
         /// <inheritdoc/>
         internal override XPathValue Invoke(XPathValue[] arguments, ref DynamicContext context)
         {
-            return m_array.Get(XdmSequence.RequireSingleItem(arguments[0], "an array position").ToInteger());
+            // An array called as a function is an array looked up by position, and a position is an
+            // xs:integer: [1,2,3](1.1) is a type error rather than a question about the first member.
+            return m_array.Get(MapArrayFunctionExpr.AsPosition(arguments[0]));
         }
     }
     /// <summary>

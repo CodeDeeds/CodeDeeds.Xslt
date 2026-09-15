@@ -203,6 +203,12 @@ namespace CodeDeeds.Xslt.XPath
         internal Collation? DefaultCollation { get; set; }
 
         /// <summary>
+        /// Gets or sets the base URI the call was written at, which a collation named by a relative
+        /// URI is resolved against. Null where the caller named none.
+        /// </summary>
+        internal string? StaticBaseUri { get; set; }
+
+        /// <summary>
         /// Creates a call to a named function, validating that the name is known and the arity is legal.
         /// </summary>
         /// <param name="name">The function name as written.</param>
@@ -292,10 +298,28 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>
         /// Finds the collation named by a third argument, or the default one where there is none.
         /// </summary>
+        /// <summary>A collation URI made absolute against the base URI the call was written at.</summary>
+        /// <remarks>
+        /// A collation is named by a URI and a URI in an expression is relative to where the expression
+        /// stands, so <c>collation/codepoint</c> written at
+        /// <c>http://www.w3.org/2005/xpath-functions/</c> is the code point collation and the same
+        /// three words written anywhere else name nothing.
+        /// </remarks>
+        /// <param name="uri">The collation URI as the call wrote it.</param>
+        private string Absolute(string uri)
+        {
+            return StaticBaseUri is string written
+                && Uri.TryCreate(written, UriKind.Absolute, out Uri? baseUri)
+                && Uri.TryCreate(baseUri, uri, out Uri? resolved)
+                    ? resolved.ToString()
+                    : uri;
+        }
+
         private Collation Collation(ref DynamicContext context)
         {
             return m_arguments.Length > 2
-                ? XPath.Collation.Resolve(m_arguments[2].Evaluate(ref context).ToStringValue(), ref context)
+                ? XPath.Collation.Resolve(
+                    Absolute(m_arguments[2].Evaluate(ref context).ToStringValue()), ref context)
                 : DefaultCollation ?? XPath.Collation.Codepoint;
         }
 

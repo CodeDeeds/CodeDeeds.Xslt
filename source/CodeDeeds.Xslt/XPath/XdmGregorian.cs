@@ -170,15 +170,55 @@ namespace CodeDeeds.Xslt.XPath
             return body + FormatTimezone();
         }
 
-        /// <summary>Whether two gregorian values are the same type and the same parts.</summary>
+        /// <summary>Whether two gregorian values are the same type and denote the same moment.</summary>
+        /// <remarks>
+        /// <para>
+        /// Not the same parts: a timezone moves what the parts denote, and XML Schema orders all five
+        /// of these types by filling the fields they do not carry from a fixed reference date and
+        /// comparing the moments that result. So <c>---30-12:00</c> and <c>---31+12:00</c> are the
+        /// same day seen from two sides of the world, twelve hours either way of the same midnight,
+        /// and comparing their day numbers would call them a day apart.
+        /// </para>
+        /// <para>
+        /// The reference is 1972-12-31T00:00:00, each part the value carries replacing the one in it.
+        /// 1972 is a leap year, which is what lets <c>--02-29</c> be a gMonthDay at all.
+        /// </para>
+        /// </remarks>
         /// <param name="other">The value to compare with.</param>
         public bool SameValue(XdmGregorian other)
         {
-            return Name == other.Name
-                && Year == other.Year
-                && Month == other.Month
-                && Day == other.Day
-                && Offset == other.Offset;
+            return Name == other.Name && Moment() == other.Moment();
+        }
+
+        /// <summary>The moment this value denotes, in ticks from the reference date at UTC.</summary>
+        internal long Moment()
+        {
+            // A year of its own is kept apart from the reference one so that a year outside what
+            // DateTime holds still counts: the arithmetic is days and not a calendar date.
+            int year = Year ?? 1972;
+            int month = Month ?? 12;
+            int day = Day ?? 31;
+
+            long days = DaysFromCivil(year, month, day);
+            return (days * TimeSpan.TicksPerDay) - (Offset ?? TimeSpan.Zero).Ticks;
+        }
+
+        /// <summary>
+        /// The day a date falls on, counted from 1970-01-01 in the proleptic Gregorian calendar.
+        /// </summary>
+        /// <remarks>
+        /// Howard Hinnant's algorithm, as <see cref="XdmDateTime"/> uses for the same reason: a year
+        /// here may be one no <see cref="DateTime"/> holds, and two of them still have to be ordered.
+        /// </remarks>
+        private static long DaysFromCivil(int year, int month, int day)
+        {
+            long shifted = year - (month <= 2 ? 1L : 0L);
+            long era = shifted >= 0 ? shifted / 400 : ((shifted - 399) / 400);
+            long yearOfEra = shifted - (era * 400);
+            long dayOfYear = (((153 * (month + (month > 2 ? -3 : 9))) + 2) / 5) + day - 1;
+            long dayOfEra = (yearOfEra * 365) + (yearOfEra / 4) - (yearOfEra / 100) + dayOfYear;
+
+            return (era * 146_097L) + dayOfEra - 719_468L;
         }
 
         private string FormatYear()

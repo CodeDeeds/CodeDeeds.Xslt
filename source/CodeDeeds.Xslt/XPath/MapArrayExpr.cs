@@ -297,7 +297,9 @@ namespace CodeDeeds.Xslt.XPath
                     + $"an {key.TypeCode}.");
             }
 
-            return key.ToInteger();
+            // An array is looked up by position, and a position is an xs:integer: [1,2,3](1.1) is a
+            // type error rather than a question about the first member.
+            return MapArrayFunctionExpr.AsPosition(key);
         }
     }
 }

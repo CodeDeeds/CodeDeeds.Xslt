@@ -2266,6 +2266,10 @@ namespace CodeDeeds.Xslt.XPath
                     case JsonFunctionExpr json:
                         json.StaticBaseUri = baseUri;
                         break;
+
+                    case FunctionCallExpr core:
+                        core.StaticBaseUri = baseUri;
+                        break;
                 }
             }
 

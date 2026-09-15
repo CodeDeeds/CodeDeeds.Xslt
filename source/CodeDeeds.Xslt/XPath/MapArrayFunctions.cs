@@ -652,9 +652,48 @@ namespace CodeDeeds.Xslt.XPath
             return AsArray(m_arguments[index].Evaluate(ref context));
         }
 
+        /// <summary>A position argument, which is declared <c>xs:integer</c> and is held to it.</summary>
+        /// <remarks>
+        /// Exactly one item, and an integer. The function conversion rules promote an integer outwards
+        /// to a decimal and a double and never inwards, so <c>array:get([1,2,3], 1.2)</c> is a type
+        /// error rather than a question about the first member — which is what it became when the
+        /// argument was simply read as a number and truncated. Untyped text converts, being untyped.
+        /// </remarks>
+        /// <param name="index">Which argument holds the position.</param>
+        /// <param name="context">The context to evaluate it in.</param>
         private long Position(int index, ref DynamicContext context)
         {
-            return m_arguments[index].Evaluate(ref context).ToInteger();
+            return AsPosition(m_arguments[index].Evaluate(ref context));
+        }
+
+        /// <summary>Reads a value as the one integer a position has to be.</summary>
+        /// <param name="value">The value given.</param>
+        internal static long AsPosition(XPathValue value)
+        {
+            List<XPathValue> items = XdmSequence.Items(value);
+
+            if (items.Count != 1)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XPTY0004,
+                    $"A position is one integer, and this is {items.Count} items.");
+            }
+
+            XPathValue one = items[0];
+
+            if (one.Kind is XPathValueKind.Node or XPathValueKind.NodeSet
+                || one.TypeCode == XdmTypeCode.UntypedAtomic)
+            {
+                one = XdmType.TryGet("integer", out XdmType.BuiltInType integer)
+                    ? XdmType.Cast(one, integer)
+                    : one;
+            }
+
+            return one.TypeCode == XdmTypeCode.Integer
+                ? one.ToInteger()
+                : throw XsltErrors.Error(
+                    XsltErrorCode.XPTY0004,
+                    $"A position is an xs:integer, and this one is {one.TypeCode}.");
         }
 
         private XPathValue Key(int index, ref DynamicContext context)

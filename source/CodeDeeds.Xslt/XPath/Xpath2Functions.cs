@@ -811,7 +811,7 @@ namespace CodeDeeds.Xslt.XPath
                 {
                     // Only an element is ever nilled, and only one that validation found so: anything else
                     // yields the empty sequence, and an element of a tree nothing validated answers false.
-                    List<XPathValue> items = ItemsOrContext(0, ref context);
+                    List<XPathValue> items = NodesOrContext(ref context);
                     return items.Count == 1 && TryNode(items[0], out Model.XdmTree? nilledTree, out int nilledNode)
                         && nilledTree!.KindOf(nilledNode) == Model.NodeKind.Element
                         ? XPathValue.FromBoolean(nilledTree.IsNilled(nilledNode))
@@ -971,8 +971,26 @@ namespace CodeDeeds.Xslt.XPath
         private Collation Collation(int index, ref DynamicContext context)
         {
             return m_arguments.Length > index
-                ? XPath.Collation.Resolve(Text(index, ref context), ref context)
+                ? XPath.Collation.Resolve(Absolute(Text(index, ref context)), ref context)
                 : m_default ?? XPath.Collation.Codepoint;
+        }
+
+        /// <summary>A collation URI made absolute against the base URI the call was written at.</summary>
+        /// <remarks>
+        /// A collation is named by a URI and a URI in an expression is relative to where the expression
+        /// stands, so <c>collation/codepoint</c> written at
+        /// <c>http://www.w3.org/2005/xpath-functions/</c> is the code point collation and the same
+        /// three words written anywhere else name nothing. Left alone where it is absolute already, or
+        /// where there is no base to resolve it against.
+        /// </remarks>
+        /// <param name="uri">The collation URI as the call wrote it.</param>
+        private string Absolute(string uri)
+        {
+            return StaticBaseUri is string written
+                && Uri.TryCreate(written, UriKind.Absolute, out Uri? baseUri)
+                && Uri.TryCreate(baseUri, uri, out Uri? resolved)
+                    ? resolved.ToString()
+                    : uri;
         }
 
         /// <summary>
@@ -1756,7 +1774,7 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         private XPathValue NodeName(ref DynamicContext context)
         {
-            List<XPathValue> items = ItemsOrContext(0, ref context);
+            List<XPathValue> items = NodesOrContext(ref context);
 
             if (items.Count == 0 || !TryNode(items[0], out Model.XdmTree? tree, out int node))
             {
@@ -1973,6 +1991,37 @@ namespace CodeDeeds.Xslt.XPath
                 : XdmSequence.Items(context.RequireContextItem($"fn:{m_name}()"));
         }
 
+        /// <summary>
+        /// The items an argument names, or the context item where it was not written, which must then
+        /// be a node.
+        /// </summary>
+        /// <remarks>
+        /// These functions are declared to take <c>node()?</c>, and a written argument is checked
+        /// against that before it ever arrives here. The context form is the same function with the
+        /// same declared type, so it holds the context item to the same standard: <c>23[nilled()]</c>
+        /// asks about an integer, and answering with the empty sequence would take the question for
+        /// one about an element that happens not to be nilled.
+        /// </remarks>
+        private List<XPathValue> NodesOrContext(ref DynamicContext context)
+        {
+            if (m_arguments.Length > 0)
+            {
+                return Items(0, ref context);
+            }
+
+            XPathValue item = context.RequireContextItem($"fn:{m_name}()");
+
+            if (item.Kind is not (XPathValueKind.Node or XPathValueKind.NodeSet))
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XPTY0004,
+                    $"fn:{m_name}() takes a node, and the context item here is "
+                    + $"{item.TypeCode} rather than one.");
+            }
+
+            return XdmSequence.Items(item);
+        }
+
         private string Text(int index, ref DynamicContext context)
         {
             return m_arguments[index].Evaluate(ref context).ToStringValue();
@@ -2029,38 +2078,82 @@ namespace CodeDeeds.Xslt.XPath
             {
                 XPathValue atomic = Atomize(item);
 
-                // Keyed by the value's type as well as how it reads, because 1 and '1' are not the same
-                // value even though they look alike. An untyped value counts as text, which is what it is
-                // until something compares it with a number.
-                bool numeric = atomic.Kind == XPathValueKind.Number;
-
-                // A name is its namespace and local name, whatever prefix it was written with: two names
-                // spelled differently are one value, which is what 'eq' says of them.
-                string key;
-
-                if (numeric)
-                {
-                    key = "n:" + NumericKey(atomic);
-                }
-                else if (atomic.TypeCode == XdmTypeCode.QName)
-                {
-                    XdmQName name = atomic.AsQName();
-                    key = "q:" + name.NamespaceUri + "}" + name.LocalName;
-                }
-                else
-                {
-                    // A string's key is the collation's, not the string: under one that ignores case,
-                    // 'DATA' and 'data' are one value and have to land in one bucket.
-                    key = "s:" + collation.Key(atomic.ToStringValue());
-                }
-
-                if (seen.Add(key))
+                if (seen.Add(DistinctKey(atomic, collation)))
                 {
                     distinct.Add(atomic);
                 }
             }
 
             return XdmSequence.Concatenate(distinct);
+        }
+
+        /// <summary>The text two values share exactly when <c>fn:distinct-values</c> counts them as one.</summary>
+        /// <remarks>
+        /// What <c>eq</c> compares and not what the value looks like, which for half of these types is
+        /// not the same thing: a moment carrying no timezone is compared in the implicit one, so
+        /// <c>13:00:00</c> and <c>13:00:00Z</c> are one value; a duration is its months and its
+        /// seconds, so <c>P0M</c> and <c>PT0S</c> are both the zero duration. The type goes into the
+        /// key wherever two types are not comparable, and stays out of it where they are.
+        /// </remarks>
+        /// <param name="value">The atomic value to key.</param>
+        /// <param name="collation">The collation strings are keyed under.</param>
+        private static string DistinctKey(XPathValue value, Collation collation)
+        {
+            if (value.Kind == XPathValueKind.Number)
+            {
+                return "n:" + NumericKey(value);
+            }
+
+            switch (value.TypeCode)
+            {
+                case XdmTypeCode.QName:
+                {
+                    // A name is its namespace and local name, whatever prefix it was written with.
+                    XdmQName name = value.AsQName();
+                    return "q:" + name.NamespaceUri + "}" + name.LocalName;
+                }
+
+                case XdmTypeCode.Date:
+                case XdmTypeCode.Time:
+                case XdmTypeCode.DateTime:
+                {
+                    XdmDateTime moment = value.AsDateTime();
+                    XdmDateTime.Moment instant = moment.Instant;
+
+                    return "m:" + (int)value.TypeCode + ":" + instant.Day + ":" + instant.Tick;
+                }
+
+                case XdmTypeCode.Duration:
+                case XdmTypeCode.YearMonthDuration:
+                case XdmTypeCode.DayTimeDuration:
+                {
+                    // No type in this one: the three compare with one another, a year-month duration
+                    // being one with no seconds and a day-time one having no months.
+                    XdmDuration length = value.AsDuration();
+                    return "t:" + length.Months + ":"
+                        + length.Seconds.ToString(CultureInfo.InvariantCulture);
+                }
+
+                case XdmTypeCode.Gregorian:
+                {
+                    XdmGregorian gregorian = value.AsGregorian();
+                    return "g:" + gregorian.Name + ":" + gregorian.Moment();
+                }
+
+                case XdmTypeCode.String:
+                case XdmTypeCode.AnyUri:
+                case XdmTypeCode.UntypedAtomic:
+                case XdmTypeCode.None:
+                    // A string's key is the collation's, not the string: under one that ignores case,
+                    // 'DATA' and 'data' are one value and have to land in one bucket. Untyped text is
+                    // a string here, which is what it is until something compares it with a number.
+                    return "s:" + collation.Key(value.ToStringValue());
+
+                default:
+                    // Everything else reads as itself and is told apart by its type, so that a boolean
+                    // and the string of it, or an xs:hexBinary and the text of one, stay two values.
+                    return "v:" + (int)value.TypeCode + ":" + value.ToCanonicalString();
+            }
         }
 
         /// <summary>Rounds half towards positive infinity, which is what <c>fn:round</c> does.</summary>
@@ -2555,6 +2648,11 @@ namespace CodeDeeds.Xslt.XPath
                 XdmTypeCode.Boolean or XdmTypeCode.Date or XdmTypeCode.Time or XdmTypeCode.DateTime
                     or XdmTypeCode.YearMonthDuration or XdmTypeCode.DayTimeDuration
                     => value.TypeCode,
+
+                // The two binary types order among themselves, XPath 3.1 giving each an lt and a gt,
+                // so min() and max() have an answer over either. Not over both at once: they are
+                // separate families here, and a mixture is the FORG0006 a mixture always was.
+                XdmTypeCode.HexBinary or XdmTypeCode.Base64Binary => value.TypeCode,
                 _ => XdmTypeCode.None,
             };
         }

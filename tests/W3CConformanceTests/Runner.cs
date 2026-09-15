@@ -88,6 +88,9 @@ namespace CodeDeeds.Xslt.Conformance
             "collection-stability",
             "directory-as-collation-uri",
             "fn-format-integer-CLDR",
+
+            // This driver reads the suite's own files and nothing over the network.
+            "remote_http",
             "non_empty_sequence_collection",
             "typedData",
 
@@ -261,11 +264,6 @@ namespace CodeDeeds.Xslt.Conformance
                         }
 
                         break;
-
-                    case "remote_http":
-                        // This driver reads the suite's own files and nothing over the network.
-                        why = "needs a remote HTTP resource";
-                        return false;
 
                     case "xml-version":
                         if (satisfied && value.Contains("1.1", StringComparison.Ordinal))
