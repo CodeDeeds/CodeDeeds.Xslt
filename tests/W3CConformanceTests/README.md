@@ -313,29 +313,34 @@ unrelated-looking reasons, while a reason shared across twenty files is nobody's
 
 ## The XPath run
 
-The 2.0 run stands at **14,116 of 14,173, 99.6%**, and the 3.1 run — `--31`, which takes in the tests marked
-`XP30+` and `XP31+` — at **17,548 of 17,631, 99.5%**. The second reads 3,458 more tests than the first and is
-a fraction behind it, which is the shape to expect: what it takes in is the newer half, and the newer half
-is where the work is.
+The 2.0 run stands at **14,144 of 14,173, 99.8%**, and the 3.1 run — `--31`, which takes in the tests marked
+`XP30+` and `XP31+` — at **17,592 of 17,629, 99.8%**. The second reads 3,456 more tests than the first and is
+level with it, which is not the shape to expect: what it takes in is the newer half, and the newer half
+was where the work was until lately.
 
 | area | 2.0 | 3.1 |
 |---|---|---|
 | `math` | *3.0 and later* | 130 / 130, 100% |
 | `misc` | 31 / 31, 100% | 33 / 33, 100% |
 | `app` | 330 / 330, 100% | 774 / 777, 99.6% |
-| `prod` | 5,505 / 5,520, 99.7% | 5,927 / 5,944, 99.7% |
-| `fn` | 5,004 / 5,028, 99.5% | 7,040 / 7,075, 99.5% |
-| `op` | 3,177 / 3,191, 99.6% | 3,390 / 3,409, 99.4% |
-| `xs` | 69 / 73, 94.5% | 113 / 117, 96.6% |
+| `array` | *3.1* | 34 / 34, 100% |
+| `op` | 3,189 / 3,191, 99.9% | 3,405 / 3,409, 99.9% |
+| `prod` | 5,510 / 5,520, 99.8% | 5,936 / 5,944, 99.9% |
+| `fn` | 5,015 / 5,028, 99.7% | 7,057 / 7,073, 99.8% |
 | `map` | *3.1* | 110 / 112, 98.2% |
-| `array` | *3.1* | 31 / 34, 91.2% |
+| `xs` | 69 / 73, 94.5% | 113 / 117, 96.6% |
 
-The failures no longer cluster anywhere. The largest set on either run holds five, and there are eleven
-sets with four or fewer between them and the end of the list. Casting led it by some way not long ago,
-then `op/to`, then `fn/parse-json`; the years before the common era, the bound on `xs:integer`, a range
-built whether its items were wanted or not, and two JSON options that were read and never consulted
-were behind all of it, and none of the four is there now. `op/to` and `fn/parse-json` have nothing left
-in them at all. The compatibility document keeps the account of what is behind what remains.
+The failures no longer cluster anywhere. The largest set on either run holds five, and every other one
+holds four or fewer. Casting led this list by some way not long ago, then `op/to`, then
+`fn/parse-json`; those three sets are empty now, and so are `array`, `math` and `misc` entirely.
+
+What is left divides in two. Rather more than half is the driver rather than the engine: four
+`fn/collection` tests it wires up no collections for, three that want a document or a language it does
+not supply, and half a dozen where its own `assert-eq` cannot build the expected value and reports a
+mismatch between two texts that read identically. The rest is the engine, and thins out into ones and
+twos: `xs:dateTimeStamp`, which is an XSD 1.1 type this processor does not have; `op:same-key`, which
+is not `eq` and is implemented as though it were; a handful of reserved-name and EQName syntax rules.
+The compatibility document keeps the account of what is behind each.
 
 ### Which XML Schema version a test asks for
 

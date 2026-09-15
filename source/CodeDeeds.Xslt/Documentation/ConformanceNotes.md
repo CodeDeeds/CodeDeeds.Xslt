@@ -6040,11 +6040,24 @@ dotnet run --project CodeDeeds.Xslt.Conformance -- --31 <path-to-qt3tests>
 
 That reads 17,573 tests where the 2.0 run reads 14,175, and stands at **98.9%** against 99.0% for 2.0. The
 gap is mostly the one 3.1 function listed as absent above — `fn:load-xquery-module` — and the
-schema-aware forms, which this engine will never have. The unbounded `xs:integer` and the years before
-the common era were both on this list and are not any more. What is left
-that is neither is the maps and JSON: `map` is the lowest area at 89.0%, and `fn:parse-json` accounts for 14
-on its own — seven pieces of malformed JSON accepted where `FOJS0001` was wanted, and five that reach for
-`unparsed-text()` where no transformation is running to answer it.
+schema-aware forms, which this engine will never have. The unbounded `xs:integer`, the years before the
+common era, the JSON options and the whole of `op/to` were all on this list and none of them is now;
+`array`, `math` and `misc` are at a hundred per cent, and no test set on either run holds more than
+five failures.
+
+What is left divides in two, and rather more than half of it is the driver. It wires up no collections,
+so `fn:collection()` has none to find; it supplies no document for `fn:doc-available()` and no language
+but English; and its `assert-eq` builds the expected value with a small literal parser rather than
+through the engine, which for half a dozen tests cannot build what the expectation names and reports a
+mismatch between two texts that read identically. Those are limits of how the tests are presented and
+not of what the engine does.
+
+The engine's own share is now ones and twos with no cause in common. `xs:dateTimeStamp` is an XSD 1.1
+type and this processor reads XSD 1.0. `op:same-key`, which maps are keyed by, is not `eq` and is
+implemented as though it were, so a float and a decimal that differ past the float's precision share a
+key. A few reserved-name and EQName rules are not enforced at parse time. And `fn:distinct-values` still
+keys a decimal apart from the float it is equal to, numeric equality across those two types being
+decided at the narrower precision and a key having no way to know what it will be compared against.
 
 The driver reads the `decimal-format` declarations in a test's environment and declares them against the
 static context, which is the same path a stylesheet's `xsl:decimal-format` takes into the engine.
