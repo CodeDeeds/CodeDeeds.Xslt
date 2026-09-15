@@ -6199,6 +6199,45 @@ order they were written.
 The 3.0 run goes from 7,903 of 7,924 to **7,904**; the 2.0, schema-aware and XPath runs are unmoved, the
 two backends agree test for test, and nothing that was passing fails.
 
+### Which results the suite asks for and does not get
+
+The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error
+codes the suite asks for and does not get*; these are the ones where a result comes out and is not the
+one the test names.
+
+**A quotation mark in an attribute, spelled one of the two ways.** `output-0102c` and `0103c` match the
+serialized output against a regular expression, and it admits `&#34;` and `&#x22;` and nothing else where
+this engine writes `&quot;`. The serialization specification says an attribute value's `"` must be
+escaped and does not say how; the HTML output method says outright that a character entity reference may
+be used in preference to a numeric one. Everything else in both expectations matches, character for
+character.
+
+**A suite whose Unicode is older than the one .NET carries.** `regex-syntax-xslt20-0984` asks for `[\w]`
+to match U+2308 and U+2309, the left and right ceiling. `\w` is every character that is not punctuation, a
+separator or an other, and those two were mathematical symbols until Unicode 5.1 reclassified them as open
+and close punctuation. `0985` asks for `[\d]` to match U+1369 to U+1371, the Ethiopic digits, which are
+`No` and not `Nd`. The classifications in that test set are a snapshot: its own stylesheet records that
+the data came from the XML Schema test suite and that the matching and non-matching lists were worked out
+by hand. The engine reads `\w` and `\d` from the Unicode data .NET carries, which is current.
+
+**Three tests marked for a 2.0 processor that need 3.0.** `strip-space-025` writes `Q{}test1` in a
+`strip-space` element list, `result-document-0286` and `0287` write an EQName in a `format` attribute.
+EQName syntax is 3.0's, and XSLT 2.0's forwards-compatible processing covers an XSLT element it does not
+know and an attribute it does not know — not a value in a syntax a later version defines. All three pass
+on the 3.0 run. `namespace-0912` is the same shape one step removed: it needs `xsl:mode`'s
+`on-no-match="shallow-copy"`, which a 2.0 processor does not have, and its variable then does not hold
+what it declared.
+
+**Two tests that name something their stylesheet does not have.** `format-number-070` asks to start at a
+template called `main` and its stylesheet declares none — it has one template, and it matches `root`.
+`collection-006` asks for one called `a`.
+
+**And the two DocBook runs.** `docbook-001` calls `exsl:node-set()`, an extension function, and this
+engine has no way to register one. `docbook-002` transforms a real document through the real DocBook 1.79
+stylesheets to XSL-FO and counts what comes out: 619 elements wanted. It is three thousand lines of
+stylesheet and the count is close but not equal, which says only that something differs somewhere. It is
+the one failure on either run with no diagnosis at all.
+
 ### The rest of 3.0
 
 Where XSLT 3.0 stands here, as of 7 September 2026. The suite measures this half under `--xslt --30`, and it
