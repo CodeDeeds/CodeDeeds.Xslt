@@ -546,6 +546,10 @@ namespace CodeDeeds.Xslt.Compiler
                     slot = m_scope[i].Slot;
                     isGlobal = m_scope[i].IsGlobal;
 
+                    // Something reads it, so it has to be worked out. Marked before the two refusals
+                    // below, which are about globals and cannot be about a local declaration.
+                    m_scope[i].Declaration?.MarkRead();
+
                     // A global variable is not in scope within its own declaration (XSLT 3.0 §9.7). The
                     // reference is to a variable that has not been declared where it stands, which is
                     // XPST0008 — so an inline function bound to a global cannot recurse by naming the
@@ -10530,11 +10534,14 @@ namespace CodeDeeds.Xslt.Compiler
                     (Expr? select, Instruction[]? body) = CompileVariableValue(element);
 
                     int slot = m_frameSlotCount++;
+                    VariableInstruction declaration = new VariableInstruction(
+                        slot, select, body, declared, StaticBaseUriAt(element));
 
                     // A variable is in scope for what follows it, so it is declared after its own value is
-                    // compiled — a variable cannot refer to itself.
-                    m_scope.Add(new VariableBinding(expanded, slot, false));
-                    output.Add(new VariableInstruction(slot, select, body, declared, StaticBaseUriAt(element)));
+                    // compiled — a variable cannot refer to itself. The declaration goes into the binding so
+                    // that a reference resolving to it can mark it read.
+                    m_scope.Add(new VariableBinding(expanded, slot, false, declaration));
+                    output.Add(declaration);
                     return;
                 }
 
@@ -13017,6 +13024,19 @@ namespace CodeDeeds.Xslt.Compiler
             };
         }
 
-        private readonly record struct VariableBinding(ExpandedName Name, int Slot, bool IsGlobal);
+        /// <summary>One variable in scope where an expression is being compiled.</summary>
+        /// <param name="Name">The variable's expanded name.</param>
+        /// <param name="Slot">Where its value lives, in the frame or in global storage.</param>
+        /// <param name="IsGlobal">Which of the two.</param>
+        /// <param name="Declaration">
+        /// The instruction that declares it, for a local <c>xsl:variable</c> and nothing else. It is
+        /// here so that a reference resolving to this binding can say so: a variable nothing refers to
+        /// has a value nothing can read, and need not be worked out.
+        /// </param>
+        private readonly record struct VariableBinding(
+            ExpandedName Name,
+            int Slot,
+            bool IsGlobal,
+            VariableInstruction? Declaration = null);
     }
 }

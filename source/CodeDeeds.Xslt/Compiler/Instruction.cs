@@ -1842,6 +1842,20 @@ namespace CodeDeeds.Xslt.Compiler
     internal sealed class VariableInstruction : Instruction
     {
         private readonly int m_slot;
+
+        /// <summary>Whether anything in the variable's scope reads it.</summary>
+        /// <remarks>
+        /// Settled while the stylesheet is read: the variable is in scope for what follows it, so every
+        /// reference to it is compiled after the declaration is, and the declaration is told each time
+        /// one resolves to it.
+        /// </remarks>
+        private bool m_read;
+
+        /// <summary>Records that something in the variable's scope refers to it.</summary>
+        internal void MarkRead()
+        {
+            m_read = true;
+        }
         private readonly Expr? m_select;
         private readonly Instruction[]? m_body;
         private readonly XdmSequenceType? m_type;
@@ -1864,8 +1878,25 @@ namespace CodeDeeds.Xslt.Compiler
         }
 
         /// <inheritdoc/>
+        /// <remarks>
+        /// A variable nothing reads is not evaluated. The specification allows it in as many words —
+        /// “if a variable is declared but never referenced, an implementation may choose whether or not to
+        /// evaluate the variable declaration” — and the suite's <c>param-0301</c> asks for it: a function
+        /// declares a variable naming the global that is being computed from the function, and the
+        /// circularity is only real if the variable is worked out.
+        /// <para>
+        /// Only where the value comes from a <c>select</c>, which can produce nothing but its value. A
+        /// sequence constructor may hold an <c>xsl:message</c>, and that is an effect a stylesheet asked
+        /// for and can see, so a variable written that way is evaluated whether it is read or not.
+        /// </para>
+        /// </remarks>
         public override void Execute(ref DynamicContext context, XsltRuntime runtime)
         {
+            if (!m_read && m_select is not null)
+            {
+                return;
+            }
+
             context.Locals[context.FrameBase + m_slot] =
                 Evaluate(m_select, m_body, ref context, runtime, m_type, baseUri: m_baseUri);
         }

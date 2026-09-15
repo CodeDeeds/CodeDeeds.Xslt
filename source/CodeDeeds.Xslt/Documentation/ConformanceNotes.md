@@ -6156,6 +6156,32 @@ passing fails. The position and size a handed-back call carries were worth the c
 of one rather than to what the instruction had cost three tests on the first attempt, and `fn/position`
 reported it at once.
 
+### A variable nothing reads is not worked out
+
+The specification says so in as many words: “if a variable is declared but never referenced, an
+implementation may choose whether or not to evaluate the variable declaration”. What makes it worth doing
+rather than merely allowed is that such a declaration can be the only thing standing between a stylesheet
+and a circularity it never actually has.
+
+That is `param-0301`, whose own description says what it is for: “to show that circularity causes errors
+only if the parameter involved in circularity is actually evaluated”. A global is computed by calling a
+function; the function declares a local variable naming that global and never uses it. Worked out, the
+global is defined in terms of itself; left alone, the function returns 3 and the global is 3.
+
+Whether anything reads it is settled while the stylesheet is read, and needs no analysis pass. A variable
+is in scope for what follows it, so every reference to it is compiled after the declaration is — and the
+binding that a reference resolves through now carries the declaration, so resolving to it says so. An
+inner declaration of the same name shadows the outer one, and the innermost binding is the one a
+reference finds, so the shadowed declaration is correctly left unread.
+
+Only where the value comes from a `select`, which can produce nothing but its value. A sequence
+constructor may hold an `xsl:message`, and a message is an effect the stylesheet asked for and can see, so
+a variable written that way is evaluated whether it is read or not.
+
+The 3.0 run goes from 7,902 of 7,924 to **7,903**, the 2.0 run from 5,597 of 5,622 to **5,598** and the
+schema-aware run from 8,463 of 8,526 to **8,464**; the XPath runs declare no variables of this kind and
+are unmoved, the two backends agree test for test, and nothing that was passing fails.
+
 ### The rest of 3.0
 
 Where XSLT 3.0 stands here, as of 7 September 2026. The suite measures this half under `--xslt --30`, and it
