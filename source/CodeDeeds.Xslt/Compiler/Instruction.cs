@@ -1214,12 +1214,41 @@ namespace CodeDeeds.Xslt.Compiler
         private readonly SortKey[] m_sortKeys;
         private readonly Instruction[] m_body;
 
+        /// <summary>Whether the template doing this has nothing left to do afterwards.</summary>
+        private bool m_last;
+
         /// <summary>Initializes a for-each instruction.</summary>
         public ForEachInstruction(Expr select, SortKey[] sortKeys, Instruction[] body)
         {
             m_select = select;
             m_sortKeys = sortKeys;
             m_body = body;
+        }
+
+        /// <inheritdoc/>
+        /// <remarks>
+        /// The body's own last instruction is in tail position too, but only on the last iteration — so
+        /// the body is marked and <see cref="RunBody"/> settles what the other iterations hand back.
+        /// </remarks>
+        internal override void MarkTailPosition()
+        {
+            m_last = true;
+            MarkTailPosition(m_body);
+        }
+
+        /// <summary>Runs the body for one item, and settles anything it handed back.</summary>
+        /// <param name="index">Which item this is, counted from zero.</param>
+        /// <param name="count">How many there are.</param>
+        /// <param name="inner">The focus for this item.</param>
+        /// <param name="runtime">The transformation in progress.</param>
+        private void RunBody(int index, int count, ref DynamicContext inner, XsltRuntime runtime)
+        {
+            ExecuteAll(m_body, ref inner, runtime);
+
+            if (m_last)
+            {
+                runtime.SettleTailCalls(index + 1 == count, ref inner);
+            }
         }
 
         /// <inheritdoc/>
@@ -1302,7 +1331,7 @@ namespace CodeDeeds.Xslt.Compiler
                     inner.Position = i + 1;
                     inner.Size = items.Count;
                     runtime.CurrentAtomicItem = inner.Node >= 0 ? null : items[i];
-                    ExecuteAll(m_body, ref inner, runtime);
+                    RunBody(i, items.Count, ref inner, runtime);
                 }
             }
             finally
@@ -1341,7 +1370,7 @@ namespace CodeDeeds.Xslt.Compiler
                     inner.CurrentTree = inner.Tree;
                     inner.Position = i + 1;
                     inner.Size = size;
-                    ExecuteAll(m_body, ref inner, runtime);
+                    RunBody(i, size, ref inner, runtime);
                 }
 
                 return;
@@ -1373,7 +1402,7 @@ namespace CodeDeeds.Xslt.Compiler
                     inner.CurrentTree = inner.Tree;
                     inner.Position = i + 1;
                     inner.Size = nodes.Count;
-                    ExecuteAll(m_body, ref inner, runtime);
+                    RunBody(i, nodes.Count, ref inner, runtime);
                 }
             }
             finally
@@ -1409,7 +1438,7 @@ namespace CodeDeeds.Xslt.Compiler
                 inner.CurrentTree = inner.Tree;
                 inner.Position = i + 1;
                 inner.Size = count;
-                ExecuteAll(m_body, ref inner, runtime);
+                RunBody(i, count, ref inner, runtime);
             }
         }
     }
@@ -1535,6 +1564,15 @@ namespace CodeDeeds.Xslt.Compiler
         /// <summary>Whether a selection may hold things that are not nodes, which is 3.0's rule.</summary>
         private readonly bool m_allowsItems;
 
+        /// <summary>Whether the template doing this has nothing left to do afterwards.</summary>
+        private bool m_last;
+
+        /// <inheritdoc/>
+        internal override void MarkTailPosition()
+        {
+            m_last = true;
+        }
+
         /// <summary>Initializes an apply-templates instruction.</summary>
         public ApplyTemplatesInstruction(
             Expr? select,
@@ -1653,7 +1691,19 @@ namespace CodeDeeds.Xslt.Compiler
                     inner.CurrentTree = inner.Tree;
                     inner.Position = i + 1;
                     inner.Size = size;
-                    runtime.ApplyTemplates(selected[i], mode, parameters, ref inner);
+
+                    // The last node of the selection, where the template has nothing left to do after
+                    // this, is a call the running invocation can make in its own place rather than
+                    // beneath it — which is what lets a template walk a long run of siblings by
+                    // applying templates to the next one.
+                    if (m_last && i == size - 1)
+                    {
+                        runtime.ApplyTemplatesInTailPosition(selected[i], mode, parameters, ref inner);
+                    }
+                    else
+                    {
+                        runtime.ApplyTemplates(selected[i], mode, parameters, ref inner);
+                    }
                 }
 
                 return;

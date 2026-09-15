@@ -362,6 +362,76 @@ namespace CodeDeeds.Xslt.UnitTests
             StringAssert.Contains(error.Message, "More than one");
         }
 
+
+        /// <summary>A stylesheet whose templates walk a run of siblings one at a time.</summary>
+        /// <param name="step">How the template reaches the next sibling.</param>
+        private static string Walks(string step)
+        {
+            return "<xsl:variable name=\"in\"><doc><xsl:for-each select=\"1 to 20000\">"
+                + "<e><xsl:value-of select=\".\"/></e></xsl:for-each></doc></xsl:variable>"
+                + "<xsl:template match=\"/\"><out>"
+                + "<xsl:apply-templates select=\"$in/doc/e[1]\"/></out></xsl:template>"
+                + "<xsl:template match=\"e\">"
+                + "<xsl:if test=\"not(following-sibling::e)\"><xsl:value-of select=\".\"/></xsl:if>"
+                + step
+                + "</xsl:template>";
+        }
+
+        [TestMethod]
+        public void ApplyingTemplatesAsTheLastThingATemplateDoesDoesNotGrowTheStack()
+        {
+            // The idiom for walking a long run of siblings: each template applies templates to the next
+            // one and does nothing after it. Nested, that costs a frame per sibling and runs out a few
+            // hundred in; made in the template's own place, the length of the run stops mattering.
+            Assert.AreEqual(
+                "<out>20000</out>",
+                Run(Walks("<xsl:apply-templates select=\"following-sibling::e[1]\"/>"), "<r/>"));
+        }
+
+        [TestMethod]
+        public void OnlyTheLastIterationOfAForEachIsInTailPosition()
+        {
+            // The same walk with the step wrapped in an xsl:for-each over one node, which is the shape
+            // the suite's call-template-1003 takes. The body's last instruction is the template's last
+            // act only on the last iteration, so the loop settles what every other iteration hands back.
+            Assert.AreEqual(
+                "<out>20000</out>",
+                Run(
+                    Walks(
+                        "<xsl:for-each select=\"following-sibling::e[1]\">"
+                        + "<xsl:apply-templates select=\".\"/></xsl:for-each>"),
+                    "<r/>"));
+        }
+
+        [TestMethod]
+        public void TheLastNodeOfASelectionKeepsItsPositionAndSize()
+        {
+            // A call handed back carries the focus it was made with, and the last node of a selection is
+            // the one that is handed back: the third of three is still third of three.
+            Assert.AreEqual(
+                "<out>1/3 2/3 3/3 </out>",
+                Run(
+                    "<xsl:template match=\"/\"><out><xsl:apply-templates select=\"/r/i\"/></out></xsl:template>"
+                    + "<xsl:template match=\"i\">"
+                    + "<xsl:value-of select=\"concat(position(), '/', last(), ' ')\"/></xsl:template>",
+                    "<r><i/><i/><i/></r>"));
+        }
+
+        [TestMethod]
+        public void ANamedCallInAForEachIsMadeInTheIterationThatMadeIt()
+        {
+            // Never handed on past the end of the loop. xsl:for-each suspends the current template rule
+            // while its body runs, so a call made afterwards would see a rule the call site did not — and
+            // there is one place to hand a call back to, so two iterations would lose the first.
+            Assert.AreEqual(
+                "<out>a1a2a3</out>",
+                Run(
+                    "<xsl:template match=\"/\"><out><xsl:for-each select=\"/r/i\">"
+                    + "<xsl:call-template name=\"w\"/></xsl:for-each></out></xsl:template>"
+                    + "<xsl:template name=\"w\">a<xsl:value-of select=\"position()\"/></xsl:template>",
+                    "<r><i/><i/><i/></r>"));
+        }
+
         [TestMethod]
         public void EndlessRecursionIsReportedRatherThanExhaustingTheStack()
         {

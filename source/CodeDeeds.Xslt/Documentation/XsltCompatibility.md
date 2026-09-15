@@ -17,13 +17,13 @@ Conformance as last measured, on 15 September 2026, against the W3C suites (see 
 
 | Suite | Result |
 | --- | --- |
-| XSLT 3.0 test suite, 3.0 processor | 7,901 of 7,924, 99.7% |
+| XSLT 3.0 test suite, 3.0 processor | 7,902 of 7,924, 99.7% |
 | XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,597 of 5,622, 99.6% |
 | QT3 (XPath), 3.1 | 17,592 of 17,629, 99.8% |
 | QT3 (XPath), 2.0 | 14,144 of 14,173, 99.8% |
 
 The 2,900 streaming tests are skipped by design. The 686 schema-aware tests are read only by the driver's
-opt-in `--schema` run, which stands at 8,462 of 8,526 (99.2%), the same on both backends; the figures
+opt-in `--schema` run, which stands at 8,463 of 8,526 (99.3%), the same on both backends; the figures
 above are the run without it.
 
 ## Not implemented, and not planned
@@ -45,7 +45,7 @@ above are the run without it.
 | Dates and times | Years 1 to 999,999,999, before the common era and after it alike. A year past that is `FODT0001` — an overflow rather than `FORG0001`, because the text names a moment perfectly well and it is this engine that cannot hold it. Text that would not be a date whatever year stood in it is still `FORG0001`. |
 | Durations | Months in a 32-bit signed integer, seconds in `System.TimeSpan`. A duration beyond either is `FODT0002`, on the same reading as the dates above. |
 | XML Schema version | Values are read by XSD 1.0 rules. The differences that show are the ones 1.1 added: there is no year zero, so `xs:gYear('0000')` is `FORG0001`; `INF` takes no leading plus, so `xs:double('+INF')` is `FORG0001`; and `xs:dateTimeStamp` is not a type. `xs:error` is implemented, being XPath 3.0's as much as 1.1's. |
-| Recursion | A template or function call 2,000 levels deep, or one about to exhaust the stack, is refused as an error. A call in tail position is a loop and does not count. |
+| Recursion | A template or function call 2,000 levels deep, or one about to exhaust the stack, is refused as an error. A call in tail position is a loop and does not count: `xsl:call-template`, a function call that is the whole of a function's answer, and `xsl:apply-templates` over the last node of its selection, reached through nothing but `xsl:if`, `xsl:choose` and the last iteration of an `xsl:for-each`. That covers the idiom of walking a long run of siblings by applying templates to the next one. |
 | Entity expansion | Capped at ten million characters. |
 | A range laid out | 4,194,304 items, about sixty-four megabytes of them. The limit is on laying a range out and not on having one: `count(1 to 10000000)` and `5 = (1 to 10000000)` are answered from the bounds and cost nothing, and only a caller genuinely walking the items reaches this. Past it is `XPDY0130`, which XPath 3.0 provides for a processor declining something on grounds of scale. A range of more items than an `int` counts has no position to ask about at all and is refused where it is made. |
 | Schema types in use | 65,534 at once, across the whole process. A value has room for a small number and not for a reference, so each type that annotates one is given a number out of a table that every stylesheet shares. The number is given back when the schema that defined the type is dropped, and stylesheets that share one `XmlSchemaSet` share its numbers, so the limit is on how many distinct types are in use at once rather than on how many have ever been read. |

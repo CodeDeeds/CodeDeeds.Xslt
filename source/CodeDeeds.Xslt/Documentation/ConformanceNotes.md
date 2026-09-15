@@ -6115,6 +6115,47 @@ The 3.0 run goes from 7,900 of 7,924 to **7,901**, the 2.0 run from 5,596 of 5,6
 schema-aware run from 8,461 of 8,526 to **8,462**; the XPath runs read no stylesheet options and are
 unmoved, the two backends agree test for test, and nothing that was passing fails.
 
+### Which calls are a loop rather than a stack
+
+A call that is the last thing its caller does need not be made beneath it. The caller has nothing left
+to do, so the call can be made in its place, and a template or function that recurses as its last act is
+then a loop that runs as long as it likes rather than a stack that runs out. That much was here for
+`xsl:call-template` and for a function call that is the whole of a function's answer. It was not here for
+`xsl:apply-templates`, and that is the one the 1.0 and 2.0 idiom for walking a long run of siblings is
+written with:
+
+```xml
+<xsl:template match="e">
+  ... do something with this one ...
+  <xsl:apply-templates select="following-sibling::e[1]"/>
+</xsl:template>
+```
+
+Nested, that costs a frame per sibling, and the stack ran out between four and eight hundred in. It now
+runs to any length. Two things make it work.
+
+**The rule is chosen where the focus is and run where the caller was.** Applying templates is not calling
+a template: which template runs is decided by matching the node, and the patterns are evaluated in the
+focus of the instruction. So the matching happens at the instruction, as it always did, and what is
+handed back is the rule it chose together with the node, the mode and the node's place among the ones
+being processed — the focus the call was made with, which the handed-back call has to be made with too.
+A built-in rule is not handed back: it walks the node's children, so nothing about it is a tail call.
+
+**And the last iteration of an `xsl:for-each` is in tail position as well.** `call-template-1003` is
+exactly that shape — the step is wrapped in `<xsl:for-each select="following-sibling::e[1]">`, a loop over
+at most one node — and which iteration is the last is not something the compiler can see. So the body is
+marked and the loop settles what each iteration hands back: an apply-templates is left to be handed on
+only by the last iteration, and a named call is always made in the iteration that made it. That second
+rule is not a detail. `xsl:for-each` suspends the current template rule while its body runs, so a named
+call made after the loop would see a rule its call site did not; and there is one place to hand a call
+back to, so two iterations handing one back would lose the first.
+
+The 3.0 run goes from 7,901 of 7,924 to **7,902** and the schema-aware run from 8,462 of 8,526 to
+**8,463**; the 2.0 and XPath runs are unmoved, the two backends agree test for test, and nothing that was
+passing fails. The position and size a handed-back call carries were worth the care: setting them to one
+of one rather than to what the instruction had cost three tests on the first attempt, and `fn/position`
+reported it at once.
+
 ### The rest of 3.0
 
 Where XSLT 3.0 stands here, as of 7 September 2026. The suite measures this half under `--xslt --30`, and it

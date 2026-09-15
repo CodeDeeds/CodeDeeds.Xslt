@@ -100,6 +100,24 @@ namespace CodeDeeds.Xslt.Runtime
         /// <summary>Whether the processor claims XSLT 3.0, which decides the codes a later specification renamed.</summary>
         private bool Implements30 => m_options.Version.CompareTo(XsltVersion.V30) >= 0;
         private Template? m_tailTemplate;
+
+        /// <summary>The rule an <c>xsl:apply-templates</c> in tail position matched, waiting to be run.</summary>
+        private TemplateRule? m_tailRule;
+
+        /// <summary>The tree of the node that rule is to be applied to.</summary>
+        private XdmTree? m_tailTree;
+
+        /// <summary>The node that rule is to be applied to.</summary>
+        private int m_tailNode;
+
+        /// <summary>The mode it is to be applied in.</summary>
+        private int m_tailMode;
+
+        /// <summary>The node's place among the ones being processed, and how many there are.</summary>
+        private int m_tailPosition;
+
+        /// <inheritdoc cref="m_tailPosition"/>
+        private int m_tailSize;
         private ParameterValue[] m_tailParameters = Array.Empty<ParameterValue>();
         private UserFunction? m_tailFunction;
         private XPathValue[]? m_tailArguments;
@@ -1683,6 +1701,24 @@ namespace CodeDeeds.Xslt.Runtime
             ParameterValue[] parameters,
             ref DynamicContext context)
         {
+            if (ChooseRule(node, mode, ref context) is not TemplateRule rule)
+            {
+                ApplyBuiltInRule(node, mode, parameters, ref context);
+                return;
+            }
+
+            InvokeRule(rule, parameters, mode, ref context);
+        }
+
+        /// <summary>
+        /// The rule that matches a node in a mode, or null where none does and the built-in rule is what
+        /// applies.
+        /// </summary>
+        /// <param name="node">The node.</param>
+        /// <param name="mode">The mode to match in.</param>
+        /// <param name="context">The context the patterns are evaluated in.</param>
+        private TemplateRule? ChooseRule(int node, int mode, ref DynamicContext context)
+        {
             if (m_hasTypedModes)
             {
                 RequireTyped(node, mode, ref context);
@@ -1702,13 +1738,147 @@ namespace CodeDeeds.Xslt.Runtime
                     + "the mode says that is a failure rather than the later rule winning.");
             }
 
-            if (rule is null)
+            return rule;
+        }
+
+        /// <summary>
+        /// Applies templates to one node where nothing follows in the template doing it, which is a call
+        /// the running invocation can make in its own place rather than beneath it.
+        /// </summary>
+        /// <remarks>
+        /// The same idea <c>xsl:call-template</c> has had all along, and the same mechanism: the rule is
+        /// chosen here, where the focus for pattern matching is, and handed back for the invocation
+        /// running this template to run once the body has returned. A built-in rule is not handed back
+        /// — it walks the node's children, so nothing about it is a tail call — and is run here.
+        /// </remarks>
+        /// <param name="node">The node to apply templates to.</param>
+        /// <param name="mode">The mode to apply them in.</param>
+        /// <param name="parameters">The parameters, already evaluated where they were written.</param>
+        /// <param name="context">The context, positioned on the node.</param>
+        internal void ApplyTemplatesInTailPosition(
+            int node,
+            int mode,
+            ParameterValue[] parameters,
+            ref DynamicContext context)
+        {
+            if (ChooseRule(node, mode, ref context) is not TemplateRule rule)
             {
                 ApplyBuiltInRule(node, mode, parameters, ref context);
                 return;
             }
 
-            InvokeRule(rule.Value, parameters, mode, ref context);
+            m_tailRule = rule;
+            m_tailParameters = parameters;
+            m_tailTree = context.Tree;
+            m_tailNode = node;
+            m_tailMode = mode;
+            m_tailPosition = context.Position;
+            m_tailSize = context.Size;
+        }
+
+        /// <summary>Takes the rule an apply-templates in tail position left, where there is one.</summary>
+        /// <param name="rule">The rule to run.</param>
+        /// <param name="parameters">Its parameters.</param>
+        /// <param name="mode">The mode to run it in.</param>
+        /// <param name="tree">The tree of the node it applies to.</param>
+        /// <param name="node">The node it applies to.</param>
+        private bool TakeDeferredApply(
+            out TemplateRule rule,
+            out ParameterValue[] parameters,
+            out int mode,
+            out XdmTree tree,
+            out int node,
+            out int position,
+            out int size)
+        {
+            if (m_tailRule is not TemplateRule pending)
+            {
+                rule = default;
+                parameters = Array.Empty<ParameterValue>();
+                mode = 0;
+                tree = null!;
+                node = DynamicContext.NotANode;
+                position = 1;
+                size = 1;
+                return false;
+            }
+
+            rule = pending;
+            parameters = m_tailParameters;
+            mode = m_tailMode;
+            tree = m_tailTree!;
+            node = m_tailNode;
+            position = m_tailPosition;
+            size = m_tailSize;
+
+            m_tailRule = null;
+            m_tailParameters = Array.Empty<ParameterValue>();
+            m_tailTree = null;
+            return true;
+        }
+
+        /// <summary>
+        /// Settles whatever the body of one <c>xsl:for-each</c> iteration handed back, which only the
+        /// last iteration may hand on any further.
+        /// </summary>
+        /// <remarks>
+        /// A named call is made here whichever iteration it was: <c>xsl:for-each</c> suspends the current
+        /// template rule while its body runs, and a call handed on past the end of the loop would be made
+        /// with that rule back in force — which is a difference an <c>xsl:apply-imports</c> inside the
+        /// called template can see. An apply-templates carries its own rule and mode, so it has nothing
+        /// to lose by waiting, and waiting is the whole point: it is the template's last act where the
+        /// iteration that made it was the last one.
+        /// </remarks>
+        /// <param name="lastIteration">Whether the iteration that ran was the last of the loop.</param>
+        /// <param name="context">The focus that iteration ran in.</param>
+        internal void SettleTailCalls(bool lastIteration, ref DynamicContext context)
+        {
+            while (m_tailTemplate is Template next)
+            {
+                ParameterValue[] nextParameters = m_tailParameters;
+                m_tailTemplate = null;
+                m_tailParameters = Array.Empty<ParameterValue>();
+                InvokeTemplate(next, nextParameters, m_currentMode, ref context);
+            }
+
+            if (lastIteration || m_tailRule is null)
+            {
+                return;
+            }
+
+            TakeDeferredApply(
+                out TemplateRule rule,
+                out ParameterValue[] parameters,
+                out int mode,
+                out XdmTree tree,
+                out int node,
+                out int position,
+                out int size);
+
+            DynamicContext moved = OnOneNode(context, tree, node, position, size);
+            InvokeRule(rule, parameters, mode, ref moved);
+        }
+
+        /// <summary>A context positioned on one node, as applying templates to it leaves the focus.</summary>
+        /// <param name="context">The context to move.</param>
+        /// <param name="tree">The node's tree.</param>
+        /// <param name="node">The node.</param>
+        /// <param name="position">Its place among the nodes being processed.</param>
+        /// <param name="size">How many of them there are.</param>
+        private static DynamicContext OnOneNode(
+            DynamicContext context, XdmTree tree, int node, int position, int size)
+        {
+            DynamicContext moved = ReferenceEquals(context.Tree, tree)
+                ? context
+                : context.SwitchTree(tree, node);
+
+            moved.Node = node;
+            moved.AtomicItem = default;
+            moved.CurrentNode = node;
+            moved.CurrentTree = moved.Tree;
+            moved.Position = position;
+            moved.Size = size;
+            return moved;
         }
 
         /// <summary>
@@ -2404,13 +2574,32 @@ namespace CodeDeeds.Xslt.Runtime
                         {
                             Instruction.ExecuteAll(template.Body, ref inner, this);
 
-                            while (m_tailTemplate is not null)
+                            while (m_tailTemplate is not null || m_tailRule is not null)
                             {
-                                Template next = m_tailTemplate;
-                                ParameterValue[] nextParameters = m_tailParameters;
-                                m_tailTemplate = null;
-                                m_tailParameters = Array.Empty<ParameterValue>();
-                                InvokeTemplate(next, nextParameters, mode, ref inner);
+                                if (m_tailTemplate is Template next)
+                                {
+                                    ParameterValue[] nextParameters = m_tailParameters;
+                                    m_tailTemplate = null;
+                                    m_tailParameters = Array.Empty<ParameterValue>();
+                                    InvokeTemplate(next, nextParameters, mode, ref inner);
+                                    continue;
+                                }
+
+                                // Inside the capture the call is made rather than handed on: what the
+                                // type is checked against is the whole of what this template produced,
+                                // so the call has to happen where the capture can see it.
+                                TakeDeferredApply(
+                                    out TemplateRule applied,
+                                    out ParameterValue[] applyParameters,
+                                    out int applyMode,
+                                    out XdmTree applyTree,
+                                    out int applyNode,
+                                    out int applyPosition,
+                                    out int applySize);
+
+                                DynamicContext moved =
+                                    OnOneNode(inner, applyTree, applyNode, applyPosition, applySize);
+                                InvokeRule(applied, applyParameters, applyMode, ref moved);
                             }
                         }
                         finally
@@ -2424,6 +2613,39 @@ namespace CodeDeeds.Xslt.Runtime
                     else
                     {
                         Instruction.ExecuteAll(template.Body, ref inner, this);
+                    }
+
+                    if (m_tailTemplate is null && m_tailRule is not null)
+                    {
+                        // The body ended in an xsl:apply-templates with nothing after it. The rule it
+                        // matched is run here, in this invocation's place, with the focus moved to the
+                        // node it applies to: a template that walks a sequence one sibling at a time is
+                        // then a loop rather than a stack, however long the sequence is.
+                        TakeDeferredApply(
+                            out TemplateRule applied,
+                            out ParameterValue[] applyParameters,
+                            out int applyMode,
+                            out XdmTree applyTree,
+                            out int applyNode,
+                            out int applyPosition,
+                            out int applySize);
+
+                        template = applied.Template;
+
+                        if (template.Visibility == Visibility.Abstract)
+                        {
+                            throw AbstractTemplate(template);
+                        }
+
+                        parameters = applyParameters;
+                        mode = applyMode;
+                        inner = OnOneNode(inner, applyTree, applyNode, applyPosition, applySize);
+                        m_currentMode = mode;
+                        m_currentPrecedence = template.ImportPrecedence;
+                        m_currentFloor = template.ImportFloor;
+                        m_currentRule = applied;
+                        m_tunnel = ExtendTunnel(parameters);
+                        continue;
                     }
 
                     if (m_tailTemplate is null)
