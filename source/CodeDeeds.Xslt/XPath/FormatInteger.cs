@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using System.Text;
 using CodeDeeds.Xslt.Compiler;
 using CodeDeeds.Xslt.Runtime;
@@ -424,6 +425,57 @@ namespace CodeDeeds.Xslt.XPath
             return value < 0 ? "-" + rendered : rendered;
         }
 
+        /// <summary>Renders one number wider than a 64-bit integer.</summary>
+        /// <remarks>
+        /// Only the digit sequences can present a number of this size. The alphabetic one would run to
+        /// tens of millions of letters, the roman one stops at 4999 and words would fill pages; the
+        /// specification's answer for a sequence that cannot render a value is the digits, which is what
+        /// each of them falls back to here as it already does for the values it cannot reach.
+        /// </remarks>
+        /// <param name="value">The number.</param>
+        /// <param name="language">The language to spell words in, if the picture asks for words.</param>
+        public string Format(BigInteger value, string? language = null)
+        {
+            if (value >= long.MinValue && value <= long.MaxValue)
+            {
+                return Format((long)value, language);
+            }
+
+            BigInteger magnitude = BigInteger.Abs(value);
+            string plain = magnitude.ToString(CultureInfo.InvariantCulture);
+
+            // The ordinal suffix is decided by the last digits and by nothing further up, so the tail is
+            // all that has to fit the counter the languages are written against.
+            string rendered = m_sequence == IntegerSequence.Digits
+                ? Digits(plain, (ulong)(magnitude % 1000), language)
+                : plain;
+
+            return value.Sign < 0 ? "-" + rendered : rendered;
+        }
+
+        /// <summary>
+        /// The same picture with a regular grouping separator, which is what <c>xsl:number</c> asks for
+        /// in its <c>grouping-separator</c> and <c>grouping-size</c> attributes rather than in a picture.
+        /// </summary>
+        /// <remarks>
+        /// The attributes apply to a digit token whatever family the digits are from, and a picture that
+        /// places its own separators has said where they go already.
+        /// </remarks>
+        /// <param name="size">How many digits go in a group; zero or less asks for none.</param>
+        /// <param name="separator">The separator's code point, or a negative number for none.</param>
+        public IntegerPicture Grouped(int size, int separator)
+        {
+            if (size <= 0 || separator < 0 || m_sequence != IntegerSequence.Digits
+                || m_interval > 0 || m_positions.Length != 0)
+            {
+                return this;
+            }
+
+            return new IntegerPicture(
+                m_sequence, m_ordinal, m_zero, m_mandatory, m_positions, new[] { separator }, size,
+                m_variation);
+        }
+
         /// <summary>Renders through the alphabetic or roman sequences.</summary>
         /// <remarks>
         /// Neither sequence has a way to write zero, and roman numerals stop at 4999. Both are asked anyway
@@ -453,7 +505,15 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>Renders as digits of the picture's family, padded and grouped as the picture asks.</summary>
         private string Digits(ulong magnitude, string? language)
         {
-            string plain = magnitude.ToString(CultureInfo.InvariantCulture);
+            return Digits(magnitude.ToString(CultureInfo.InvariantCulture), magnitude, language);
+        }
+
+        /// <summary>Renders digits already written out, which is the one thing a wide value shares.</summary>
+        /// <param name="plain">The magnitude in Latin digits, with no sign.</param>
+        /// <param name="ordinal">The magnitude, or its last digits, for the ordinal suffix.</param>
+        /// <param name="language">The language the suffix is spelled in.</param>
+        private string Digits(string plain, ulong ordinal, string? language)
+        {
             int width = Math.Max(plain.Length, m_mandatory);
             StringBuilder builder = new StringBuilder(width + width);
 
@@ -478,7 +538,7 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             // An ordinal written in digits is a suffix in English and a full stop in German: 3rd against 3.
-            return builder.Append(Languages.Words(language).OrdinalSuffix(magnitude, m_variation)).ToString();
+            return builder.Append(Languages.Words(language).OrdinalSuffix(ordinal, m_variation)).ToString();
         }
 
         /// <summary>The separator that belongs this many digits from the right, if any.</summary>
@@ -798,7 +858,7 @@ namespace CodeDeeds.Xslt.XPath
 
             return Xpath2FunctionExpr.IsEmptySequence(value)
                 ? XPathValue.FromString(string.Empty)
-                : XPathValue.FromString(picture.Format(value.ToInteger(), language));
+                : XPathValue.FromString(picture.Format(value.ToBigInteger(), language));
         }
     }
 }

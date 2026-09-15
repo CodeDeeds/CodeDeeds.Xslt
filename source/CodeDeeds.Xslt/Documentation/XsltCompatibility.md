@@ -17,13 +17,13 @@ Conformance as last measured, on 15 September 2026, against the W3C suites (see 
 
 | Suite | Result |
 | --- | --- |
-| XSLT 3.0 test suite, 3.0 processor | 7,894 of 7,924, 99.6% |
+| XSLT 3.0 test suite, 3.0 processor | 7,896 of 7,924, 99.6% |
 | XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,594 of 5,622, 99.5% |
 | QT3 (XPath), 3.1 | 17,592 of 17,629, 99.8% |
 | QT3 (XPath), 2.0 | 14,144 of 14,173, 99.8% |
 
 The 2,900 streaming tests are skipped by design. The 686 schema-aware tests are read only by the driver's
-opt-in `--schema` run, which stands at 8,455 of 8,526 (99.2%), the same on both backends; the figures
+opt-in `--schema` run, which stands at 8,457 of 8,526 (99.2%), the same on both backends; the figures
 above are the run without it.
 
 ## Not implemented, and not planned
@@ -40,7 +40,7 @@ above are the run without it.
 
 | Area | Limit |
 | --- | --- |
-| `xs:integer` | Unbounded, as the specification has it. A value that fits a 64-bit signed integer is held in one and a wider value in a `BigInteger`, narrowing again the moment it fits, so the width is a storage detail rather than a limit. A cast fails only where the target type excludes the value — `xs:long('9223372036854775808')` is `FORG0001` — and the derived types that keep `xs:integer`'s lack of a bound keep it here too. `format-integer` and `xsl:number` are the exception: they render through a fixed-width number and refuse a value past it with `FOAR0002` rather than truncating. |
+| `xs:integer` | Unbounded, as the specification has it. A value that fits a 64-bit signed integer is held in one and a wider value in a `BigInteger`, narrowing again the moment it fits, so the width is a storage detail rather than a limit. A cast fails only where the target type excludes the value — `xs:long('9223372036854775808')` is `FORG0001` — and the derived types that keep `xs:integer`'s lack of a bound keep it here too. `format-number`, `format-integer` and `xsl:number` write every digit of one; a numbering sequence with no spelling for a number that size, roman numerals or words, falls back to the digits as the specification asks. |
 | `xs:decimal` | About 28 significant digits, being `System.Decimal`. |
 | Dates and times | Years 1 to 999,999,999, before the common era and after it alike. A year past that is `FODT0001` — an overflow rather than `FORG0001`, because the text names a moment perfectly well and it is this engine that cannot hold it. Text that would not be a date whatever year stood in it is still `FORG0001`. |
 | Durations | Months in a 32-bit signed integer, seconds in `System.TimeSpan`. A duration beyond either is `FODT0002`, on the same reading as the dates above. |

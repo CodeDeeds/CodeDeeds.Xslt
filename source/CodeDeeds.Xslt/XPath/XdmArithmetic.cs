@@ -117,6 +117,53 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
+        /// Rounds an integer to a number of digits, which is only ever a negative number of them: an
+        /// integer rounded at the point or below it is itself.
+        /// </summary>
+        /// <remarks>
+        /// Done on the integer rather than through a <see cref="decimal"/> or a <see cref="double"/>,
+        /// both of which run out of digits before an <c>xs:integer</c> does. The comparison against the
+        /// half is a comparison of two integers and loses nothing.
+        /// </remarks>
+        /// <param name="value">The value to round.</param>
+        /// <param name="places">How many digits to keep after the point; zero or more leaves the value.</param>
+        /// <param name="halfToEven">
+        /// Whether a half goes to the nearest even digit; otherwise it goes towards positive infinity.
+        /// </param>
+        public static BigInteger At(BigInteger value, int places, bool halfToEven)
+        {
+            if (places >= 0 || value.IsZero)
+            {
+                return value;
+            }
+
+            // An upper bound on the digit count, so that a power of ten that cannot reach the value is
+            // never built: rounding a twenty-digit number to the nearest 10^100000 gives zero, and
+            // working that out by computing 10^100000 first would take a while to say so.
+            long digits = (long)(BigInteger.Abs(value).GetBitLength() * 0.30103) + 2;
+
+            if (-(long)places > digits)
+            {
+                return BigInteger.Zero;
+            }
+
+            BigInteger power = BigInteger.Pow(10, -places);
+            BigInteger whole = BigInteger.DivRem(BigInteger.Abs(value), power, out BigInteger remainder);
+            int half = (remainder * 2).CompareTo(power);
+            bool negative = value.Sign < 0;
+
+            // The magnitude is what is being rounded, so towards positive infinity means up for a
+            // positive value and down for a negative one.
+            if (half > 0 || (half == 0 && (halfToEven ? !whole.IsEven : !negative)))
+            {
+                whole += BigInteger.One;
+            }
+
+            whole *= power;
+            return negative ? -whole : whole;
+        }
+
+        /// <summary>
         /// Rounds at the point, where no scaling is needed and nothing can be lost.
         /// </summary>
         /// <remarks>

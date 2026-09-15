@@ -197,14 +197,55 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
-        public void SpellingOneOutIsStillSixtyFourBitWork()
+        public void SpellingOneOutGoesAsWideAsTheDigitsDo()
         {
-            // format-integer and xsl:number render through a fixed-width number, and widening those means
-            // widening the sequences they render through as well - the words for a quintillion and past it,
-            // the alphabetic and roman fallbacks. That has not been done, and the path refuses rather than
-            // truncating, which is the property the two forms are meant to keep: a gap is an error and
-            // never a wrong number.
-            Refuses("FOAR0002", $"format-integer({Wide}, '1')");
+            // The digits of a value are its digits however many there are, and a picture's padding and
+            // grouping are counted from the right either way.
+            Assert.AreEqual(Wide, Writes($"format-integer({Wide}, '1')"));
+            Assert.AreEqual("1,000,000,000,000,000,000,000", Writes($"format-integer({Wide}, '1,000')"));
+
+            // A sequence with no spelling for a number this size answers with the digits, which is the
+            // fallback the specification asks for and the same one roman numerals already take above 4999.
+            Assert.AreEqual(Wide, Writes($"format-integer({Wide}, 'i')"));
+            Assert.AreEqual(Wide, Writes($"format-integer({Wide}, 'w')"));
+        }
+
+        [TestMethod]
+        public void XslNumberCountsInWholeDigitsToo()
+        {
+            // The value went through an int and came back as int.MaxValue, which is the one thing a
+            // bounded path must never do: it answered a question about a different number.
+            string Numbered(string attributes) => Transforms(
+                "<xsl:template match=\"/\"><out><xsl:number " + attributes + "/></out></xsl:template>");
+
+            Assert.AreEqual(Wide, Numbered($"value=\"{Wide}\" format=\"1\""));
+            Assert.AreEqual(
+                "1,000,000,000,000,000,000,000",
+                Numbered($"value=\"{Wide}\" format=\"1\" grouping-separator=\",\" grouping-size=\"3\""));
+
+            // grouping-separator and grouping-size are attributes rather than picture text, and they
+            // group a digit token whatever family its digits are from.
+            Assert.AreEqual(
+                "\u0661\u0662,\u0663\u0664\u0665",
+                Numbered("value=\"12345\" format=\"\u0660\" grouping-separator=\",\" grouping-size=\"3\""));
+        }
+
+        /// <summary>Runs a whole stylesheet body through both backends and returns what is inside out.</summary>
+        private static string Transforms(string body)
+        {
+            string stylesheet = $"<xsl:stylesheet version=\"3.0\" {Xsl}>{body}</xsl:stylesheet>";
+
+            XsltOptions For(XsltBackend backend) => new XsltOptions
+            {
+                Backend = backend,
+                OmitXmlDeclaration = true,
+            };
+
+            string interpreted = new Xslt(stylesheet, For(XsltBackend.Interpreted)).TransformXml("<r/>");
+            string compiled = new Xslt(stylesheet, For(XsltBackend.Compiled)).TransformXml("<r/>");
+
+            Assert.AreEqual(interpreted, compiled, "the compiled backend disagreed with the interpreter");
+            return interpreted == "<out/>" ? string.Empty : interpreted["<out>".Length..^"</out>".Length];
         }
 
         [TestMethod]

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 
 namespace CodeDeeds.Xslt.Compiler
 {
@@ -47,6 +48,12 @@ namespace CodeDeeds.Xslt.Compiler
             value.TryFormat(buffer, out int written, default, CultureInfo.InvariantCulture);
             ReadOnlySpan<char> text = buffer[..written];
             return Parse(text[0] == '-' ? text[1..] : text);
+        }
+
+        /// <summary>The digits of an integer too wide to hold in 64 bits, which are exact as well.</summary>
+        public static DecimalDigits Of(BigInteger value)
+        {
+            return Parse(BigInteger.Abs(value).ToString(CultureInfo.InvariantCulture));
         }
 
         /// <summary>The digits of a decimal, whose own text is already exact.</summary>

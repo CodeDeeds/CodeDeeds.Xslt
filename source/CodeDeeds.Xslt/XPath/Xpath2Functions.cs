@@ -2559,16 +2559,20 @@ namespace CodeDeeds.Xslt.XPath
                 return value;
             }
 
-            if (value.TypeCode is XdmTypeCode.Integer or XdmTypeCode.Decimal && digits is < 0 and >= -28)
+            // Rounding to the left of the point, in the type the value came in: an integer stays an
+            // integer, so -3 to the hundreds is 0 and not a double's -0, which writes as "-0". An
+            // integer is rounded as one however wide it is, a decimal running out of digits first.
+            if (value.TypeCode == XdmTypeCode.Integer)
             {
-                // Rounding to the left of the point, in the type the value came in: an integer stays an
-                // integer, so -3 to the hundreds is 0 and not a double's -0, which writes as "-0".
+                return XPathValue.FromInteger(XdmRounding.At(value.ToBigInteger(), digits, halfToEven: true));
+            }
+
+            if (value.TypeCode == XdmTypeCode.Decimal && digits is < 0 and >= -28)
+            {
                 decimal power = (decimal)Math.Pow(10, -digits);
                 decimal rounded = Math.Round(value.ToDecimal() / power, 0, MidpointRounding.ToEven) * power;
 
-                return value.TypeCode == XdmTypeCode.Integer
-                    ? XPathValue.FromInteger((long)rounded)
-                    : XPathValue.FromDecimal(rounded);
+                return XPathValue.FromDecimal(rounded);
             }
 
             if (value.TypeCode == XdmTypeCode.Decimal && digits is >= 0 and <= 28)

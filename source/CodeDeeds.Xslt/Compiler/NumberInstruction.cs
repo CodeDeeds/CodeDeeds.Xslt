@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using System.Text;
 using CodeDeeds.Xslt.Model;
 using CodeDeeds.Xslt.Runtime;
@@ -248,7 +249,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// <inheritdoc/>
         public override void Execute(ref DynamicContext context, XsltRuntime runtime)
         {
-            List<int> numbers = new List<int>();
+            List<BigInteger> numbers = new List<BigInteger>();
 
             if (m_value is not null)
             {
@@ -363,7 +364,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// </remarks>
         /// <param name="numbers">The numbers to shift, in place.</param>
         /// <param name="written">The attribute's value, whitespace-separated integers.</param>
-        private static void ShiftToStart(List<int> numbers, string written)
+        private static void ShiftToStart(List<BigInteger> numbers, string written)
         {
             string[] tokens = written.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
 
@@ -407,7 +408,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// Text to write instead of any formatted number, which only backwards-compatible processing
         /// produces; <see langword="null"/> where <paramref name="numbers"/> is the answer.
         /// </returns>
-        private string? CollectValues(List<int> numbers, ref DynamicContext context)
+        private string? CollectValues(List<BigInteger> numbers, ref DynamicContext context)
         {
             XPathValue value = m_value!.Evaluate(ref context);
 
@@ -429,14 +430,26 @@ namespace CodeDeeds.Xslt.Compiler
 
             foreach (XPathValue item in XdmSequence.Atomize(XdmSequence.Items(value)))
             {
+                // An integer is taken as one: a double holds fifteen digits and xsl:number is given
+                // values that run past that, whose last digits are exactly what is being numbered.
+                if (item.TypeCode == XdmTypeCode.Integer)
+                {
+                    BigInteger whole = item.ToBigInteger();
+
+                    if (whole.Sign < 0)
+                    {
+                        throw NotANumberToCountBy(item);
+                    }
+
+                    numbers.Add(whole);
+                    continue;
+                }
+
                 double number = item.ToNumber();
 
                 if (double.IsNaN(number) || double.IsInfinity(number) || number < -0.5)
                 {
-                    throw XsltErrors.Error(
-                        XsltErrorCode.XTDE0980,
-                        $"The value of xsl:number holds '{XdmSequence.StringValueOf(item)}', and every item "
-                        + "in it has to be an integer that is not negative.");
+                    throw NotANumberToCountBy(item);
                 }
 
                 numbers.Add(Rounded(number));
@@ -445,11 +458,18 @@ namespace CodeDeeds.Xslt.Compiler
             return null;
         }
 
-        /// <summary>Rounds a number to the integer that is going to be rendered.</summary>
-        private static int Rounded(double number)
+        private static XsltException NotANumberToCountBy(XPathValue item)
         {
-            double rounded = Math.Floor(number + 0.5);
-            return rounded is >= int.MinValue and <= int.MaxValue ? (int)rounded : int.MaxValue;
+            return XsltErrors.Error(
+                XsltErrorCode.XTDE0980,
+                $"The value of xsl:number holds '{XdmSequence.StringValueOf(item)}', and every item "
+                + "in it has to be an integer that is not negative.");
+        }
+
+        /// <summary>Rounds a number to the integer that is going to be rendered.</summary>
+        private static BigInteger Rounded(double number)
+        {
+            return new BigInteger(Math.Floor(number + 0.5));
         }
 
         /// <summary>
@@ -487,7 +507,7 @@ namespace CodeDeeds.Xslt.Compiler
             return true;
         }
 
-        private void CollectNumbers(List<int> numbers, ref DynamicContext context)
+        private void CollectNumbers(List<BigInteger> numbers, ref DynamicContext context)
         {
             switch (m_level)
             {
@@ -710,7 +730,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="ordinal">The value of the <c>ordinal</c> attribute, or null for cardinal numbering.</param>
         /// <param name="language">The language to spell words in.</param>
         public static string Format(
-            List<int> numbers,
+            List<BigInteger> numbers,
             string format,
             string? groupingSeparator = null,
             int groupingSize = 0,
@@ -737,7 +757,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="ordinal">The value of the <c>ordinal</c> attribute, or null for cardinal numbering.</param>
         /// <param name="language">The language to spell words in.</param>
         public static string Format(
-            List<int> numbers,
+            List<BigInteger> numbers,
             NumberFormat format,
             string? groupingSeparator = null,
             int groupingSize = 0,
@@ -775,18 +795,28 @@ namespace CodeDeeds.Xslt.Compiler
                     ? format.PictureAt(i)
                     : IntegerPicture.Parse(format.TokenAt(i), modifiers: true, ordinal: true, ordinal);
 
+                BigInteger number = numbers[i];
+
                 if (picture is not null)
                 {
-                    builder.Append(picture.Format(numbers[i], language));
+                    // grouping-separator and grouping-size are attributes rather than picture text, and
+                    // they group a digit token whatever family its digits are from.
+                    builder.Append(
+                        picture.Grouped(groupingSize, CodePointOf(groupingSeparator))
+                            .Format(number, language));
                 }
-                else if (TryFormatOne(numbers[i], token, groupingSeparator, groupingSize, alphabetic,
+                else if (number < int.MinValue || number > int.MaxValue)
+                {
+                    builder.Append(FormatWide(number, token, groupingSeparator, groupingSize));
+                }
+                else if (TryFormatOne((int)number, token, groupingSeparator, groupingSize, alphabetic,
                     scratch, out int written))
                 {
                     builder.Append(scratch[..written]);
                 }
                 else
                 {
-                    builder.Append(FormatOne(numbers[i], token, groupingSeparator, groupingSize, alphabetic));
+                    builder.Append(FormatOne((int)number, token, groupingSeparator, groupingSize, alphabetic));
                 }
             }
 
@@ -821,6 +851,63 @@ namespace CodeDeeds.Xslt.Compiler
             }
 
             return true;
+        }
+
+        /// <summary>The code point a separator begins with, or a negative number where there is none.</summary>
+        /// <param name="separator">The separator as written.</param>
+        private static int CodePointOf(string? separator)
+        {
+            if (string.IsNullOrEmpty(separator))
+            {
+                return -1;
+            }
+
+            return char.IsSurrogatePair(separator, 0) ? char.ConvertToUtf32(separator, 0) : separator[0];
+        }
+
+        /// <summary>Renders one number too wide to hold in an <see cref="int"/>.</summary>
+        /// <remarks>
+        /// Only digits can present a number of this size: the alphabetic sequence would run to millions of
+        /// letters and the roman one stops at 4999, and the specification's answer for a sequence that
+        /// cannot render a value is the digits. The token's own width and the grouping attributes apply as
+        /// they do to any other number.
+        /// </remarks>
+        /// <param name="number">The number to render.</param>
+        /// <param name="token">The token saying how to render it.</param>
+        /// <param name="groupingSeparator">The characters to separate digit groups with, if any.</param>
+        /// <param name="groupingSize">How many digits go in a group; zero disables grouping.</param>
+        internal static string FormatWide(
+            BigInteger number,
+            ReadOnlySpan<char> token,
+            string? groupingSeparator,
+            int groupingSize)
+        {
+            string plain = BigInteger.Abs(number).ToString(CultureInfo.InvariantCulture);
+
+            if (token.Length > plain.Length && token.Length > 1 && char.IsDigit(token[0]))
+            {
+                plain = plain.PadLeft(token.Length, '0');
+            }
+
+            if (groupingSeparator is string separator && separator.Length != 0 && groupingSize > 0
+                && plain.Length > groupingSize)
+            {
+                StringBuilder grouped = new StringBuilder(plain.Length * 2);
+
+                for (int i = 0; i < plain.Length; i++)
+                {
+                    if (i > 0 && (plain.Length - i) % groupingSize == 0)
+                    {
+                        grouped.Append(separator);
+                    }
+
+                    grouped.Append(plain[i]);
+                }
+
+                plain = grouped.ToString();
+            }
+
+            return number.Sign < 0 ? "-" + plain : plain;
         }
 
         /// <summary>Renders one number through one format token.</summary>

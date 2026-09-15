@@ -472,9 +472,10 @@ a month that is no month, and naming the year's size would send a reader after t
 `FODT0002` is the durations' overflow, on the same reading: `xs:yearMonthDuration('P100000000000Y')` says
 plainly what it means and the months are held in a 32-bit signed integer here.
 
-`FOAR0002` was the integers' overflow and has almost nothing left to say, `xs:integer` no longer being
-bounded: what remains for it is `format-integer` and `xsl:number`, which render through a fixed-width
-number. A cast now fails only where the target type excludes the value, whatever its size, so
+`FOAR0002` was the integers' overflow and has nothing left to say, `xs:integer` no longer being bounded
+and the last two places that rendered through a fixed-width number no longer doing so (see *What a
+number that will not fit sixty-four bits is rounded and written as*). A cast now fails only where the
+target type excludes the value, whatever its size, so
 `xs:unsignedLong('18446744073709551615')` is that type's maximum and is held, while
 `xs:unsignedLong('18446744073709551616')` and `xs:long('9223372036854775808')` are each one past the
 type itself and are `FORG0001`. The rest:
@@ -5869,6 +5870,43 @@ second serialization costs a second run paid only by a test that would otherwise
 
 The 3.0 run goes from 7,891 of 7,924 to **7,894**, the 2.0 run from 5,592 of 5,622 to **5,594** and the
 schema-aware run from 8,452 of 8,526 to **8,455**. The XPath runs read no XSLT and are unmoved.
+
+### What a number that will not fit sixty-four bits is rounded and written as
+
+`xs:integer` stopped being bounded here some while ago, and four places went on holding one in a
+<code>long</code> anyway. Each of them was found by a test that asked for a number wider than that.
+
+**Rounding at a precision went through a `decimal`.** `round($x, -1)` and `round-half-to-even($x, -1)`
+scaled the value down, rounded and scaled back up in `decimal`, then narrowed the result to a `long`.
+A `decimal` holds 28 digits and a `long` 19, so `round(123456789012345789011, -1)` overflowed the
+narrowing — silently in the first, which caught the overflow and fell back to a `double` and answered
+`1.2345678901234578E20`, and not at all in the second, which let an `OverflowException` out of the engine.
+An integer is now rounded as an integer: the division, the remainder and the comparison against the half
+are all `BigInteger` and lose nothing. That is `math-3601`, which rounds a 21-digit literal at the tens.
+
+**`xsl:number` counted in an `int`.** The value was rounded to an `int` and clamped to `int.MaxValue` past
+it, so `number-0111` — which numbers 1234567890 cubed — wrote `-2:147483647`. Clamping is the one thing a
+bounded path must never do: it answers a question about a different number. The numbers are `BigInteger`
+now, from the value through `start-at` to the format token, and the narrow path is still the narrow path
+for everything that fits it.
+
+**`format-integer` and `format-number` refused.** Both asked for the value as a `long` and raised
+`FOAR0002` where it would not go, which was honest but not required of them: the digits of a value are its
+digits however many there are, and the padding and grouping are counted from the right either way. The
+sequences that genuinely cannot present a number that size — roman numerals, which stop at 4999, and words,
+which would fill pages — fall back to the digits, which is what the specification asks of a sequence that
+cannot render a value and what they already did above `int.MaxValue`.
+
+One thing came with it that no test asked for and the specification does: **`grouping-separator` and
+`grouping-size` group a digit token whatever family its digits are from**. They were applied on the fast
+path, which writes Latin digits, and dropped on the path that reads the token as a `format-integer`
+picture, which is where every other family goes. `number-0111` wants the same number three times, the
+third in Arabic-Indic digits, and all three grouped.
+
+The 3.0 run goes from 7,894 of 7,924 to **7,896** and the schema-aware run from 8,455 of 8,526 to
+**8,457**; the 2.0 and XPath runs are unmoved, the two backends agree test for test, and nothing that was
+passing fails. One unit test changed with the code: it recorded the `FOAR0002` refusal as the property
+those two forms were meant to keep, and what they keep now is the number.
 
 ### The rest of 3.0
 

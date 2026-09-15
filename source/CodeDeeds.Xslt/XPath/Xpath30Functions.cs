@@ -763,9 +763,19 @@ namespace CodeDeeds.Xslt.XPath
                 return value;
             }
 
+            // An integer is rounded as one, however wide. A decimal holds 28 digits and a double 15,
+            // and an xs:integer is bounded by neither, so neither can be the road to the answer.
+            if (value.TypeCode == XdmTypeCode.Integer)
+            {
+                return XPathValue.FromInteger(XdmRounding.At(
+                    value.ToBigInteger(),
+                    (int)Math.Clamp(digits, int.MinValue, int.MaxValue),
+                    halfToEven: false));
+            }
+
             // An exact type is rounded exactly. Going through a double would answer 35600.000000000004 for
             // round(35612.25, -2), the scaling back up being a division by a power of ten that is not one.
-            if (value.TypeCode is XdmTypeCode.Decimal or XdmTypeCode.Integer && Math.Abs(digits) <= 18)
+            if (value.TypeCode is XdmTypeCode.Decimal && Math.Abs(digits) <= 18)
             {
                 try
                 {
@@ -776,9 +786,7 @@ namespace CodeDeeds.Xslt.XPath
                         ? Math.Floor((exact * factor) + 0.5m) / factor
                         : Math.Floor((exact / factor) + 0.5m) * factor;
 
-                    return value.TypeCode == XdmTypeCode.Integer
-                        ? XPathValue.FromInteger((long)scaled)
-                        : XPathValue.FromDecimal(scaled);
+                    return XPathValue.FromDecimal(scaled);
                 }
                 catch (OverflowException)
                 {

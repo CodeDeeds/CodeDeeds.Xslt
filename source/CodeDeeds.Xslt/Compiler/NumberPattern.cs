@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using System.Text;
 using CodeDeeds.Xslt.XPath;
 
@@ -127,7 +128,9 @@ namespace CodeDeeds.Xslt.Compiler
 
             return value.TypeCode switch
             {
-                XdmTypeCode.Integer => DecimalDigits.Of(value.ToInteger()).Shift(multiplier),
+                XdmTypeCode.Integer => (value.IsWideInteger
+                    ? DecimalDigits.Of(value.ToBigInteger())
+                    : DecimalDigits.Of(value.ToInteger())).Shift(multiplier),
                 XdmTypeCode.Decimal => DecimalDigits.Of(value.ToDecimal()).Shift(multiplier),
                 _ => DecimalDigits.Of(scaled),
             };
