@@ -5908,6 +5908,31 @@ The 3.0 run goes from 7,894 of 7,924 to **7,896** and the schema-aware run from 
 passing fails. One unit test changed with the code: it recorded the `FOAR0002` refusal as the property
 those two forms were meant to keep, and what they keep now is the number.
 
+### What upper case is, when a letter has no capital of its own
+
+`fn:upper-case` and `fn:lower-case` are defined against Unicode's *default case operations*, which are
+the **full** case mappings without tailoring for any language. .NET's `ToUpperInvariant` applies the
+*simple* mappings, which are one character to one character. The difference is every letter whose capital
+is more than one character: the sharp s uppercases to `SS`, the ffi ligature to `FFI`, j with caron to a
+capital J and a combining caron, and a Greek letter with a subscript iota to the letter and a capital
+iota beside it. There are 102 of them, and .NET left all 102 alone.
+
+The table here is the unconditional part of the Unicode Character Database's `SpecialCasing`: every
+character whose full mapping is longer than one character and does not depend on context. The conditional
+entries are left out for the reason the specification gives — the language-specific ones are excluded by a
+function defined to be locale-insensitive — except the Greek final sigma, which is neither conditional on a
+language nor decidable from the character alone, and is not implemented.
+
+The substitution runs before the simple mapping rather than instead of it. Every replacement is text the
+simple mapping then leaves alone, so the two compose; and letting .NET map the rest is what keeps a
+surrogate pair a pair, which a character-at-a-time loop would not.
+
+`string-135` uppercases every character of Latin-1 and reads back the code points. The only one of the
+102 that lives there is the sharp s, and that one character was the whole of the failure.
+
+The 3.0 run goes from 7,896 of 7,924 to **7,897** and the schema-aware run from 8,457 of 8,526 to
+**8,458**; the 2.0 and XPath runs are unmoved and nothing that was passing fails.
+
 ### The rest of 3.0
 
 Where XSLT 3.0 stands here, as of 7 September 2026. The suite measures this half under `--xslt --30`, and it

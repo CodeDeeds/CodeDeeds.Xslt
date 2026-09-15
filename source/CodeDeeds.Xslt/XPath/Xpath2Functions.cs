@@ -679,10 +679,10 @@ namespace CodeDeeds.Xslt.XPath
                     return Average(Items(0, ref context));
 
                 case Xpath2Function.UpperCase:
-                    return XPathValue.FromString(Text(0, ref context).ToUpperInvariant());
+                    return XPathValue.FromString(CaseMapping.ToUpper(Text(0, ref context)));
 
                 case Xpath2Function.LowerCase:
-                    return XPathValue.FromString(Text(0, ref context).ToLowerInvariant());
+                    return XPathValue.FromString(CaseMapping.ToLower(Text(0, ref context)));
 
                 case Xpath2Function.EndsWith:
                     return XPathValue.FromBoolean(
