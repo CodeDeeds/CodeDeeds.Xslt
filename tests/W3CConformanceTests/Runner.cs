@@ -615,8 +615,16 @@ namespace CodeDeeds.Xslt.Conformance
                 return cached;
             }
 
-            using FileStream stream = File.OpenRead(Path.Combine(m_catalog.Root, file));
+            string path = Path.GetFullPath(Path.Combine(m_catalog.Root, file));
+
+            using FileStream stream = File.OpenRead(path);
             XdmTree tree = XdmTreeBuilder.FromXml(stream, m_names);
+
+            // Where it came from, which fn:document-uri() and fn:base-uri() answer with. A document
+            // read from a file has one; a driver that does not say so leaves both of them empty.
+            tree.DocumentUri = new Uri(path).AbsoluteUri;
+            tree.BaseUri = tree.DocumentUri;
+
             m_documents.Add(file, tree);
             return tree;
         }

@@ -1055,6 +1055,30 @@ namespace CodeDeeds.Xslt.XPath
                 case XPathValueKind.Node:
                     return TryTypedValueToOne(value.NodeTree, value.NodeId, out single);
 
+                case XPathValueKind.Array:
+                {
+                    // An array atomizes to its members atomized, so [3] is the integer 3 and compares
+                    // as one. An array holding several is several values, which a value comparison has
+                    // no more room for than any other sequence of them.
+                    List<XPathValue> members = XdmSequence.Atomize(new List<XPathValue> { value });
+
+                    if (members.Count == 0)
+                    {
+                        single = default;
+                        return false;
+                    }
+
+                    if (members.Count > 1)
+                    {
+                        throw XsltErrors.Error(
+                            XsltErrorCode.XPTY0004,
+                            $"A value comparison needs one value on each side, but was given {members.Count}.");
+                    }
+
+                    single = members[0];
+                    return true;
+                }
+
                 case XPathValueKind.Map:
                 case XPathValueKind.Function:
                     // A value comparison atomizes each operand before comparing them, and a map or a

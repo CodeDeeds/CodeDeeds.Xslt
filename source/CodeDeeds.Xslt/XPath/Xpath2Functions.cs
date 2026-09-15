@@ -1049,8 +1049,18 @@ namespace CodeDeeds.Xslt.XPath
 
         private string ReadUnparsedText(ref DynamicContext context)
         {
-            string href = Text(0, ref context);
-            string? encoding = m_arguments.Length > 1 ? Text(1, ref context) : null;
+            return ReadUnparsedText(
+                Text(0, ref context),
+                m_arguments.Length > 1 ? Text(1, ref context) : null,
+                ref context);
+        }
+
+        /// <summary>Reads a resource as text, the arguments having already been evaluated.</summary>
+        /// <param name="href">The reference as written.</param>
+        /// <param name="encoding">The encoding the call named, or null for none.</param>
+        /// <param name="context">The context to read in.</param>
+        private string ReadUnparsedText(string href, string? encoding, ref DynamicContext context)
+        {
 
             // A fragment names part of a document, and there is no part of a text file to name. Asked
             // here rather than only of the resolver, so that a lent loader is not left to know it.
@@ -1142,9 +1152,17 @@ namespace CodeDeeds.Xslt.XPath
 
         private bool IsUnparsedTextAvailable(ref DynamicContext context)
         {
+            // The argument is read before the attempt, and outside it. This function answers whether
+            // fn:unparsed-text() would succeed, so it catches what that raises — but an argument of
+            // the wrong type is a type error of this call, raised by the function conversion rules
+            // before either function is entered, and answering false to it would be answering a
+            // question that was never validly asked.
+            string href = Text(0, ref context);
+            string? encoding = m_arguments.Length > 1 ? Text(1, ref context) : null;
+
             try
             {
-                ReadUnparsedText(ref context);
+                ReadUnparsedText(href, encoding, ref context);
                 return true;
             }
             catch (XsltException)
@@ -1573,9 +1591,22 @@ namespace CodeDeeds.Xslt.XPath
 
             List<XPathValue> items = Items(index, ref context);
 
-            return items.Count != 0
-                && TryNode(items[0], out tree, out element)
-                && tree!.KindOf(element) == Model.NodeKind.Element;
+            if (items.Count == 0)
+            {
+                return false;
+            }
+
+            // Declared element(), so anything else here is a type error and not an answer about an
+            // element with nothing in scope: in-scope-prefixes(/) is asking about a document node.
+            if (!TryNode(items[0], out tree, out element)
+                || tree!.KindOf(element) != Model.NodeKind.Element)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XPTY0004,
+                    $"fn:{m_name}() takes an element, and was given something that is not one.");
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -1858,6 +1889,14 @@ namespace CodeDeeds.Xslt.XPath
                 {
                     return XPathValue.FromQName(new XdmQName(prefix, uri, localName));
                 }
+            }
+
+            // The xml prefix is bound everywhere and declared nowhere: XML binds it by definition, so
+            // an element carries it whether anything in the document mentions it or not.
+            if (prefix == "xml")
+            {
+                return XPathValue.FromQName(
+                    new XdmQName(prefix, Model.XdmTree.XmlNamespaceUri, localName));
             }
 
             throw XsltErrors.Error(
@@ -2685,12 +2724,14 @@ namespace CodeDeeds.Xslt.XPath
                 items, wantSmallest ? "min" : "max", numbersAndDurationsOnly: false);
 
             // NaN stands in no relation to anything, so a sequence holding one has no smallest or largest
-            // member. The specification makes NaN the answer rather than letting it be passed over.
+            // member. The specification makes NaN the answer rather than letting it be passed over —
+            // at the common type like any other answer, an untyped item among them having made that
+            // type xs:double.
             foreach (XPathValue item in prepared)
             {
                 if (item.Kind == XPathValueKind.Number && double.IsNaN(item.ToNumber()))
                 {
-                    return item;
+                    return Promoted(item, prepared);
                 }
             }
 
