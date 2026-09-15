@@ -154,6 +154,32 @@ namespace CodeDeeds.Xslt.UnitTests
                     "main"));
         }
 
+
+        [TestMethod]
+        public void WhatACopiedParentTookAtTheCopyReachesNothingBeneathIt()
+        {
+            // copy-namespaces="no" gives a copied element the declarations its own name and attribute
+            // names need and no others, and "its own" is said of every element of the copy: the a element
+            // takes a prefix for its attribute, and the aa element inside it does not acquire that prefix
+            // merely because its parent has it (§11.7.2). What the copy takes from where it was attached
+            // is the other half of the same rule and reaches all of it, parent and child alike.
+            const string Fragment =
+                "<xsl:variable name=\"fragment\"><w xmlns:w=\"uri:w\">"
+                + "<a xmlns:p=\"uri:p\" p:att=\"A\"><aa xmlns=\"uri:aa\"/></a></w></xsl:variable>";
+
+            Assert.AreEqual(
+                "<out><e n=\"doc\" ns=\"|q=uri:q\"/><e n=\"a\" ns=\"|p=uri:p|q=uri:q\"/>"
+                + "<e n=\"aa\" ns=\"|=uri:aa|q=uri:q\"/></out>",
+                Run(InScope + Fragment
+                    + "<xsl:template name=\"main\"><xsl:variable name=\"result\">"
+                    + "<doc xmlns:q=\"uri:q\"><xsl:copy-of select=\"$fragment/w/*\" copy-namespaces=\"no\"/></doc>"
+                    + "</xsl:variable>"
+                    + "<out><xsl:for-each select=\"$result//*\"><e n=\"{local-name()}\" ns=\"{f:ns(.)}\"/>"
+                    + "</xsl:for-each></out></xsl:template>",
+                    string.Empty,
+                    "main"));
+        }
+
         [TestMethod]
         public void SerializeWritesNoDeclarationUnlessAsked()
         {

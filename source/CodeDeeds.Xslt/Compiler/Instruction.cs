@@ -2914,9 +2914,19 @@ namespace CodeDeeds.Xslt.Compiler
                 {
                     if (kind == NodeKind.Element)
                     {
+                        // The top of the copy is every element attached where the copy was placed,
+                        // which is the starting node itself or, where that is a document node, each
+                        // of its element children: a document node is not an element to inherit from.
                         StartElementCopy(
-                            tree, current, output, copyNamespaces, copyAccumulators, root: current == node,
-                            preserveTypes, types);
+                            tree,
+                            current,
+                            output,
+                            copyNamespaces,
+                            copyAccumulators,
+                            root: current == node
+                                || (tree.ParentOf(current) == node && tree.KindOf(node) == NodeKind.Root),
+                            preserveTypes,
+                            types);
                     }
                     else
                     {

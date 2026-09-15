@@ -5955,6 +5955,38 @@ run now, at the cost of a second run paid only by an assertion the first renderi
 The 2.0 run goes from 5,594 of 5,622 to **5,595**. The 3.0, schema-aware and XPath runs are unmoved,
 the two backends agree test for test, and nothing that was passing fails.
 
+### Where an element of a copy takes its namespaces from
+
+From the element the copy was attached to, and not from the copied element above it. XSLT 3.0 §11.9.2
+says so of the whole copy rather than of its outermost element, and §11.7.2 says the other half: namespace
+fixup gives an element no namespace merely because its parent has one. So a namespace a copied parent
+acquired *at the copy* — a prefix fixup had to invent for its attribute under `copy-namespaces="no"` —
+reaches nothing beneath it, while everything the copy takes from the point of attachment reaches all of
+it.
+
+The engine had the rule written down and half implemented. `OutputTarget.MarkOwnNamespaces` exists to
+carry it, its own documentation states it in these words, and the serializer honours what it can of it —
+XML 1.0 can undeclare the default namespace and no other, so that is the whole of what serialized output
+can say. Neither of the two targets that build a **tree** overrode it at all, and a tree is where the
+question can actually be asked: `copy-1221` copies a fragment with `copy-namespaces="no"` and reads the
+namespace axis of what came out.
+
+A tree says an element does not have a namespace its parent has by undeclaring it, which is what
+`inherit-namespaces="no"` already did. What is new is which namespaces are undeclared — only those the
+copied parent declared for itself — and that the walk up the ancestors, while the tree is being built,
+continues at the point of attachment rather than at the copied parent. Without the second an element
+would find a binding above it, decline to declare one of its own, and then have that binding undeclared
+out from under it.
+
+**And the top of a copy is every element attached where the copy was placed**, which is the copied node
+itself or, where that is a document node, each of its element children: a document node is not an element
+for anything to inherit from. Reading it as the copied node alone put the elements of a copied *document*
+one level too deep and cut them off from the namespaces of the element they were grafted under.
+
+The 3.0 run goes from 7,897 of 7,924 to **7,898** and the schema-aware run from 8,458 of 8,526 to
+**8,459**; the 2.0 and XPath runs are unmoved, the two backends agree test for test, and nothing that was
+passing fails.
+
 ### The rest of 3.0
 
 Where XSLT 3.0 stands here, as of 7 September 2026. The suite measures this half under `--xslt --30`, and it

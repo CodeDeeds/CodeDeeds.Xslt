@@ -1020,6 +1020,48 @@ namespace CodeDeeds.Xslt.Model
             (m_noInherit ??= new HashSet<int>()).Add(RequireOpenElement());
         }
 
+        /// <summary>Where a copied element takes its namespaces from, where that is not its parent.</summary>
+        /// <remarks>
+        /// Every element of a copy below the top of it. The value is the element the copy was attached
+        /// to, which is where they all take them from.
+        /// </remarks>
+        private Dictionary<int, int>? m_attachedAt;
+
+        /// <summary>
+        /// Records that the element being built came from a copy, and so carries its own namespace nodes
+        /// rather than adding to its parent's.
+        /// </summary>
+        /// <remarks>
+        /// XSLT 3.0 §11.9.2: a copy takes the namespaces of the element it is attached to, and so do all
+        /// of its descendants — from the point of attachment and not from the copied parent. So an element
+        /// that undeclared the default namespace keeps that undeclaration through a copy of its parent,
+        /// and a namespace the copied parent acquired at the copy — from fixup under
+        /// <c>copy-namespaces="no"</c>, say — reaches nothing beneath it.
+        /// </remarks>
+        /// <param name="root">Whether this element is where the copy started, which takes its parent's.</param>
+        public void MarkCopiedNamespaces(bool root)
+        {
+            if (root)
+            {
+                return;
+            }
+
+            int element = RequireOpenElement();
+            int parent = m_parent[element];
+
+            if (parent < 0)
+            {
+                return;
+            }
+
+            // The parent is the copy above this one: either the top of the copy, whose own parent is
+            // where it was attached, or another element of it, which has been told already.
+            m_attachedAt ??= new Dictionary<int, int>();
+            m_attachedAt[element] = m_attachedAt.TryGetValue(parent, out int attachment)
+                ? attachment
+                : m_parent[parent];
+        }
+
         /// <summary>
         /// Settles the namespaces of the element whose start tag is open, once anything follows it.
         /// </summary>
@@ -1106,6 +1148,30 @@ namespace CodeDeeds.Xslt.Model
                     }
                 }
             }
+            else if (m_attachedAt is not null && m_attachedAt.TryGetValue(element, out int attachment))
+            {
+                // An element of a copy takes its namespaces from where the copy was attached, so what
+                // the copied parent declared for itself and the attachment does not have is undeclared
+                // here. Read into a list first: appending to this element's run moves the arrays the
+                // parent's is read from.
+                List<(string Prefix, string Uri)> own = new List<(string, string)>();
+                int first = m_namespaceStart[parent];
+
+                for (int i = first; i < first + m_namespaceCount[parent]; i++)
+                {
+                    own.Add((m_namespacePrefix[i], m_namespaceUri[i]));
+                }
+
+                foreach ((string above, string bound) in own)
+                {
+                    if (bound.Length != 0
+                        && !DeclaresPrefix(element, above)
+                        && ResolveWhileBuilding(attachment, above) != bound)
+                    {
+                        AppendDeclaration(element, above, string.Empty);
+                    }
+                }
+            }
         }
 
         /// <summary>What a prefix is bound to by the element's own declarations, or null where it has none.</summary>
@@ -1160,10 +1226,15 @@ namespace CodeDeeds.Xslt.Model
         }
 
         /// <summary>What a prefix is bound to at an element under construction, walking its ancestors.</summary>
+        /// <remarks>
+        /// Ancestors as the namespaces run rather than as the tree does. A parent that passes none of
+        /// them on ends the walk; an element of a copy continues it at the element the copy was attached
+        /// to, that being where every element of the copy takes its namespaces from.
+        /// </remarks>
         /// <returns>The namespace, an empty string for the default namespace when there is none, or null for a prefix nothing binds.</returns>
         private string? ResolveWhileBuilding(int element, string prefix)
         {
-            for (int node = element; node >= 0; node = m_parent[node])
+            for (int node = element; node >= 0; node = Above(node))
             {
                 int start = m_namespaceStart[node];
                 int end = start + m_namespaceCount[node];
@@ -1176,9 +1247,23 @@ namespace CodeDeeds.Xslt.Model
                         return uri.Length == 0 && prefix.Length != 0 ? null : uri;
                     }
                 }
+
+                if (m_noInherit is not null && m_parent[node] >= 0 && m_noInherit.Contains(m_parent[node]))
+                {
+                    break;
+                }
             }
 
             return prefix.Length == 0 ? string.Empty : null;
+        }
+
+        /// <summary>Where the namespaces in scope at an element continue, which is not always its parent.</summary>
+        /// <param name="element">The element.</param>
+        private int Above(int element)
+        {
+            return m_attachedAt is not null && m_attachedAt.TryGetValue(element, out int attachment)
+                ? attachment
+                : m_parent[element];
         }
 
         private IEnumerable<(string Prefix, string Uri)> InScopeWhileBuilding(int element)

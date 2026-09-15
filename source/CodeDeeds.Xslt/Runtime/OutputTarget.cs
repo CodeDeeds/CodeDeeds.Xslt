@@ -525,6 +525,15 @@ namespace CodeDeeds.Xslt.Runtime
             }
         }
 
+        /// <inheritdoc/>
+        public override void MarkOwnNamespaces(bool root)
+        {
+            if (m_depth != 0)
+            {
+                m_builder!.MarkCopiedNamespaces(root);
+            }
+        }
+
         /// <summary>Whether each document copy under way began at the top, where it is an item of its own.</summary>
         private readonly Stack<bool> m_documentCopies = new();
 
@@ -765,6 +774,12 @@ namespace CodeDeeds.Xslt.Runtime
         public override void MarkNoInheritedNamespaces()
         {
             m_builder.MarkNoInheritedNamespaces();
+        }
+
+        /// <inheritdoc/>
+        public override void MarkOwnNamespaces(bool root)
+        {
+            m_builder.MarkCopiedNamespaces(root);
         }
 
         /// <inheritdoc/>
