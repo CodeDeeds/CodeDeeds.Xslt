@@ -6635,6 +6635,36 @@ schema-aware run from 8,470 of 8,526 to **8,472**, which is the same two tests r
 backends agree test for test, and one unit test moved: the one that had written down what this engine did
 rather than what anything asked of it.
 
+### The correction the suite needs
+
+Three failures were left in `decl/package`, and all three had been read to a conclusion already: two are
+mistakes in the suite's own files, and the third is a disagreement about which code the specification
+means. Saying so a third time would have added nothing, so this round wrote the correction down instead.
+
+`tests/W3CConformanceTests/suite-corrections.patch` is a two-file diff against the published suite, six
+lines changed. It takes the `#0` off `xsl:function`'s `name` in `package-021err-used.xsl`, where a
+function's arity comes from its `xsl:param` children and never from its name; and it moves the `#0` from
+`xsl:accept`'s `component` to the name in `names` in `package-022err-includeC.xsl`, which is where
+erratum E36 meant to put it — the shape the unbroken tests beside them are written in. The patch carries
+its evidence in its header: neither spelling appears anywhere else in the 14,601 test cases, `package-021`
+and `package-022` were corrected again on 8 September 2020 and are right, and the erratum was walked back
+across `decl/accept` and `decl/expose` on 5 March 2023 while these two files were touched by neither pass.
+
+Applied to a clone of the suite, both tests raise the `XTSE3050` they were written for and the 3.0 run
+reads **7,913 of 7,924**. It is not applied here, and the figures in these notes do not include it. A
+measurement is worth something because of what it is taken against, and a patch kept in the repository and
+offered upstream is worth more than two tests counted differently at home.
+
+`package-200` is deliberately not in it. It asks for `XTSE3000` where `use-package-291` to `294` ask for
+`XTSE0020` on the same shape, so one of the five is wrong about a rule rather than about a character — see
+*Which error an unreadable version range is*. Patching it would assert a reading of the specification,
+which is not what a correction is for; that one belongs in a question to the working group.
+
+Nothing moves on any run: 7,911 of 7,924 at 3.0 on both backends, 5,602 of 5,623 at 2.0, 8,472 of 8,526
+schema-aware, and 18,268 and 14,553 on the two XPath runs. The driver's README gained the section that
+points at the patch, and its pass-rate-by-area table, which had fallen several rounds behind, was brought
+up to date.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error

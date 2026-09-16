@@ -1,0 +1,2 @@
+# A patch file is applied byte for byte; leave its line endings alone.
+*.patch -text

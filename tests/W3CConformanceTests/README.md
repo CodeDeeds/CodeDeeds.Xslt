@@ -214,6 +214,33 @@ result's place. That found the messages themselves being flattened: a message is
 the instruction's content, and an `xsl:message` writing an element means the element. They are serialized
 now, as every other processor presents them.
 
+## Where the suite is wrong
+
+Two tests cannot pass, and not for anything this engine does. `package-021err` and `package-022err` ask
+for `XTSE3050` — the code for a component that two namings of one package both leave in view — and
+neither stylesheet gets far enough to raise it, because neither is well-formed XSLT.
+
+Draft erratum E36 required a function named in an `xsl:accept` or an `xsl:expose` to carry its arity, and
+on 18 February 2020 the tests were swept through to add it. Two of the edits put the `#0` in an attribute
+that does not take one: on `xsl:function`'s `name`, which is an `EQName`, and on `xsl:accept`'s
+`component`, which is one of six words. Neither spelling appears anywhere else in the suite — not once
+in the 14,601 test cases the driver reads. Their unedited twins were corrected again on 8 September 2020
+and are right, and the erratum's other effects were withdrawn across `decl/accept` and `decl/expose` on
+5 March 2023; these two files were touched by neither pass.
+
+The correction is kept here as [`suite-corrections.patch`](suite-corrections.patch), which `git apply`
+takes from the root of a clone of the suite. With it both tests raise the code they were written for and
+the 3.0 run goes from 7,911 to **7,913**. It is checked in rather than applied: every figure in this
+document is measured against the suite as published, and the patch is there to be offered upstream rather
+than kept as a local advantage.
+
+The third failure left in `decl/package` is not of that kind. `package-200` asks for `XTSE3000` where
+`use-package-291` to `294` ask for `XTSE0020` on the same shape — an unreadable `package-version` range
+on an `xsl:use-package` naming a package that is there — so answering the one means failing the four.
+That is a question about which code the specification means rather than a mistake in a file, and it is
+settled the way the four have it. See *Which error an unreadable version range is* and *Where a
+function's arity belongs* in the conformance notes.
+
 ## Where one module ends and another begins
 
 Running the tests that name several stylesheets left five failures, and they had one thing in common: each
@@ -617,11 +644,11 @@ tree** for the substring a branch processes, there being no atomic context item 
 written; there is one now, and a path written in a branch no longer walks a tree that was never in the
 stylesheet.
 
-The largest clusters behind the current **5,600 of 5,623, 99.6%**, and no one cause dominates:
+The largest clusters behind the current **5,602 of 5,623, 99.6%**, and no one cause dominates:
 
 | | |
 |---|---|
-| `decl/output` | 5 |
+| `decl/output` | 3 |
 | `decl/function` | 2 |
 | `fn/collection` | 2 |
 | `insn/result-document` | 2 |
@@ -636,7 +663,7 @@ The largest skip left is not a failure either: **6,518 are XSLT 3.0 tests**, rea
 
 ## What the 3.0 run says
 
-That opt-in run measures the XSLT 3.0 half at **7,906 of 7,924, 99.8%**, from 4,994 of 6,427 when it was first
+That opt-in run measures the XSLT 3.0 half at **7,911 of 7,924, 99.8%**, from 4,994 of 6,427 when it was first
 taken. It reads more tests than it did as well as passing more of them, which is the part worth reading twice:
 opening a feature the suite writes *around* stops whole files being skipped, so the denominator moves too — and
 the percentage can fall while the work goes forward, which is why the two numbers are always given together.
@@ -1122,13 +1149,13 @@ document.
 
 | area | | |
 |---|---|---|
-| `attr` | 988 / 990 | 99.8% |
-| `type` | 744 / 746 | 99.7% |
-| `fn` | 1,108 / 1,111 | 99.7% |
-| `expr` | 649 / 651 | 99.7% |
-| `misc` | 1,797 / 1,804 | 99.6% |
-| `insn` | 1,339 / 1,347 | 99.4% |
-| `decl` | 955 / 969 | 98.6% |
+| `attr` | 1,012 / 1,012 | 100.0% |
+| `expr` | 663 / 663 | 100.0% |
+| `misc` | 1,903 / 1,904 | 99.9% |
+| `type` | 767 / 768 | 99.9% |
+| `fn` | 1,140 / 1,143 | 99.7% |
+| `insn` | 1,405 / 1,409 | 99.7% |
+| `decl` | 1,021 / 1,025 | 99.6% |
 
 Every instruction and declaration XSLT 3.0 adds is implemented, and so is **every attribute it hung on an
 element that already existed** — `composite`, `select` on `xsl:copy`, `default-mode`, `new-each-time`,

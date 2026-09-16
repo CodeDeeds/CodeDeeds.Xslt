@@ -1,0 +1,70 @@
+Two corrections to the W3C xslt30-test suite.
+
+package-021err and package-022err ask for XTSE3050 and cannot raise it, because
+neither stylesheet is well-formed XSLT. Both were edited on 18 February 2020 for
+draft erratum E36, which requires a function named in an xsl:accept or an
+xsl:expose to carry its arity, and in both the "#0" landed in an attribute that
+does not take one:
+
+  package-021err-used.xsl     on xsl:function's "name", which is an EQName
+  package-022err-includeC.xsl on xsl:accept's "component", which is one of six
+                              words
+
+Neither spelling appears anywhere else in the suite. Their unedited twins,
+package-021 and package-022, were corrected again on 8 September 2020 and are
+right; the same erratum's other effects were withdrawn across decl/accept and
+decl/expose on 5 March 2023, under "remove unintended error, missing arity on
+function name". These two files were touched by neither pass.
+
+With this applied, both tests raise XTSE3050 as they were written to, and the
+xslt30-test 3.0 run here goes from 7,911 of 7,924 to 7,913.
+
+Not included: package-200, which asks for XTSE3000 where use-package-291 to 294
+ask for XTSE0020 on the same shape - an unreadable package-version range on
+xsl:use-package, with the named package available in both. That is a question
+about which code the specification means rather than a typo, and is written up
+in source/CodeDeeds.Xslt/Documentation/ConformanceNotes.md under "Which error an
+unreadable version range is".
+
+Apply from the root of a clone of https://github.com/w3c/xslt30-test:
+
+    git apply suite-corrections.patch
+
+diff --git a/tests/decl/package/package-021err-used.xsl b/tests/decl/package/package-021err-used.xsl
+index 7619a24..c7213bc 100644
+--- a/tests/decl/package/package-021err-used.xsl
++++ b/tests/decl/package/package-021err-used.xsl
+@@ -9,7 +9,7 @@
+     <!-- private to a package -->
+     <xsl:mode on-no-match="fail" />
+     
+-    <xsl:function name="me:function1#0" visibility="public" >You found me!</xsl:function>
+-    <xsl:function name="me:function2#0" visibility="public" />
++    <xsl:function name="me:function1" visibility="public" >You found me!</xsl:function>
++    <xsl:function name="me:function2" visibility="public" />
+     
+ </xsl:package>
+\ No newline at end of file
+diff --git a/tests/decl/package/package-022err-includeC.xsl b/tests/decl/package/package-022err-includeC.xsl
+index 38ba4c7..5eb0b5f 100644
+--- a/tests/decl/package/package-022err-includeC.xsl
++++ b/tests/decl/package/package-022err-includeC.xsl
+@@ -8,14 +8,14 @@
+         to resolve a conflict, overlapping declarations can be hidden in one use-package and accepted in the other -->
+     
+     <xsl:use-package name="urn:use-me" package-version="*"  >
+-        <xsl:accept component="function#0" names="pkg:function1" visibility="hidden" />
+-        <xsl:accept component="function#0" names="pkg:function2" visibility="hidden" />
++        <xsl:accept component="function" names="pkg:function1#0" visibility="hidden" />
++        <xsl:accept component="function" names="pkg:function2#0" visibility="hidden" />
+     </xsl:use-package>
+     
+     <xsl:use-package name="urn:use-me" package-version="*"  >
+         <!-- note: pkg:function1 is accepted through another xsl:include as visibility="private", this is a conflict -->
+-        <xsl:accept component="function#0" names="pkg:function1" visibility="public" />
+-        <xsl:accept component="function#0" names="pkg:function2" visibility="hidden" />
++        <xsl:accept component="function" names="pkg:function1#0" visibility="public" />
++        <xsl:accept component="function" names="pkg:function2#0" visibility="hidden" />
+     </xsl:use-package>
+     
+     <xsl:template match="second-child">
