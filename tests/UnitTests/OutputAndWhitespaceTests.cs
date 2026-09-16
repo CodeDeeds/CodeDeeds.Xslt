@@ -528,9 +528,11 @@ namespace CodeDeeds.Xslt.UnitTests
         public void PrintableAsciiSurvivesUriEscapingExactly()
         {
             // A space, a quotation mark and an already-escaped %20 all stand: re-escaping an escape would
-            // change where the link points, and the markup escaping still protects what markup needs.
+            // change where the link points, and the markup escaping still protects what markup needs. The
+            // quotation mark is written as a numeric reference, which is what the suite's output-0102c and
+            // 0103c ask for and what the characters beside it get.
             Assert.AreEqual(
-                "<a xmlns=\"http://www.w3.org/1999/xhtml\" href=\"a b %20 &quot; &amp; ~\"></a>",
+                "<a xmlns=\"http://www.w3.org/1999/xhtml\" href=\"a b %20 &#34; &amp; ~\"></a>",
                 Run(Page("<a href=\"a b %20 &#34; &amp; ~\"/>",
                     "method=\"xhtml\" indent=\"no\" include-content-type=\"no\""),
                     "<r/>"));

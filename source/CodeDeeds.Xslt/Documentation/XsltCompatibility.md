@@ -17,13 +17,13 @@ Conformance as last measured, on 16 September 2026, against the W3C suites (see 
 
 | Suite | Result |
 | --- | --- |
-| XSLT 3.0 test suite, 3.0 processor | 7,907 of 7,924, 99.8% |
-| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,600 of 5,623, 99.6% |
+| XSLT 3.0 test suite, 3.0 processor | 7,911 of 7,924, 99.8% |
+| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,602 of 5,623, 99.6% |
 | QT3 (XPath), 3.1 | 18,268 of 18,285, 99.9% |
 | QT3 (XPath), 2.0 | 14,553 of 14,577, 99.8% |
 
 The 2,900 streaming tests are skipped by design. The 686 schema-aware tests are read only by the driver's
-opt-in `--schema` run, which stands at 8,468 of 8,526 (99.3%), the same on both backends; the figures
+opt-in `--schema` run, which stands at 8,472 of 8,526 (99.4%), the same on both backends; the figures
 above are the run without it.
 
 ## Not implemented, and not planned
@@ -72,6 +72,7 @@ above are the run without it.
 | --- | --- |
 | Nothing is reachable by default | `xsl:include` and `xsl:import` need `XsltOptions.StylesheetResolver`; `document()`, `doc()`, `unparsed-text()` and `json-doc()` need `DocumentResolver`; `collection()` and `uri-collection()` need `CollectionResolver`, which names what a collection holds, and `DocumentResolver`, which reads it; `xsl:use-package` needs `PackageResolver`; external entities need `EntityResolver`; `xsl:result-document` and `exsl:document` need `ResultStreamResolver` or `ResultResolver`; `environment-variable()` needs `EnvironmentVariablesEnabled`. Without one, the reference is an error and a stylesheet cannot reach the file system, the network or the process's environment. `FileResolver` serves a directory; `UriResolver` serves HTTP and HTTPS as well as a directory. Both serve a directory as a collection, its files in name order, narrowed by `?select=*.xml;recurse=yes`. |
 | Tunnel parameters and `xsl:function` | A function starts with an empty tunnel set, so templates it invokes do not see what its caller was tunnelling. `tunnel="yes"` on a function parameter is refused. The specification never settled this corner. |
+| A quotation mark in an attribute | Written as `&#34;`, where `&`, `<` and `>` keep the named forms. The specification requires the delimiter to be escaped and does not say how, and both spellings are correct XML; the suite asks for the numeric one twice and for the named one nowhere, and the characters beside it in the same attribute already take numeric references. |
 | Character maps | A map's own `xsl:output-character` children override the maps it draws in with `use-character-maps`. The map also applies to text written with `disable-output-escaping` and inside CDATA sections. |
 | Result tree fragments (1.0) | Represented as trees, so they can be navigated. This accepts more than XSLT 1.0 allows and rejects nothing it permits. |
 | Error timing | Errors are reported at compile time wherever possible. What the fallback mechanism covers, and a call to an extension function, is left to run time, since a stylesheet may hold those legitimately and never reach them. |

@@ -2364,7 +2364,15 @@ namespace CodeDeeds.Xslt.Runtime
                 case '&' when style != EscapeStyle.None: return "&amp;";
                 case '<' when style != EscapeStyle.None: return "&lt;";
                 case '>' when style != EscapeStyle.None: return "&gt;";
-                case '"' when style == EscapeStyle.Attribute: return "&quot;";
+
+                // Numeric, where the three above are named. The specification requires the delimiter to be
+                // escaped and does not say how, and both spellings are correct XML; what settles it is that
+                // the suite asks twice and asks for this one. output-0102c and 0103c write a quotation mark
+                // in a URI attribute and match the result against a pattern admitting '&#34;' and '&#x22;'
+                // and nothing else, and no test anywhere asks for '&quot;'. It is the more consistent
+                // answer as well: the same attribute has this engine writing '&#150;' beside it, every
+                // character that needs a reference here taking one.
+                case '"' when style == EscapeStyle.Attribute: return "&#34;";
                 case '\n' when style == EscapeStyle.Attribute: return "&#xA;";
                 case '\r' when style == EscapeStyle.Attribute: return "&#xD;";
                 case '\t' when style == EscapeStyle.Attribute: return "&#x9;";

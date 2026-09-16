@@ -6604,18 +6604,42 @@ should do more than say the value is not a name.
 Nothing moves: 7,909 of 7,924 on the 3.0 run and the rest where they were. Two new unit tests, 2,788 in
 all.
 
+### Which way a quotation mark is written
+
+`output-0102c` and `0103c` put a quotation mark in a URI attribute and match the serialized result against
+a pattern. Everything in both expectations matched, character for character — the URI escaping, the
+`%C2%96` and `%C2%A1`, the double space, `&lt; &gt; &amp;`, and in `0103c` the `&#150;` for U+0096 — except
+one character. They ask for `&#34;` or `&#x22;`, and this engine wrote `&quot;`.
+
+The specification requires the delimiter of an attribute value to be escaped and does not say how, and
+both spellings are correct XML: `quot` is one of the five entities XML predefines, and a numeric reference
+is always allowed. So this was a free choice between two right answers, made one way and now made the
+other.
+
+Three things settled it. The suite asks twice, and in both places the author enumerated the alternatives
+he would accept — an `any-of` of `&#34;` and `&#x22;` in one, the pattern `&#0*(34|x22);` in the other — and
+neither admits the named form. No serialization expectation anywhere in the suite asks for `&quot;`; the
+count over all fourteen thousand test cases is zero. And it is the more consistent of the two: in the very
+attribute these tests are about, this engine already writes `&#150;` for U+0096 beside it, every other
+character that needs a reference there taking a numeric one.
+
+So a quotation mark in an attribute value is written `&#34;`. Nothing else changes: the named forms for
+`&`, `<` and `>` are what every reader expects and what the suite's own expected results are written with.
+
+The other three failures in that test set needed nothing. `output-0724`, `0725` and `0726` are marked for a
+2.0 processor and are 3.0 stylesheets — see *Which results the suite asks for and does not get*.
+
+The 3.0 run goes from 7,909 of 7,924 to **7,911**, the 2.0 run from 5,600 of 5,623 to **5,602** and the
+schema-aware run from 8,470 of 8,526 to **8,472**, which is the same two tests read three times;
+`decl/output` has none left on the 3.0 run. The XPath runs are unmoved at 18,268 and 14,553, the two
+backends agree test for test, and one unit test moved: the one that had written down what this engine did
+rather than what anything asked of it.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error
 codes the suite asks for and does not get*; these are the ones where a result comes out and is not the
 one the test names.
-
-**A quotation mark in an attribute, spelled one of the two ways.** `output-0102c` and `0103c` match the
-serialized output against a regular expression, and it admits `&#34;` and `&#x22;` and nothing else where
-this engine writes `&quot;`. The serialization specification says an attribute value's `"` must be
-escaped and does not say how; the HTML output method says outright that a character entity reference may
-be used in preference to a numeric one. Everything else in both expectations matches, character for
-character.
 
 **A suite whose Unicode is older than the one .NET carries.** `regex-syntax-xslt20-0984` asks for `[\w]`
 to match U+2308 and U+2309, the left and right ceiling. `\w` is every character that is not punctuation, a
@@ -6634,7 +6658,10 @@ on the 3.0 run. `namespace-0912` is the same shape one step removed: it needs `x
 what it declared. `variable-4802` is the same again: a `version="3.0"` stylesheet whose `expand-text="yes"`
 a 2.0 processor is required to ignore, being an attribute of an XSLT element it does not know, so the
 `<out>{.}</out>` it writes says `{.}` and means it. Both pass on the 3.0 run. This one had been skipped
-rather than counted until the declaration it writes at the top of its result came out in the right place.
+rather than counted until the declaration it writes at the top of its result came out in the right
+place. `output-0724`, `0725` and `0726` are the plainest of the family: each declares `version="2.0"`
+and then writes `html-version="5"` on its `xsl:output` and starts at a template named
+`xsl:initial-template`, both of which are 3.0's. All three pass on the 3.0 run.
 
 **Two tests that name something their stylesheet does not have.** `format-number-070` asks to start at a
 template called `main` and its stylesheet declares none — it has one template, and it matches `root`.
