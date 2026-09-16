@@ -385,8 +385,47 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>Whether this is a function type written out with its argument and result types.</summary>
         public bool IsWrittenFunctionType => ParameterTypes is not null;
 
-        /// <inheritdoc/>
-        public override string ToString() => m_written;
+        /// <summary>
+        /// The type as written, with the occurrence indicator that says how many items it admits.
+        /// </summary>
+        /// <remarks>
+        /// The indicator is kept out of <see cref="m_written"/>, which names the item type alone and is
+        /// what two kind tests are compared as. It belongs in a message all the same: a diagnostic that
+        /// says <c>xs:integer</c> where the stylesheet wrote <c>xs:integer*</c> is telling the reader that
+        /// one item was wanted, which is the very thing they are trying to find out.
+        /// </remarks>
+        public override string ToString()
+        {
+            string indicator = Occurrence switch
+            {
+                XdmOccurrence.ZeroOrOne => "?",
+                XdmOccurrence.ZeroOrMore => "*",
+                XdmOccurrence.OneOrMore => "+",
+                _ => string.Empty,
+            };
+
+            // empty-sequence() admits any number of items as far as the occurrence goes, and none at all
+            // as far as it is concerned; writing it 'empty-sequence()*' would be saying the opposite.
+            return m_emptyOnly ? m_written : m_written + indicator;
+        }
+
+        /// <summary>Whether the type admits a sequence of this many items, whatever the items are.</summary>
+        /// <param name="count">How many items there are.</param>
+        public bool Admits(int count)
+        {
+            if (m_emptyOnly)
+            {
+                return count == 0;
+            }
+
+            return Occurrence switch
+            {
+                XdmOccurrence.One => count == 1,
+                XdmOccurrence.ZeroOrOne => count <= 1,
+                XdmOccurrence.OneOrMore => count >= 1,
+                _ => true,
+            };
+        }
 
         /// <summary>Returns whether a value is of this type.</summary>
         /// <param name="value">The value to test.</param>
@@ -394,20 +433,7 @@ namespace CodeDeeds.Xslt.XPath
         {
             List<XPathValue> items = XdmSequence.Items(value);
 
-            if (m_emptyOnly)
-            {
-                return items.Count == 0;
-            }
-
-            bool countAllowed = Occurrence switch
-            {
-                XdmOccurrence.One => items.Count == 1,
-                XdmOccurrence.ZeroOrOne => items.Count <= 1,
-                XdmOccurrence.OneOrMore => items.Count >= 1,
-                _ => true,
-            };
-
-            if (!countAllowed)
+            if (!Admits(items.Count))
             {
                 return false;
             }

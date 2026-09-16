@@ -1435,7 +1435,7 @@ namespace CodeDeeds.Xslt.Runtime
                 : XdmTypeConversion.Apply(
                     accumulator.InitialValue.Evaluate(ref context),
                     accumulator.Type,
-                    XsltErrorCode.XTTE0570);
+                    AccumulatorTypeError);
 
             // The nodes whose start has been passed and whose end has not, innermost last, with the id the
             // walk has to reach before each one ends.
@@ -1465,6 +1465,20 @@ namespace CodeDeeds.Xslt.Runtime
 
             return values;
         }
+
+        /// <summary>
+        /// The code for a value that does not fit what an <c>xsl:accumulator</c> declared.
+        /// </summary>
+        /// <remarks>
+        /// XSLT has a code for each place an <c>as</c> may be written — a variable's <c>XTTE0570</c>, a
+        /// parameter's <c>XTTE0590</c> — and an accumulator is not one of those places. §18.2.1 says the
+        /// result of the <c>initial-value</c> and of a rule's <c>select</c> "is converted to the type
+        /// declared in the as attribute by applying the function conversion rules", and §18.2.4 gives the
+        /// accumulator's delta function the signature <c>function ($old-value as T, $event as map(*)) as
+        /// T</c>. So the value is a function's argument and its result, and what a function does with a
+        /// value it cannot convert is <c>XPTY0004</c>.
+        /// </remarks>
+        private const XsltErrorCode AccumulatorTypeError = XsltErrorCode.XPTY0004;
 
         /// <summary>Applies the last rule of a phase that matches a node, or leaves the value alone.</summary>
         private XPathValue Fire(
@@ -1513,7 +1527,7 @@ namespace CodeDeeds.Xslt.Runtime
                 return XdmTypeConversion.Apply(
                     VariableInstruction.Evaluate(rule.Select, rule.Body, ref inner, this),
                     accumulator.Type,
-                    XsltErrorCode.XTTE0570);
+                    AccumulatorTypeError);
             }
 
             return value;

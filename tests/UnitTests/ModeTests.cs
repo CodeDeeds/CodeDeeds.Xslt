@@ -1403,7 +1403,10 @@ namespace CodeDeeds.Xslt.UnitTests
                     Nested,
                     "3.0"));
 
-            Assert.AreEqual("XTTE0570", error.Code);
+            // Not the XTTE0570 a variable would raise. 18.2.1 converts the value by the function
+            // conversion rules and 18.2.4 gives the accumulator's delta the signature of a function
+            // returning the declared type, so the code is the one a function call gives.
+            Assert.AreEqual("XPTY0004", error.Code);
         }
 
         // ---- Copying a node away from where it came from ------------------------------------------------------

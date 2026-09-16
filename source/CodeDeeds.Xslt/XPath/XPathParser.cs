@@ -1115,16 +1115,9 @@ namespace CodeDeeds.Xslt.XPath
                 XdmSequenceType inner = ParseSequenceType(itemOnly: true);
                 Expect(XPathTokenKind.RightParen);
 
-                XdmOccurrence wrapped = ParseOccurrence(itemOnly);
-                string indicator = wrapped switch
-                {
-                    XdmOccurrence.ZeroOrOne => "?",
-                    XdmOccurrence.ZeroOrMore => "*",
-                    XdmOccurrence.OneOrMore => "+",
-                    _ => string.Empty,
-                };
-
-                return inner.WithOccurrence(wrapped, $"({inner}){indicator}");
+                // The written form names the item type; the occurrence indicator is the type's to
+                // add when it is asked how it reads.
+                return inner.WithOccurrence(ParseOccurrence(itemOnly), $"({inner})");
             }
 
             if (token.Kind != XPathTokenKind.Name)

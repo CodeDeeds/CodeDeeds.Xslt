@@ -1,23 +1,41 @@
-Two corrections to the W3C xslt30-test suite.
+Corrections to three test cases of the W3C xslt30-test suite.
 
-package-021err and package-022err ask for XTSE3050 and cannot raise it, because
-neither stylesheet is well-formed XSLT. Both were edited on 18 February 2020 for
-draft erratum E36, which requires a function named in an xsl:accept or an
-xsl:expose to carry its arity, and in both the "#0" landed in an attribute that
-does not take one:
+1. package-021err and package-022err ask for XTSE3050 and cannot raise it,
+   because neither stylesheet is well-formed XSLT. Both were edited on
+   18 February 2020 for draft erratum E36, which requires a function named in an
+   xsl:accept or an xsl:expose to carry its arity, and in both the "#0" landed in
+   an attribute that does not take one:
 
-  package-021err-used.xsl     on xsl:function's "name", which is an EQName
-  package-022err-includeC.xsl on xsl:accept's "component", which is one of six
-                              words
+     package-021err-used.xsl     on xsl:function's "name", which is an EQName
+     package-022err-includeC.xsl on xsl:accept's "component", which is one of six
+                                 words
 
-Neither spelling appears anywhere else in the suite. Their unedited twins,
-package-021 and package-022, were corrected again on 8 September 2020 and are
-right; the same erratum's other effects were withdrawn across decl/accept and
-decl/expose on 5 March 2023, under "remove unintended error, missing arity on
-function name". These two files were touched by neither pass.
+   Neither spelling appears anywhere else in the suite. Their unedited twins,
+   package-021 and package-022, were corrected again on 8 September 2020 and are
+   right; the same erratum's other effects were withdrawn across decl/accept and
+   decl/expose on 5 March 2023, under "remove unintended error, missing arity on
+   function name". These two files were touched by neither pass.
 
-With this applied, both tests raise XTSE3050 as they were written to, and the
-xslt30-test 3.0 run here goes from 7,911 of 7,924 to 7,913.
+2. accumulator-038 asks for XPTY0004 from evaluating an accumulator and cannot
+   get that far. Its stylesheet is an xsl:package whose entry point,
+   <xsl:template match="/" name="main">, declares no visibility and so is
+   private (XSLT 3.0 3.5.3.1, "Otherwise, private"), while 2.3.4 requires the
+   initial named template to be public or final on pain of XTDE0040. Twelve
+   test-cases in the same test set were amended for exactly this - "Make main
+   template public", eleven on 5 March 2019 and accumulator-031 as late as
+   6 March 2023 - and this one was not. It is the only test case left in the
+   suite that needs a private named template in an explicit package to serve
+   as an entry point. Thirteen others name an entry template that carries no
+   visibility attribute: twelve of them expect a static error, raised before
+   the entry point is reached, and the thirteenth, forwards-011, makes its
+   template public with an xsl:expose in the package manifest instead.
+
+Apply from the root of a clone of https://github.com/w3c/xslt30-test:
+
+    git apply suite-corrections.patch
+
+With this applied the xslt30-test 3.0 run here goes from 7,911 of 7,924 to
+7,914.
 
 Not included: package-200, which asks for XTSE3000 where use-package-291 to 294
 ask for XTSE0020 on the same shape - an unreadable package-version range on
@@ -26,10 +44,19 @@ about which code the specification means rather than a typo, and is written up
 in source/CodeDeeds.Xslt/Documentation/ConformanceNotes.md under "Which error an
 unreadable version range is".
 
-Apply from the root of a clone of https://github.com/w3c/xslt30-test:
-
-    git apply suite-corrections.patch
-
+diff --git a/tests/decl/accumulator/accumulator-038.xsl b/tests/decl/accumulator/accumulator-038.xsl
+index 41e5485..233bbc8 100644
+--- a/tests/decl/accumulator/accumulator-038.xsl
++++ b/tests/decl/accumulator/accumulator-038.xsl
+@@ -11,7 +11,7 @@
+       </xsl:for-each>
+     </xsl:variable>
+     
+-    <xsl:template match="/" name="main">
++    <xsl:template match="/" name="main" visibility="public">
+         <out>
+           <last><xsl:value-of select="$v/w[last()]/accumulator-after('big')"/></last>
+           <first><xsl:value-of select="$v/w[1]/accumulator-after('big')"/></first>
 diff --git a/tests/decl/package/package-021err-used.xsl b/tests/decl/package/package-021err-used.xsl
 index 7619a24..c7213bc 100644
 --- a/tests/decl/package/package-021err-used.xsl

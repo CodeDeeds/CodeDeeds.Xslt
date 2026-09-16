@@ -211,6 +211,30 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
+        public void AnAccumulatorValueIsConvertedByTheFunctionConversionRules()
+        {
+            // 18.2.1: the initial-value and a rule's select are converted to the declared type by the
+            // function conversion rules, and 18.2.4 gives the accumulator's delta the signature of a
+            // function returning that type. So a value that will not convert is XPTY0004, not the
+            // XTTE0570 a variable would raise.
+            Assert.AreEqual(
+                "XPTY0004",
+                Refuses(
+                    "<xsl:mode use-accumulators=\"#all\"/>"
+                    + "<xsl:accumulator name=\"n\" initial-value=\"0\" as=\"xs:integer*\">"
+                    + "<xsl:accumulator-rule match=\"*\" select=\"$value, name(.)\"/></xsl:accumulator>"
+                    + Root("<xsl:value-of select=\"accumulator-after('n')\"/>")));
+
+            Assert.AreEqual(
+                "XPTY0004",
+                Refuses(
+                    "<xsl:mode use-accumulators=\"#all\"/>"
+                    + "<xsl:accumulator name=\"n\" initial-value=\"'x'\" as=\"xs:integer*\">"
+                    + "<xsl:accumulator-rule match=\"*\" select=\"$value\"/></xsl:accumulator>"
+                    + Root("<xsl:value-of select=\"accumulator-after('n')\"/>")));
+        }
+
+        [TestMethod]
         public void AnAccumulatorFunctionWantsANodeThatIsNotAnAttribute()
         {
             const string Counting =

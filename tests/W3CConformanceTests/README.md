@@ -216,25 +216,32 @@ now, as every other processor presents them.
 
 ## Where the suite is wrong
 
-Two tests cannot pass, and not for anything this engine does. `package-021err` and `package-022err` ask
-for `XTSE3050` — the code for a component that two namings of one package both leave in view — and
-neither stylesheet gets far enough to raise it, because neither is well-formed XSLT.
+Three tests cannot pass, and not for anything this engine does.
 
-Draft erratum E36 required a function named in an `xsl:accept` or an `xsl:expose` to carry its arity, and
-on 18 February 2020 the tests were swept through to add it. Two of the edits put the `#0` in an attribute
-that does not take one: on `xsl:function`'s `name`, which is an `EQName`, and on `xsl:accept`'s
-`component`, which is one of six words. Neither spelling appears anywhere else in the suite — not once
-in the 14,601 test cases the driver reads. Their unedited twins were corrected again on 8 September 2020
-and are right, and the erratum's other effects were withdrawn across `decl/accept` and `decl/expose` on
-5 March 2023; these two files were touched by neither pass.
+`package-021err` and `package-022err` ask for `XTSE3050` — the code for a component that two namings of
+one package both leave in view — and neither stylesheet gets far enough to raise it, because neither is
+well-formed XSLT. Draft erratum E36 required a function named in an `xsl:accept` or an `xsl:expose` to
+carry its arity, and on 18 February 2020 the tests were swept through to add it. Two of the edits put the
+`#0` in an attribute that does not take one: on `xsl:function`'s `name`, which is an `EQName`, and on
+`xsl:accept`'s `component`, which is one of six words. Neither spelling appears anywhere else in the suite
+— not once in the 14,601 test cases the driver reads. Their unedited twins were corrected again on
+8 September 2020 and are right, and the erratum's other effects were withdrawn across `decl/accept` and
+`decl/expose` on 5 March 2023; these two files were touched by neither pass.
 
-The correction is kept here as [`suite-corrections.patch`](suite-corrections.patch), which `git apply`
-takes from the root of a clone of the suite. With it both tests raise the code they were written for and
-the 3.0 run goes from 7,911 to **7,913**. It is checked in rather than applied: every figure in this
+`accumulator-038` asks for a type error from evaluating an accumulator and never reaches one, because its
+stylesheet is an `xsl:package` whose entry point declares no visibility and so is private, where the
+specification requires an initial named template to be public or final. Twelve test cases in the same test
+set were amended for exactly that — *Make main template public*, eleven in March 2019 and one in March
+2023 — and this one was missed. It is the only test case in the suite that needs a private named template
+in an explicit package to serve as a way in.
+
+The corrections are kept here as [`suite-corrections.patch`](suite-corrections.patch), which `git apply`
+takes from the root of a clone of the suite. With it all three tests raise the code they were written for
+and the 3.0 run goes from 7,911 to **7,914**. It is checked in rather than applied: every figure in this
 document is measured against the suite as published, and the patch is there to be offered upstream rather
 than kept as a local advantage.
 
-The third failure left in `decl/package` is not of that kind. `package-200` asks for `XTSE3000` where
+One failure in `decl/package` is not of that kind. `package-200` asks for `XTSE3000` where
 `use-package-291` to `294` ask for `XTSE0020` on the same shape — an unreadable `package-version` range
 on an `xsl:use-package` naming a package that is there — so answering the one means failing the four.
 That is a question about which code the specification means rather than a mistake in a file, and it is

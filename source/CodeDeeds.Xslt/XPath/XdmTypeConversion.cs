@@ -63,17 +63,14 @@ namespace CodeDeeds.Xslt.XPath
                 // XTTE0590 — that code is the answer. A function call keeps XPath's: the cast failed.
                 throw XsltErrors.Error(
                     code,
-                    $"A value of type {Describe(value)} was produced where {type} was declared, and "
-                    + $"cannot be read as one: {failed.Message}",
+                    $"{Mismatch(value, type)}, and cannot be read as one: {failed.Message}",
                     failed);
             }
 
 
             return type.Matches(converted)
                 ? converted
-                : throw XsltErrors.Error(
-                    code,
-                    $"A value of type {Describe(value)} was produced where {type} was declared.");
+                : throw XsltErrors.Error(code, $"{Mismatch(value, type)}.");
         }
 
         /// <summary>Coerces each function item of a value to a required function type.</summary>
@@ -252,6 +249,69 @@ namespace CodeDeeds.Xslt.XPath
                 XdmTypeCode.Base64Binary => "base64Binary",
                 XdmTypeCode.UntypedAtomic => "untypedAtomic",
                 _ => "anyAtomicType",
+            };
+        }
+
+        /// <summary>
+        /// Says what is wrong with a value that does not match a declared type.
+        /// </summary>
+        /// <remarks>
+        /// Two quite different complaints have to be told apart. Either there are too many items or too
+        /// few, and then what the items are is beside the point; or the count is right and one of them is
+        /// of the wrong type, and then naming <em>that</em> item is what saves the reader a search. A
+        /// sequence of fifty whose forty-first member is a string is not much helped by being called a
+        /// sequence of fifty.
+        /// </remarks>
+        /// <param name="value">The value produced.</param>
+        /// <param name="type">The type it was measured against.</param>
+        /// <returns>The complaint, as a sentence wanting only its final stop.</returns>
+        private static string Mismatch(XPathValue value, XdmSequenceType type)
+        {
+            List<XPathValue> items = XdmSequence.Items(value);
+
+            if (!type.Admits(items.Count))
+            {
+                string counted = items.Count switch
+                {
+                    0 => "An empty sequence",
+                    1 => "A single item",
+                    _ => $"A sequence of {items.Count} items",
+                };
+
+                return $"{counted} was produced where {type} was declared";
+            }
+
+            for (int i = 0; i < items.Count; i++)
+            {
+                // One item measured against the whole sequence type, the count having been settled
+                // already: what is left for it to fail is the item type.
+                if (type.Matches(items[i]))
+                {
+                    continue;
+                }
+
+                string what = ItemTypeOf(items[i]);
+
+                return items.Count == 1
+                    ? $"A value of type {what} was produced where {type} was declared"
+                    : $"A sequence of {items.Count} items was produced where {type} was declared, and "
+                        + $"item {i + 1} of it is {what}";
+            }
+
+            return $"A value of type {Describe(value)} was produced where {type} was declared";
+        }
+
+        /// <summary>Names one item's type the way a stylesheet would have written it.</summary>
+        /// <param name="item">The item.</param>
+        private static string ItemTypeOf(XPathValue item)
+        {
+            return item.Kind switch
+            {
+                XPathValueKind.Node or XPathValueKind.NodeSet => "a node",
+                XPathValueKind.Map => "a map",
+                XPathValueKind.Array => "an array",
+                XPathValueKind.Function => "a function",
+                _ => "xs:" + NameOf(item.TypeCode),
             };
         }
 

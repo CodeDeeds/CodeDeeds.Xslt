@@ -749,5 +749,52 @@ namespace CodeDeeds.Xslt.UnitTests
                 new Xslt(stylesheet, For(XsltBackend.Compiled)).TransformXml("<r/>"),
                 "the compiled backend disagreed with the interpreter");
         }
+        // ---- What a type error says ------------------------------------------------------------------------
+
+        /// <summary>The message of the error a stylesheet is refused with.</summary>
+        private static string Complaint(string body)
+        {
+            return Assert.ThrowsExactly<XsltException>(() => Run(body)).Message;
+        }
+
+        [TestMethod]
+        public void ATypeErrorNamesTheOccurrenceThatWasAskedFor()
+        {
+            // The indicator is half of what the declaration said. A message naming xs:integer where the
+            // stylesheet wrote xs:integer* tells the reader that one item was wanted, which is the very
+            // thing they are trying to find out.
+            string complaint = Complaint(
+                "<xsl:template match=\"/\">"
+                + "<xsl:variable name=\"v\" as=\"xs:integer*\" select=\"1, 'x'\"/>"
+                + "<out><xsl:value-of select=\"$v\"/></out></xsl:template>");
+
+            StringAssert.Contains(complaint, "xs:integer*");
+        }
+
+        [TestMethod]
+        public void ATypeErrorPointsAtTheItemThatDoesNotFit()
+        {
+            // Where the count is right and one item is wrong, saying which one saves the reader a search.
+            string complaint = Complaint(
+                "<xsl:template match=\"/\">"
+                + "<xsl:variable name=\"v\" as=\"xs:integer*\" select=\"1, 2, 'x'\"/>"
+                + "<out><xsl:value-of select=\"$v\"/></out></xsl:template>");
+
+            StringAssert.Contains(complaint, "item 3");
+            StringAssert.Contains(complaint, "xs:string");
+        }
+
+        [TestMethod]
+        public void ATypeErrorAboutTheCountSaysSo()
+        {
+            // Two items where one was wanted is not a complaint about what the items are.
+            string complaint = Complaint(
+                "<xsl:template match=\"/\">"
+                + "<xsl:variable name=\"v\" as=\"xs:integer\" select=\"1, 2\"/>"
+                + "<out><xsl:value-of select=\"$v\"/></out></xsl:template>");
+
+            StringAssert.Contains(complaint, "A sequence of 2 items");
+            StringAssert.Contains(complaint, "xs:integer was declared");
+        }
     }
 }

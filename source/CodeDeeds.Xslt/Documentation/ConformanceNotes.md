@@ -6641,19 +6641,22 @@ Three failures were left in `decl/package`, and all three had been read to a con
 mistakes in the suite's own files, and the third is a disagreement about which code the specification
 means. Saying so a third time would have added nothing, so this round wrote the correction down instead.
 
-`tests/W3CConformanceTests/suite-corrections.patch` is a two-file diff against the published suite, six
-lines changed. It takes the `#0` off `xsl:function`'s `name` in `package-021err-used.xsl`, where a
-function's arity comes from its `xsl:param` children and never from its name; and it moves the `#0` from
-`xsl:accept`'s `component` to the name in `names` in `package-022err-includeC.xsl`, which is where
-erratum E36 meant to put it — the shape the unbroken tests beside them are written in. The patch carries
-its evidence in its header: neither spelling appears anywhere else in the 14,601 test cases, `package-021`
+`tests/W3CConformanceTests/suite-corrections.patch` is a diff against the published suite. Two of its
+three corrections are in `decl/package`. It takes the `#0` off `xsl:function`'s `name` in
+`package-021err-used.xsl`, where a function's arity comes from its `xsl:param` children and never from
+its name; and it moves the `#0` from `xsl:accept`'s `component` to the name in `names` in
+`package-022err-includeC.xsl`, which is where erratum E36 meant to put it — the shape the unbroken tests
+beside them are written in. The patch carries its evidence in its header: neither spelling appears
+anywhere else in the 14,601 test cases, `package-021`
 and `package-022` were corrected again on 8 September 2020 and are right, and the erratum was walked back
 across `decl/accept` and `decl/expose` on 5 March 2023 while these two files were touched by neither pass.
 
-Applied to a clone of the suite, both tests raise the `XTSE3050` they were written for and the 3.0 run
-reads **7,913 of 7,924**. It is not applied here, and the figures in these notes do not include it. A
-measurement is worth something because of what it is taken against, and a patch kept in the repository and
-offered upstream is worth more than two tests counted differently at home.
+Applied to a clone of the suite, both tests raise the `XTSE3050` they were written for. The third
+correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
+as* — and with all three the 3.0 run reads **7,914 of 7,924**. The patch is not applied here, and the
+figures in these notes do not include it. A measurement is worth something because of what it is taken
+against, and a patch kept in the repository and offered upstream is worth more than three tests counted
+differently at home.
 
 `package-200` is deliberately not in it. It asks for `XTSE3000` where `use-package-291` to `294` ask for
 `XTSE0020` on the same shape, so one of the five is wrong about a rule rather than about a character — see
@@ -6664,6 +6667,60 @@ Nothing moves on any run: 7,911 of 7,924 at 3.0 on both backends, 5,602 of 5,623
 schema-aware, and 18,268 and 14,553 on the two XPath runs. The driver's README gained the section that
 points at the patch, and its pass-rate-by-area table, which had fallen several rounds behind, was brought
 up to date.
+
+### What an accumulator's declared type is checked as
+
+The last failure in `decl/accumulator` had two things stacked on top of each other, and needed both taken
+off.
+
+`accumulator-038` declares `as="xs:integer*"` and writes a rule producing `$value, name(.)`, which is
+integers and then a string. It asks for `XPTY0004`. This engine raised `XTTE0570`, which is a variable's
+code, because a variable's is what the accumulator's value was being checked as. The specification says
+otherwise twice. §18.2.1: the result of the `initial-value` and of a rule's `select` "is converted to the
+type declared in the as attribute by applying the function conversion rules". §18.2.4 gives the
+accumulator's delta the signature `function ($old-value as T, $event as map(*)) as T`, where `T` is that
+type. So the value is a function's argument and a function's result, and what a function does with a value
+it cannot convert is `XPTY0004`. XSLT has a code for each place an `as` may be written — `XTTE0570` for a
+variable, `XTTE0590` for a parameter — and an accumulator is not one of those places.
+
+That alone does not pass the test, which is how the second thing came to light. The stylesheet is an
+`xsl:package`, and its entry point is `<xsl:template match="/" name="main">` with no visibility on it.
+§3.5.3.1 ends its list of the ways a component's visibility is settled with *Otherwise, private*, and §2.3.4
+makes it `XTDE0040` "if the invocation of the stylesheet specifies a template name that does not match the
+expanded QName of a named template defined in the stylesheet, whose visibility is public or final". A
+private template is not a way into a package, and this engine says so.
+
+The suite agrees with that reading everywhere else, including in this very file. Twelve of
+`accumulator-038`'s own siblings carry the note *Make main template public* — eleven dated 5 March 2019
+and `accumulator-031` as late as 6 March 2023 — and that is not a correction anyone would make if a private
+template were a way in. Fourteen test cases in the whole suite run an explicit `xsl:package` from a named
+template that carries no `visibility`: twelve expect a static error, raised before the entry point is ever
+reached; `forwards-011` makes its template public with an `xsl:expose` in the manifest instead; and
+`accumulator-038` is the one left. So it joins the correction patch, beside the two `err` files of
+`decl/package` — see *The correction the suite needs*.
+
+A third thing turned up on the way, in the message rather than the code. A sequence type printed its item
+type and dropped the occurrence indicator, so a stylesheet that had written `xs:integer*` was told
+`xs:integer` was declared. That is not merely terse, it is the opposite of true, and it misleads worst in
+the commonest case: a value refused for having two items, reported against a type that appears to allow
+one. The indicator is now the type's to add when it is asked how it reads, which also gives
+`array(xs:integer*)` and `function(xs:string*) as item()?` their inner indicators back.
+
+The complaint itself was rewritten while it was open, because *A value of type a sequence of 2 was
+produced where xs:integer was declared* gives a reader nothing to act on. Two different failures had been
+sharing one sentence. Either the count is wrong, and then what the items are is beside the point; or the
+count is right and one item is not, and then naming that item is what saves a search. So the accumulator
+now says:
+
+```
+XPTY0004: A sequence of 2 items was produced where xs:integer* was declared, and item 2 of it is xs:string.
+```
+
+Nothing moves on the suite as it is published: 7,911 of 7,924 at 3.0 on both backends, 5,602 of 5,623 at
+2.0, 8,472 of 8,526 schema-aware, and 18,268 and 14,553 on the two XPath runs, with the failure sets
+identical test for test. The two changes pay off only together and only against the corrected file: with
+the code alone the test cannot start, and with the correction alone it raises `XTTE0570`. Four new unit
+tests and one amended — it had written down the old code — for 2,792 in all.
 
 ### Which results the suite asks for and does not get
 
