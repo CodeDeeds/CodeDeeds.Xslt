@@ -41,6 +41,22 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>Gets whether the duration is negative.</summary>
         public bool IsNegative => Months < 0 || Seconds < 0m;
 
+        /// <summary>
+        /// The largest number of seconds a duration can be written as, and so the largest it can hold.
+        /// </summary>
+        /// <remarks>
+        /// A day-time duration is spelt as a count of days and a time of day, and the count of days is a
+        /// 64-bit integer here. More seconds than this has no spelling at all, which makes it out of range
+        /// rather than merely large — <c>FODT0002</c>, the overflow the specification provides for, and what
+        /// the suite's cbcl-divide-dayTimeDuration-003 allows in place of an answer.
+        /// </remarks>
+        public static readonly decimal MaxSeconds = long.MaxValue * 86400m;
+
+        /// <summary>Whether a number of seconds is one a duration can hold.</summary>
+        /// <param name="seconds">The number of seconds.</param>
+        public static bool CanHold(decimal seconds) =>
+            seconds >= -MaxSeconds && seconds <= MaxSeconds;
+
         /// <summary>How reading a duration turned out.</summary>
         public enum Reading : byte
         {

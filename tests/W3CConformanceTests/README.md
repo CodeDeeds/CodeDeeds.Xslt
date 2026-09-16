@@ -348,8 +348,8 @@ is paid only by a test that would otherwise be reported as failing.
 
 ## The XPath run
 
-The 2.0 run stands at **14,144 of 14,173, 99.8%**, and the 3.1 run — `--31`, which takes in the tests marked
-`XP30+` and `XP31+` — at **17,592 of 17,629, 99.8%**. The second reads 3,456 more tests than the first and is
+The 2.0 run stands at **14,553 of 14,577, 99.8%**, and the 3.1 run — `--31`, which takes in the tests marked
+`XP30+` and `XP31+` — at **18,268 of 18,285, 99.9%**. The second reads 3,708 more tests than the first and is
 level with it, which is not the shape to expect: what it takes in is the newer half, and the newer half
 was where the work was until lately.
 
@@ -357,25 +357,42 @@ was where the work was until lately.
 |---|---|---|
 | `math` | *3.0 and later* | 130 / 130, 100% |
 | `misc` | 31 / 31, 100% | 33 / 33, 100% |
-| `app` | 330 / 330, 100% | 774 / 777, 99.6% |
+| `app` | 331 / 332, 99.7% | 826 / 828, 99.8% |
 | `array` | *3.1* | 34 / 34, 100% |
-| `op` | 3,189 / 3,191, 99.9% | 3,405 / 3,409, 99.9% |
-| `prod` | 5,510 / 5,520, 99.8% | 5,936 / 5,944, 99.9% |
-| `fn` | 5,015 / 5,028, 99.7% | 7,057 / 7,073, 99.8% |
-| `map` | *3.1* | 110 / 112, 98.2% |
-| `xs` | 69 / 73, 94.5% | 113 / 117, 96.6% |
+| `op` | 3,225 / 3,225, 100% | 3,445 / 3,445, 100% |
+| `prod` | 5,751 / 5,760, 99.8% | 6,189 / 6,192, 100% |
+| `fn` | 5,145 / 5,156, 99.8% | 7,385 / 7,394, 99.9% |
+| `map` | *3.1* | 112 / 112, 100% |
+| `xs` | 70 / 73, 95.9% | 114 / 117, 97.4% |
 
 The failures no longer cluster anywhere. The largest set on either run holds five, and every other one
 holds four or fewer. Casting led this list by some way not long ago, then `op/to`, then
-`fn/parse-json`; those three sets are empty now, and so are `array`, `math` and `misc` entirely.
+`fn/parse-json`; those three sets are empty now, and so are `array`, `map`, `math`, `misc` and `op`
+entirely.
 
 What is left divides in two. Rather more than half is the driver rather than the engine: four
 `fn/collection` tests it wires up no collections for, three that want a document or a language it does
-not supply, and half a dozen where its own `assert-eq` cannot build the expected value and reports a
-mismatch between two texts that read identically. The rest is the engine, and thins out into ones and
-twos: `xs:dateTimeStamp`, which is an XSD 1.1 type this processor does not have; `op:same-key`, which
-is not `eq` and is implemented as though it were; a handful of reserved-name and EQName syntax rules.
-The compatibility document keeps the account of what is behind each.
+not supply, and a couple where its own `assert-eq` cannot build the expected value. The rest is the
+engine, and thins out into ones and twos: `xs:dateTimeStamp`, which is an XSD 1.1 type this processor
+does not have; `fn:distinct-values` over two numeric types, where <code>eq</code> is not transitive and
+a single-pass hash cannot reproduce it; two EQName rules whose codes are XQuery's. The compatibility
+document keeps the account of what is behind each.
+
+### Where an environment's files are named from
+
+An environment names its source documents with a file path, and where that path is relative to depends on
+where the environment was written. One declared in `catalog.xml` names its files from the root of the
+suite; one declared inside a test set names them from that test set's own directory, which is how
+`fn/collection.xml` reaches `../docs/bib.xml`. Resolving every one of them from the root left **767 tests
+skipped** as *context document would not load*, not one of which had anything wrong with it — and the
+reason read like a statement about the suite rather than about the driver. The environment now carries the
+directory it was read in: 664 of those tests run and 644 of them pass, which is where most of the
+difference between this run and the last one is.
+
+The catalogs are read with `LoadOptions.PreserveWhitespace` for a related reason. XLinq throws away a text
+node that is whitespace and nothing else, so an `assert-string-value` holding a character reference for a
+carriage return arrived as the empty string, and every result but the empty one was reported as differing
+from it. Some of the expectation is whitespace, so none of it can be dropped.
 
 ### Which XML Schema version a test asks for
 

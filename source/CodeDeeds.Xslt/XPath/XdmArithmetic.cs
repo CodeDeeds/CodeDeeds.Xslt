@@ -474,10 +474,17 @@ namespace CodeDeeds.Xslt.XPath
                 case BinaryOperator.Subtract:
                 {
                     int sign = op == BinaryOperator.Subtract ? -1 : 1;
-                    return XPathValue.FromDuration(new XdmDuration(
-                        a.Months + (sign * b.Months),
-                        a.Seconds + (sign * b.Seconds),
-                        a.Type));
+                    decimal total = a.Seconds + (sign * b.Seconds);
+
+                    if (!XdmDuration.CanHold(total))
+                    {
+                        throw XsltErrors.Error(
+                            XsltErrorCode.FODT0002,
+                            $"'{a}' and '{b}' together give a duration outside the range one can hold.");
+                    }
+
+                    return XPathValue.FromDuration(
+                        new XdmDuration(a.Months + (sign * b.Months), total, a.Type));
                 }
 
                 case BinaryOperator.Divide:
@@ -582,6 +589,13 @@ namespace CodeDeeds.Xslt.XPath
                 decimal months = divide ? duration.Months / scale : duration.Months * scale;
                 decimal seconds = divide ? duration.Seconds / scale : duration.Seconds * scale;
 
+                // A decimal holds more seconds than a duration can be written as, so the range is checked
+                // rather than left to the overflow that would otherwise come out of writing the answer.
+                if (!XdmDuration.CanHold(seconds))
+                {
+                    throw Overflow(duration, factor);
+                }
+
                 // A whole number of months, rounded the way fn:round rounds: to the nearest, and a half to
                 // whichever of the two is nearer positive infinity. P1M times 0.5 is P1M and not P0M,
                 // and P5M divided by -2 is -P2M and not -P3M.
@@ -605,7 +619,8 @@ namespace CodeDeeds.Xslt.XPath
         {
             return XsltErrors.Error(
                 XsltErrorCode.FODT0002,
-                $"Scaling '{duration}' by {factor} gives a duration outside the range one can hold.");
+                $"Scaling '{duration}' by {factor.ToString(CultureInfo.InvariantCulture)} gives a duration "
+                + "outside the range one can hold.");
         }
 
         /// <summary>

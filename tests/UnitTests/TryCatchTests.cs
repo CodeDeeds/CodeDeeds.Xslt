@@ -36,6 +36,38 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
+        public void OutputEscapingStaysDisabledThroughATry()
+        {
+            // An xsl:try holds its body back so that an error can take it away again, and that buffer
+            // stands in for the final output: nothing else is between the instruction and the serializer,
+            // so a text node written with the escaping off is still written with it off. Inside an element
+            // as well as at the top, which is where the suite's doe-0191 puts it.
+            Assert.AreEqual(
+                "<out><z>&lt;</z>10</out>",
+                Run(Root(
+                    "<xsl:try><z><xsl:value-of select=\"'&amp;lt;'\" disable-output-escaping=\"yes\"/></z>"
+                    + "<xsl:value-of select=\"10 idiv 1\"/>"
+                    + "<xsl:catch errors=\"*\"><error/></xsl:catch></xsl:try>")));
+
+            // And where the try does catch, nothing of the body survives to be escaped either way.
+            Assert.AreEqual(
+                "<out><error/></out>",
+                Run(Root(
+                    "<xsl:try><z><xsl:value-of select=\"'&amp;lt;'\" disable-output-escaping=\"yes\"/></z>"
+                    + "<xsl:value-of select=\"10 idiv 0\"/>"
+                    + "<xsl:catch errors=\"*\"><error/></xsl:catch></xsl:try>")));
+
+            // A variable is not that buffer: the specification lets a text node lose the flag on its way
+            // into one, and this engine does — the suite's doe-0186 turns on it.
+            Assert.AreEqual(
+                "<out><z>&amp;lt;</z></out>",
+                Run(Root(
+                    "<xsl:variable name=\"v\"><z>"
+                    + "<xsl:value-of select=\"'&amp;lt;'\" disable-output-escaping=\"yes\"/></z></xsl:variable>"
+                    + "<xsl:copy-of select=\"$v\"/>")));
+        }
+
+        [TestMethod]
         public void AnErrorCodeKeepsItsNamespace()
         {
             // fn:error() may raise a code in any namespace or in none, and a clause matches the whole name:

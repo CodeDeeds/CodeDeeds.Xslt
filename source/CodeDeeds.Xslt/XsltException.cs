@@ -852,6 +852,9 @@ namespace CodeDeeds.Xslt
         /// <summary>An axis step whose context item is not a node.</summary>
         XPTY0020,
 
+        /// <summary>Untyped content where <c>xs:QName</c> or <c>xs:NOTATION</c> is declared.</summary>
+        XPTY0117,
+
         /// <summary>An expression that does not fit the grammar.</summary>
         XPST0003,
 
@@ -1074,6 +1077,12 @@ namespace CodeDeeds.Xslt
 
         /// <summary>A serialization parameter given a value it may not take.</summary>
         SEPM0016,
+
+        /// <summary>Two mappings for one character in a character map.</summary>
+        SEPM0018,
+
+        /// <summary>A serialization parameter set twice.</summary>
+        SEPM0019,
 
         /// <summary>A value the JSON output method cannot write, such as infinity.</summary>
         SERE0020,

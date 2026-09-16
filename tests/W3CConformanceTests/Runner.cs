@@ -423,6 +423,7 @@ namespace CodeDeeds.Xslt.Conformance
                         .FirstOrDefault(e => (string?)e.Attribute("name") == reference) is XElement local)
                 {
                     Environment parsed = Environment.Parse(local);
+                    parsed.Directory = m_testSetDirectory ?? string.Empty;
                     problem = parsed.Unsupported;
                     return parsed;
                 }
@@ -438,6 +439,7 @@ namespace CodeDeeds.Xslt.Conformance
             }
 
             Environment inline = Environment.Parse(declared);
+            inline.Directory = m_testSetDirectory ?? string.Empty;
             problem = inline.Unsupported;
             return inline;
         }
@@ -517,7 +519,7 @@ namespace CodeDeeds.Xslt.Conformance
 
                 staticContext.DeclareGlobalVariable(name, slot);
                 globals[slot] = XPathValue.FromNodeSet(
-                    NodeSet.Singleton(LoadDocument(file), XdmTree.RootNode));
+                    NodeSet.Singleton(LoadDocument(environment.Directory, file), XdmTree.RootNode));
             }
 
             return globals;
@@ -604,18 +606,22 @@ namespace CodeDeeds.Xslt.Conformance
                 return XdmTreeBuilder.FromXml(new StringReader("<empty/>"), m_names);
             }
 
-            return LoadDocument(environment.ContextFile);
+            return LoadDocument(environment.Directory, environment.ContextFile);
         }
 
         /// <summary>Loads a document named by the catalog, once per run.</summary>
-        private XdmTree LoadDocument(string file)
+        /// <param name="directory">Where the environment names its files from, under the catalog root.</param>
+        /// <param name="file">The file as the environment wrote it.</param>
+        private XdmTree LoadDocument(string directory, string file)
         {
-            if (m_documents.TryGetValue(file, out XdmTree? cached))
+            string path = Path.GetFullPath(Path.Combine(m_catalog.Root, directory, file));
+
+            // The same name means a different file in two test sets, so the resolved path is what is
+            // remembered rather than what was written.
+            if (m_documents.TryGetValue(path, out XdmTree? cached))
             {
                 return cached;
             }
-
-            string path = Path.GetFullPath(Path.Combine(m_catalog.Root, file));
 
             using FileStream stream = File.OpenRead(path);
             XdmTree tree = XdmTreeBuilder.FromXml(stream, m_names);
@@ -625,7 +631,7 @@ namespace CodeDeeds.Xslt.Conformance
             tree.DocumentUri = new Uri(path).AbsoluteUri;
             tree.BaseUri = tree.DocumentUri;
 
-            m_documents.Add(file, tree);
+            m_documents.Add(path, tree);
             return tree;
         }
 

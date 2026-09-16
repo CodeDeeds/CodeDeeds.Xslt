@@ -537,6 +537,21 @@ namespace CodeDeeds.Xslt.Conformance
                 return true;
             }
 
+            // A number written with a point and no exponent is an xs:decimal, which is what the grammar
+            // says and what keeps the digits: read as a double, 151942272995732263.5 loses the half and
+            // then disagrees with an exact answer that spelt it — the suite's fn-avgnni2args-2.
+            if (trimmed.IndexOf('.') >= 0
+                && trimmed.IndexOf('e') < 0
+                && trimmed.IndexOf('E') < 0
+                && decimal.TryParse(
+                    trimmed, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
+                    CultureInfo.InvariantCulture,
+                    out decimal exact))
+            {
+                value = XPathValue.FromDecimal(exact);
+                return true;
+            }
+
             if (double.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out double number))
             {
                 value = XPathValue.FromNumber(number);
@@ -568,6 +583,14 @@ namespace CodeDeeds.Xslt.Conformance
                     value = type == "xs:float"
                         ? XPathValue.FromFloat((float)parsed)
                         : XPathValue.FromNumber(parsed);
+                }
+
+                // The canonical form of an xs:hexBinary is upper case, and the suite writes its
+                // expectations in lower. Upper-casing the digits is not a reading of the value: they are
+                // the same digits, and the comparison below is on text.
+                if (type == "xs:hexBinary")
+                {
+                    value = XPathValue.FromString(value.ToStringValue().ToUpperInvariant());
                 }
 
                 return true;

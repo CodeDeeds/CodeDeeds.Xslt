@@ -229,9 +229,12 @@ namespace CodeDeeds.Xslt.XPath
                 case Kind.Text:
                     // By the collation in scope where the comparison was written, and by code point where
                     // that is what it is — which is the answer wherever a stylesheet has not said otherwise.
-                    return where?.Collation is Collation collation
-                        ? collation.Compare(left.ToStringValue(), right.ToStringValue())
-                        : Math.Sign(string.CompareOrdinal(left.ToStringValue(), right.ToStringValue()));
+                    // Not string.CompareOrdinal, which orders by UTF-16 code unit: a character above the
+                    // basic plane is a surrogate pair there, and every one of those begins D800-DBFF, which
+                    // sorts below E000-FFFF. So an ordinal comparison puts U+11170 below U+EA60, where by
+                    // code point it is far above it.
+                    return (where?.Collation ?? Collation.Codepoint)
+                        .Compare(left.ToStringValue(), right.ToStringValue());
 
                 case Kind.Boolean:
                     return left.ToBoolean().CompareTo(right.ToBoolean());

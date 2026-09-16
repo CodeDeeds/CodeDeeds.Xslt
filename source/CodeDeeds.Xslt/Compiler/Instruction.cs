@@ -1132,8 +1132,11 @@ namespace CodeDeeds.Xslt.Compiler
                 return ignoringCase != 0 ? ignoringCase : CompareByCase(left, right);
             }
 
+            // By code point where no language was named, which is what the default collation is. Not
+            // string.CompareOrdinal: that orders by UTF-16 code unit, and every character above the basic
+            // plane begins with a surrogate in D800-DBFF, which sorts below the ordinary E000-FFFF.
             return m_culture is null
-                ? string.CompareOrdinal(left, right)
+                ? Collation.Codepoint.Compare(left, right)
                 : m_culture.CompareInfo.Compare(left, right, CompareOptions.None);
         }
 
@@ -2798,7 +2801,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// Serialized rather than flattened. A message is a document node built from the instruction's
         /// content, and an xsl:message writing an element means the element: reducing it to the text
         /// inside throws away what the stylesheet put there to be read. How a message is presented is
-        /// left to the processor (XSLT 3.0 §6.3), and every other one presents it as XML.
+        /// left to the processor (XSLT 3.0 ï¿½6.3), and every other one presents it as XML.
         /// </remarks>
         /// <param name="content">What the message is made of.</param>
         private static string Present(XPathValue content)
@@ -2977,7 +2980,8 @@ namespace CodeDeeds.Xslt.Compiler
             bool copyAccumulators = false,
             XsltRuntime? runtime = null,
             bool preserveTypes = true,
-            TypeOverlay? types = null)
+            TypeOverlay? types = null,
+            bool rawText = false)
         {
             if (runtime is not null && output.OpenElementDepth == 0)
             {
@@ -3027,7 +3031,7 @@ namespace CodeDeeds.Xslt.Compiler
                 }
                 else
                 {
-                    CopyShallow(tree, current, output, copyAccumulators, preserveTypes, types);
+                    CopyShallow(tree, current, output, copyAccumulators, preserveTypes, types, rawText);
                 }
 
                 if (child >= 0)
@@ -3082,13 +3086,23 @@ namespace CodeDeeds.Xslt.Compiler
             OutputTarget output,
             bool copyAccumulators = false,
             bool preserveTypes = true,
-            TypeOverlay? types = null)
+            TypeOverlay? types = null,
+            bool rawText = false)
         {
             NameTable names = tree.NameTable;
 
             switch (tree.KindOf(node))
             {
                 case NodeKind.Text:
+                    // The escaping a text node was written with survives only where the caller says the
+                    // tree is a buffer standing in for the final output rather than a value somebody kept:
+                    // see SequenceWriter.Write, which is the one caller that says so.
+                    if (rawText && tree.IsRawText(node))
+                    {
+                        output.WriteRawText(tree.StringValueOf(node));
+                        break;
+                    }
+
                     output.WriteText(tree.StringValueOf(node));
                     break;
 

@@ -101,7 +101,11 @@ namespace CodeDeeds.Xslt.Conformance
                     continue;
                 }
 
-                XElement testSet = XDocument.Load(path).Root!;
+                // Whitespace preserved, because some of it is the expectation. XLinq throws away a text
+                // node that is whitespace and nothing else, so an assert-string-value holding one character
+                // reference for a carriage return arrived as the empty string and every result but the
+                // empty one was reported as differing from it — the suite's cbcl-codepoints-to-string-026.
+                XElement testSet = XDocument.Load(path, LoadOptions.PreserveWhitespace).Root!;
                 testSets++;
 
                 string area = file.Contains('/') ? file[..file.IndexOf('/')] : "(root)";

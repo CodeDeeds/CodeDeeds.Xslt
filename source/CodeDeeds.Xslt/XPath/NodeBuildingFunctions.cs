@@ -110,6 +110,58 @@ namespace CodeDeeds.Xslt.XPath
                 && arity <= most;
         }
 
+        /// <summary>
+        /// The base URI the tree these build takes, which is the static base URI of the call.
+        /// </summary>
+        internal string? StaticBaseUri { get; set; }
+
+        /// <summary>
+        /// Refuses a fragment whose text declaration is not one.
+        /// </summary>
+        /// <remarks>
+        /// <c>fn:parse-xml-fragment</c> reads external general parsed entity syntax, which may begin with a
+        /// <em>text</em> declaration rather than an XML declaration. The two look alike and the rules are
+        /// not the same: a text declaration must carry an <c>encoding</c> and may not carry a
+        /// <c>standalone</c>. .NET's reader takes either in fragment conformance, so the two differences
+        /// are checked here — the suite's parse-xml-fragment-016 and 017.
+        /// </remarks>
+        /// <param name="xml">The text about to be parsed.</param>
+        private static void RefuseBadTextDeclaration(string xml)
+        {
+            ReadOnlySpan<char> text = xml.AsSpan();
+
+            if (!text.StartsWith("<?xml", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            // Only a declaration, not an ordinary processing instruction whose target begins with those
+            // letters: <?xmlfoo?> is a target of its own, and an ill-formed one at that.
+            if (text.Length > 5 && text[5] is not (' ' or '\t' or '\r' or '\n'))
+            {
+                return;
+            }
+
+            int close = xml.IndexOf("?>", StringComparison.Ordinal);
+            ReadOnlySpan<char> declaration = close < 0 ? text : text[..close];
+
+            if (declaration.IndexOf("encoding".AsSpan(), StringComparison.Ordinal) < 0)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.FODC0006,
+                    "fn:parse-xml-fragment() was given a text declaration with no 'encoding'. A fragment is "
+                    + "an external parsed entity, and a text declaration has to say what it is encoded in.");
+            }
+
+            if (declaration.IndexOf("standalone".AsSpan(), StringComparison.Ordinal) >= 0)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.FODC0006,
+                    "fn:parse-xml-fragment() was given a text declaration with a 'standalone'. Only a "
+                    + "document has one, and a fragment is an external parsed entity rather than a document.");
+            }
+        }
+
         /// <inheritdoc/>
         public override XPathValue Evaluate(ref DynamicContext context)
         {
@@ -131,8 +183,21 @@ namespace CodeDeeds.Xslt.XPath
 
             try
             {
+                string xml = text.ToStringValue();
+
+                if (fragment)
+                {
+                    RefuseBadTextDeclaration(xml);
+                }
+
                 XdmTree tree = XdmTreeBuilder.FromXml(
-                    text.ToStringValue(), fragment, context.Runtime is null ? null : context.Tree.NameTable);
+                    xml, fragment, context.Runtime is null ? null : context.Tree.NameTable);
+
+                // The specification says outright what base URI the result has: the static base URI of the
+                // call. Without it a document built here is the one kind of document that answers nothing
+                // to fn:base-uri, and a relative reference read out of it would have nothing to resolve
+                // against.
+                tree.BaseUri = StaticBaseUri ?? context.Runtime?.BaseUri;
 
                 return XPathValue.FromNodeSet(NodeSet.Singleton(tree, XdmTree.RootNode));
             }

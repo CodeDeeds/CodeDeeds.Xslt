@@ -180,18 +180,76 @@ namespace CodeDeeds.Xslt.UnitTests
         public void AParameterElementThatIsWrongInAnyWayIsReported()
         {
             // It is a document written by hand and read once, so a typo in it is worth reporting rather
-            // than passing over.
-            foreach ((string body, string why) in new[]
+            // than passing over. Which code it is reported under is the specification's to say, and it
+            // gives two of them their own: a parameter set twice and a character mapped twice.
+            foreach ((string body, string code, string why) in new[]
             {
-                ("<method value='xml'/><method value='text'/>", "a parameter named twice"),
-                ("<invented value='xml'/>", "a parameter that is not one"),
-                ("<method/>", "a parameter with no value"),
-                ("<use-character-maps value='yes'/>", "the one only a stylesheet may declare"),
+                ("<method value='xml'/><method value='text'/>", "SEPM0019", "a parameter named twice"),
+                ("<invented value='xml'/>", "SEPM0017", "a parameter that is not one"),
+                ("<method/>", "SEPM0017", "a parameter with no value"),
+                ("<method value='xml' value2='text'/>", "SEPM0017", "an attribute it does not take"),
+                ("<indent value='maybe'/>", "SEPM0017", "a value the parameter will not take"),
+                ("<use-character-maps value='yes'/>", "SEPM0017", "an attribute on use-character-maps"),
+                ("<use-character-maps><character-map character='$$' map-string='x'/></use-character-maps>",
+                    "SEPM0017", "a mapping of more than one character"),
+                ("<use-character-maps><character-map character='$' map-string='x'/>"
+                    + "<character-map character='$' map-string='y'/></use-character-maps>",
+                    "SEPM0018", "a character mapped twice"),
             })
             {
                 Assert.AreEqual(
-                    "SEPM0017", CodeOf($"serialize(parse-xml('<a/>'), {Element(body)})"), why);
+                    code, CodeOf($"serialize(parse-xml('<a/>'), {Element(body)})"), why);
             }
+        }
+
+        [TestMethod]
+        public void AParameterInSomebodyElsesNamespaceIsLeftAlone()
+        {
+            // A vendor's own parameter for a vendor that is not this one, which the specification says to
+            // pass over rather than refuse — and two of them under one name is still a parameter set twice.
+            StringAssert.Contains(
+                Writes("serialize(parse-xml('<a/>'), " + Element(
+                    "<method value=\"xml\"/>"
+                    + "<v:indent-spaces value=\"2\" xmlns:v=\"http://vendor.example.com/\"/>") + ")"),
+                "<a/>");
+
+            Assert.AreEqual(
+                "SEPM0019",
+                CodeOf("serialize(parse-xml('<a/>'), " + Element(
+                    "<v:indent-spaces value=\"3\" xmlns:v=\"http://vendor.example.com/\"/>"
+                    + "<v:indent-spaces value=\"2\" xmlns:v=\"http://vendor.example.com/\"/>") + ")"));
+        }
+
+        [TestMethod]
+        public void AnElementThatIsNotTheParametersIsATypeError()
+        {
+            // The argument is declared element(output:serialization-parameters), so an element of another
+            // name does not match the declaration: that is a type error rather than a serialization one.
+            Assert.AreEqual(
+                "XPTY0004",
+                CodeOf("serialize(parse-xml('<a/>'), parse-xml('<wrong/>')/*)"));
+        }
+
+        [TestMethod]
+        public void ACharacterMapMayBeWrittenEitherWay()
+        {
+            // The element form, which holds one character-map child per substitution.
+            StringAssert.Contains(
+                Writes("serialize(parse-xml('<a>$</a>'), " + Element(
+                    "<use-character-maps><character-map character=\"$\" map-string=\"USD\"/>"
+                    + "</use-character-maps>") + ")"),
+                "USD");
+
+            // And the map form, where the parameter is itself a map of character to replacement.
+            StringAssert.Contains(
+                Writes("serialize(parse-xml('<a>$</a>'), map { 'use-character-maps': map { '$': 'USD' } })"),
+                "USD");
+
+            // A key or a value that is not a string is a type error: the option parameter conventions
+            // convert an untyped value and refuse the rest, and they do not reach inside the inner map.
+            Assert.AreEqual(
+                "XPTY0004",
+                CodeOf("serialize(parse-xml('<a/>'), map { 'use-character-maps': map { 'x': xs:QName('n') } })"));
         }
 
         /// <summary>Builds the expression that parses a serialization-parameters element.</summary>

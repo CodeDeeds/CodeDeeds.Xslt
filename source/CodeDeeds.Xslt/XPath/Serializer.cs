@@ -87,6 +87,15 @@ namespace CodeDeeds.Xslt.XPath
             {
                 foreach (KeyValuePair<XPathValue, XPathValue> entry in options.AsMap().Entries)
                 {
+                    // A key written as an xs:QName names a parameter the implementation defines for itself,
+                    // and this one defines none, so it is passed over rather than refused: the suite's
+                    // serialize-xml-120b writes QName('', 'indent') and asks for a result that is not
+                    // indented, which is what ignoring it gives.
+                    if (entry.Key.TypeCode == XdmTypeCode.QName)
+                    {
+                        continue;
+                    }
+
                     Apply(parameters, entry.Key.ToStringValue(), entry.Value);
                 }
 
@@ -109,10 +118,20 @@ namespace CodeDeeds.Xslt.XPath
         /// Reads the parameters from an <c>output:serialization-parameters</c> element.
         /// </summary>
         /// <remarks>
-        /// Everything about the element is checked: a child outside the serialization namespace, a parameter
-        /// named twice, one this engine does not offer, or one carrying anything but a <c>value</c> attribute
-        /// is <c>SEPM0017</c>. It is a document written by hand and read once, so a typo in it is worth
-        /// reporting rather than passing over.
+        /// <para>
+        /// The element's own name decides a <em>type</em> error rather than a serialization one: the
+        /// argument is declared <c>element(output:serialization-parameters)</c>, and an element of another
+        /// name does not match that declaration, so it is <c>XPTY0004</c>.
+        /// </para>
+        /// <para>
+        /// After that, three rules that are easy to run together and are not the same. A child in the
+        /// serialization namespace whose name is not a parameter, one carrying anything but its
+        /// <c>value</c>, and a value the parameter will not take are all <c>SEPM0017</c>. A child in
+        /// <em>another</em> namespace is <em>ignored</em>, being a vendor's own parameter for a vendor that
+        /// is not this one. And two children of one name are <c>SEPM0019</c> however they are named — the
+        /// suite's params-025 duplicates a parameter in a namespace of its own and still asks for the
+        /// error, so the count is kept before the namespace is looked at.
+        /// </para>
         /// </remarks>
         private static void ReadParameterElement(Parameters parameters, XPathValue options)
         {
@@ -120,22 +139,28 @@ namespace CodeDeeds.Xslt.XPath
                 ? NodeSet.Singleton(options.NodeTree, options.NodeId)
                 : options.AsNodeSet();
 
-            if (nodes.Count != 1)
+            if (nodes.Count != 1
+                || nodes.TreeAt(0).KindOf(nodes[0]) != NodeKind.Element
+                || NamespaceOf(nodes.TreeAt(0), nodes[0]) != ParameterNamespace
+                || LocalOf(nodes.TreeAt(0), nodes[0]) != "serialization-parameters")
             {
-                throw Bad("the parameters are one element, not a set of them");
+                throw XsltErrors.Error(
+                    XsltErrorCode.XPTY0004,
+                    "fn:serialize() takes its parameters from one output:serialization-parameters element, "
+                    + "and this is not one.");
             }
 
             XdmTree tree = nodes.TreeAt(0);
             int element = nodes[0];
 
-            if (tree.KindOf(element) != NodeKind.Element
-                || NamespaceOf(tree, element) != ParameterNamespace
-                || LocalOf(tree, element) != "serialization-parameters")
+            if (tree.AttributeCountOf(element) > 0)
             {
-                throw Bad("they are named by an output:serialization-parameters element");
+                throw Bad(
+                    $"'{LocalOf(tree, tree.AttributeAt(element, 0))}' is written on "
+                    + "output:serialization-parameters, which takes no attributes");
             }
 
-            HashSet<string> seen = new HashSet<string>(StringComparer.Ordinal);
+            HashSet<(string Namespace, string Name)> seen = new HashSet<(string, string)>();
 
             for (int child = tree.FirstChildOf(element); child >= 0; child = tree.NextSiblingOf(child))
             {
@@ -154,22 +179,35 @@ namespace CodeDeeds.Xslt.XPath
                     continue;
                 }
 
-                if (NamespaceOf(tree, child) != ParameterNamespace)
-                {
-                    throw Bad($"'{LocalOf(tree, child)}' is not in the serialization namespace");
-                }
-
+                string namespaceUri = NamespaceOf(tree, child);
                 string name = LocalOf(tree, child);
 
-                if (!seen.Add(name))
+                if (!seen.Add((namespaceUri, name)))
                 {
-                    throw Bad($"'{name}' is named twice");
+                    throw XsltErrors.Error(
+                        XsltErrorCode.SEPM0019,
+                        $"fn:serialize() was given '{name}' twice, and a parameter is set once.");
                 }
 
-                if (tree.FirstChildOf(child) >= 0)
+                // Somebody else's parameter for somebody else's serializer. A name in no namespace is not
+                // that: it is a parameter written without its namespace, which the specification refuses.
+                if (namespaceUri.Length != 0 && namespaceUri != ParameterNamespace)
                 {
-                    throw Bad($"'{name}' carries content, where it takes a value attribute and nothing else");
+                    continue;
                 }
+
+                if (namespaceUri.Length == 0)
+                {
+                    throw Bad($"'{name}' is in no namespace, where a parameter is in the serialization one");
+                }
+
+                if (name == "use-character-maps")
+                {
+                    parameters.Settings.CharacterMap = ReadCharacterMaps(tree, child);
+                    continue;
+                }
+
+                RefuseOtherAttributes(tree, child, name, "value");
 
                 string? value = AttributeOf(tree, child, "value");
 
@@ -178,7 +216,104 @@ namespace CodeDeeds.Xslt.XPath
                     throw Bad($"'{name}' has no value attribute");
                 }
 
+                if (tree.FirstChildOf(child) >= 0)
+                {
+                    throw Bad($"'{name}' carries content, where it takes a value attribute and nothing else");
+                }
+
                 Apply(parameters, name, XPathValue.FromString(value), element: true);
+            }
+        }
+
+        /// <summary>
+        /// Reads an <c>output:use-character-maps</c> element, which holds one child per substitution.
+        /// </summary>
+        /// <remarks>
+        /// The one parameter whose element form is not a <c>value</c> attribute. A map is a set of single
+        /// characters and what each is written as instead, so a character named twice is a contradiction
+        /// rather than a repetition — <c>SEPM0018</c>, which is its own code.
+        /// </remarks>
+        /// <param name="tree">The tree the parameters are in.</param>
+        /// <param name="element">The <c>use-character-maps</c> element.</param>
+        private static CharacterMap ReadCharacterMaps(XdmTree tree, int element)
+        {
+            RefuseOtherAttributes(tree, element, "use-character-maps");
+            Dictionary<int, string> entries = new Dictionary<int, string>();
+
+            for (int map = tree.FirstChildOf(element); map >= 0; map = tree.NextSiblingOf(map))
+            {
+                if (tree.KindOf(map) == NodeKind.Text)
+                {
+                    if (XdmSequence.StringValueOf(XPathValue.FromNode(tree, map)).Trim().Length > 0)
+                    {
+                        throw Bad("'use-character-maps' holds text, where it holds character-map elements");
+                    }
+
+                    continue;
+                }
+
+                if (tree.KindOf(map) != NodeKind.Element)
+                {
+                    continue;
+                }
+
+                if (NamespaceOf(tree, map) != ParameterNamespace || LocalOf(tree, map) != "character-map")
+                {
+                    throw Bad(
+                        $"'use-character-maps' holds '{LocalOf(tree, map)}', where it holds "
+                        + "output:character-map elements");
+                }
+
+                RefuseOtherAttributes(tree, map, "character-map", "character", "map-string");
+
+                string character = AttributeOf(tree, map, "character")
+                    ?? throw Bad("a character-map has no character attribute");
+                string replacement = AttributeOf(tree, map, "map-string")
+                    ?? throw Bad("a character-map has no map-string attribute");
+
+                if (character.Length == 0
+                    || character.Length != (char.IsHighSurrogate(character[0]) ? 2 : 1))
+                {
+                    throw Bad($"a character-map maps '{character}', which is not one character");
+                }
+
+                if (!entries.TryAdd(char.ConvertToUtf32(character, 0), replacement))
+                {
+                    throw XsltErrors.Error(
+                        XsltErrorCode.SEPM0018,
+                        $"fn:serialize() was given two mappings for '{character}', and a character is "
+                        + "written one way or another.");
+                }
+            }
+
+            return new CharacterMap(entries);
+        }
+
+        /// <summary>Refuses an attribute the element does not take.</summary>
+        /// <param name="tree">The tree the element is in.</param>
+        /// <param name="element">The element.</param>
+        /// <param name="what">The element's name, for the message.</param>
+        /// <param name="allowed">The attribute names it does take, in no namespace.</param>
+        private static void RefuseOtherAttributes(
+            XdmTree tree, int element, string what, params string[] allowed)
+        {
+            for (int i = 0; i < tree.AttributeCountOf(element); i++)
+            {
+                int attribute = tree.AttributeAt(element, i);
+
+                // An attribute in a namespace belongs to whoever owns the namespace, as it does everywhere
+                // else; the ones this element defines are in none.
+                if (NamespaceOf(tree, attribute).Length != 0)
+                {
+                    continue;
+                }
+
+                string name = LocalOf(tree, attribute);
+
+                if (Array.IndexOf(allowed, name) < 0)
+                {
+                    throw Bad($"'{what}' has no '{name}' attribute");
+                }
             }
         }
 
@@ -291,9 +426,38 @@ namespace CodeDeeds.Xslt.XPath
                     break;
 
                 case "use-character-maps":
-                    // The one parameter fn:serialize may not be given at all, a character map being
-                    // something only a stylesheet declares.
-                    throw Bad("'use-character-maps' names something only a stylesheet can declare");
+                {
+                    // In a map this parameter is itself a map, from the character to what is written in its
+                    // place. The option parameter conventions convert an xs:untypedAtomic value and refuse
+                    // anything else that is not a string, and they do not recurse: the inner map's own
+                    // entries are checked here rather than by whatever built it.
+                    if (value.Kind != XPathValueKind.Map)
+                    {
+                        throw XsltErrors.Error(
+                            XsltErrorCode.XPTY0004,
+                            "the serialization parameter 'use-character-maps' is a map of characters and "
+                            + "what to write instead, and this is not one.");
+                    }
+
+                    Dictionary<int, string> mappings = new Dictionary<int, string>();
+
+                    foreach (KeyValuePair<XPathValue, XPathValue> mapping in value.AsMap().Entries)
+                    {
+                        string character = CharacterMapText(mapping.Key, "character");
+                        string replacement = CharacterMapText(mapping.Value, "replacement");
+
+                        if (character.Length == 0
+                            || character.Length != (char.IsHighSurrogate(character[0]) ? 2 : 1))
+                        {
+                            throw Bad($"'{character}' is not one character to map");
+                        }
+
+                        mappings[char.ConvertToUtf32(character, 0)] = replacement;
+                    }
+
+                    settings.CharacterMap = new CharacterMap(mappings);
+                    break;
+                }
 
                 default:
                     if (element)
@@ -320,10 +484,11 @@ namespace CodeDeeds.Xslt.XPath
                 return value.ToBoolean();
             }
 
-            // Only in the element form, where every value is written as text and 'yes' is how a boolean is
-            // spelled. In a map the value carries a type and a string is the wrong one, which is why the
-            // suite checks "indent":"true" as well as "indent":23.
-            if (element)
+            // In the element form every value is written as text and 'yes' is how a boolean is spelled
+            // there. In a map the value carries a type and a string is the wrong one — which is why the
+            // suite checks "indent":"true" as well as "indent":23 — except for an xs:untypedAtomic, which
+            // the option parameter conventions convert to whatever the parameter takes.
+            if (element || value.TypeCode == XdmTypeCode.UntypedAtomic)
             {
                 string text = value.ToStringValue().Trim();
 
@@ -338,9 +503,35 @@ namespace CodeDeeds.Xslt.XPath
                 }
             }
 
+            // Written as an element, a value the parameter will not take is a serialization error: the
+            // document is a document and the word in it is wrong. Written in a map it is a type error, the
+            // value carrying a type that is not the one the parameter is declared with.
+            throw XsltErrors.Error(
+                element ? XsltErrorCode.SEPM0017 : XsltErrorCode.XPTY0004,
+                $"the serialization parameter '{name}' is a boolean, and this one is not.");
+        }
+
+        /// <summary>
+        /// Reads one half of a character mapping, which the option parameter conventions say is a string.
+        /// </summary>
+        /// <remarks>
+        /// An <c>xs:untypedAtomic</c> is converted, as those conventions have it, and anything else that is
+        /// not a string is a type error: the suite's serialize-xml-141b writes an <c>xs:QName</c> for a
+        /// replacement and 140b an element, and both ask for <c>XPTY0004</c>.
+        /// </remarks>
+        /// <param name="value">The key or the value of one entry.</param>
+        /// <param name="what">Which half it is, for the message.</param>
+        private static string CharacterMapText(XPathValue value, string what)
+        {
+            if (value.TypeCode is XdmTypeCode.String or XdmTypeCode.UntypedAtomic
+                && value.Kind == XPathValueKind.String)
+            {
+                return value.ToStringValue();
+            }
+
             throw XsltErrors.Error(
                 XsltErrorCode.XPTY0004,
-                $"the serialization parameter '{name}' is a boolean, and this one is not.");
+                $"a character map's {what} is an xs:string, and this one is a {value.TypeCode}.");
         }
 
         private static XsltException Bad(string why)

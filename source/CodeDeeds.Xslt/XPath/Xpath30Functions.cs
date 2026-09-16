@@ -921,8 +921,12 @@ namespace CodeDeeds.Xslt.XPath
 
             if (tree.KindOf(node) == NodeKind.Namespace)
             {
-                // Named by its prefix (F&O §14.5.1); the default namespace's node has none to be named by.
-                return local.Length == 0 ? "namespace::*[fn:local-name()=\"\"]" : "namespace::" + local;
+                // Named by its prefix (F&O §14.5.1); the default namespace's node has none to be named by,
+                // and the path the specification gives for it writes the function out in full: a path is
+                // an expression somebody else may evaluate, and the fn prefix is not bound everywhere.
+                return local.Length == 0
+                    ? "namespace::*[Q{http://www.w3.org/2005/xpath-functions}local-name()=\"\"]"
+                    : "namespace::" + local;
             }
 
             if (XdmTree.IsAttribute(node))

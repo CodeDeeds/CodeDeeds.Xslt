@@ -54,6 +54,17 @@ namespace CodeDeeds.Xslt.XPath
             "typeswitch",
         };
 
+        /// <summary>The names XPath 3.0 and 3.1 added to the list, with the version that added each.</summary>
+        /// <remarks>
+        /// The list grew with the language, and a name a later version reserves is an ordinary function
+        /// name in an earlier one: a 2.0 stylesheet writing <c>function() { 1 }</c> is calling a function
+        /// nobody declared, which is what it would have meant when it was written.
+        /// </remarks>
+        private static readonly HashSet<string> s_reservedFrom30 = new(StringComparer.Ordinal)
+        {
+            "array", "function", "map", "switch",
+        };
+
         private readonly List<XPathToken> m_tokens;
         private readonly IXPathStaticContext m_context;
         private readonly string m_source;
@@ -884,21 +895,32 @@ namespace CodeDeeds.Xslt.XPath
                     // A name is the function itself, so the call is built as if it had been written out —
                     // which is what makes '=> concat(...)' reach the same overload resolution.
                     case XPathTokenKind.Name:
+                    {
                         m_index++;
-                        left = CreateCall(
-                            target,
-                            new List<Expr>(RequireNoPlaceholders(ParseArgumentList(left), "an '=>' call")));
+                        List<Expr?> given = ParseArgumentList(left);
+
+                        // An argument list written here may hold a placeholder like any other, and the
+                        // arrow's own argument is simply one more argument already supplied: '"$" =>
+                        // concat(?)' is concat#2 with the first bound and the second open, which is the
+                        // function of one argument the suite's ArrowPostfix-108 then calls.
+                        left = HasPlaceholder(given)
+                            ? new PartialApplicationExpr(
+                                NamedFunctionItem(target, given.Count), given.ToArray())
+                            : CreateCall(target, new List<Expr>(given!));
 
                         break;
+                    }
 
                     // A variable or a parenthesized expression yields the function at run time instead.
                     case XPathTokenKind.Variable:
                     case XPathTokenKind.LeftParen:
                     {
                         Expr function = ParsePrimaryExpression();
-                        left = new DynamicCallExpr(
-                            function,
-                            RequireNoPlaceholders(ParseArgumentList(left), "an '=>' call"));
+                        List<Expr?> given = ParseArgumentList(left);
+
+                        left = HasPlaceholder(given)
+                            ? new PartialApplicationExpr(function, given.ToArray())
+                            : new DynamicCallExpr(function, given.ToArray()!);
 
                         break;
                     }
@@ -1321,6 +1343,7 @@ namespace CodeDeeds.Xslt.XPath
             {
                 case XPathTokenKind.Question:
                     m_index++;
+                    RereadStarAsMultiply();
                     return XdmOccurrence.ZeroOrOne;
 
                 // A '*' after a type name follows an expression, so the scanner reads it as multiplication.
@@ -1328,6 +1351,7 @@ namespace CodeDeeds.Xslt.XPath
                 case XPathTokenKind.Star:
                 case XPathTokenKind.Multiply:
                     m_index++;
+                    RereadStarAsMultiply();
                     return XdmOccurrence.ZeroOrMore;
 
                 case XPathTokenKind.Plus:
@@ -1336,6 +1360,24 @@ namespace CodeDeeds.Xslt.XPath
 
                 default:
                     return XdmOccurrence.One;
+            }
+        }
+
+        /// <summary>
+        /// Rereads a <c>*</c> that follows an occurrence indicator as the multiplication operator.
+        /// </summary>
+        /// <remarks>
+        /// The scanner decides between the wildcard and the operator from what comes before it, and what
+        /// comes before here is <c>?</c> or <c>*</c>, which end no operand — the right answer for <c>?*</c>,
+        /// the lookup of every entry, and the wrong one for <c>xs:integer? * 3</c>. Only the parser knows
+        /// that a sequence type has just ended, and after one there is nothing a <c>*</c> could be but the
+        /// operator: the suite writes both spellings, in K-SeqExprTreat-13 and 14.
+        /// </remarks>
+        private void RereadStarAsMultiply()
+        {
+            if (Current.Kind == XPathTokenKind.Star)
+            {
+                m_tokens[m_index] = new XPathToken(XPathTokenKind.Multiply, Current.Position);
             }
         }
 
@@ -1937,8 +1979,10 @@ namespace CodeDeeds.Xslt.XPath
                 {
                     // A reserved name is one the grammar needs for a kind test or a keyword, so it cannot
                     // also be a function name. The call does not fail to resolve; it does not parse.
-                    if (token.Prefix.Length == 0 && s_reservedFunctionNames.Contains(token.Text)
-                        && !m_context.LegacySyntax)
+                    if (token.Prefix.Length == 0
+                        && !m_context.LegacySyntax
+                        && (s_reservedFunctionNames.Contains(token.Text)
+                            || (IsXPath30 && s_reservedFrom30.Contains(token.Text))))
                     {
                         throw Error(
                             token,
@@ -2031,23 +2075,6 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             return false;
-        }
-
-        /// <summary>
-        /// The arguments of a call that may not have placeholders, refusing one that does.
-        /// </summary>
-        /// <param name="arguments">The parsed arguments.</param>
-        /// <param name="where">What was being called, for the message.</param>
-        private Expr[] RequireNoPlaceholders(List<Expr?> arguments, string where)
-        {
-            if (!HasPlaceholder(arguments))
-            {
-                return arguments.ToArray()!;
-            }
-
-            throw Error(
-                Current,
-                $"A '?' cannot stand for an argument of {where}, which supplies one of its arguments itself.");
         }
 
         /// <summary>
@@ -2283,6 +2310,10 @@ namespace CodeDeeds.Xslt.XPath
 
                     case JsonFunctionExpr json:
                         json.StaticBaseUri = baseUri;
+                        break;
+
+                    case NodeBuildingFunctionExpr building:
+                        building.StaticBaseUri = baseUri;
                         break;
 
                     case FunctionCallExpr core:

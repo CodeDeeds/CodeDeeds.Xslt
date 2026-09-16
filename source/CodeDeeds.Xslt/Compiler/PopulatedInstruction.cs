@@ -432,7 +432,11 @@ namespace CodeDeeds.Xslt.Compiler
                         continue;
                     }
 
-                    NodeCopier.CopyDeep(item.NodeTree, item.NodeId, runtime.Output);
+                    // And inside a copied element too, which is where an xsl:try buffer holds one: the try
+                    // is between the instruction and the serializer and nothing else is, so the escaping it
+                    // switched off is still off. Only a tree that was built as a stand-in for the final
+                    // output carries the mark that deep — see SequenceCaptureTarget.WriteRawText.
+                    NodeCopier.CopyDeep(item.NodeTree, item.NodeId, runtime.Output, rawText: true);
                     continue;
                 }
 

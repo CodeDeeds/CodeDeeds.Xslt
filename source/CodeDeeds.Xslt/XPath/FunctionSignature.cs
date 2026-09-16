@@ -356,6 +356,18 @@ namespace CodeDeeds.Xslt.XPath
             // without a cast at every reference. It may fail, as any cast may, and that failure is the answer.
             if (atomic.TypeCode == XdmTypeCode.UntypedAtomic && !AcceptsUntyped)
             {
+                // The one declared type an untyped value is not read as: a name is a namespace and a local
+                // part, and text carries neither — the prefix in it would have to mean something, and
+                // where the text came from is not where the function is. The specification gives that its
+                // own code rather than letting the cast fail (F&O: XPTY0117).
+                if (m_type.Code == XdmTypeCode.QName)
+                {
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XPTY0117,
+                        $"Argument {position} of {function}() is declared xs:{m_type.Name}, and untyped "
+                        + "content is not read as one: a name written as text has no namespace to be in.");
+                }
+
                 return m_shape == Shape.Numeric
                     ? XdmType.UntypedAsDouble(atomic)
                     : XdmType.Cast(atomic, m_type);

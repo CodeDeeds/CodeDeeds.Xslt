@@ -620,8 +620,26 @@ namespace CodeDeeds.Xslt.Runtime
         /// <inheritdoc/>
         public override void WriteRawText(string text)
         {
-            if (m_depth != 0 || m_becomesAString)
+            if (m_becomesAString)
             {
+                WriteText(text);
+                return;
+            }
+
+            // Inside an element the flag survives only where this buffer stands in for the final output,
+            // which is an xsl:try holding its content back so that it can be dropped. Nothing else is
+            // between the instruction and the serializer there, so the escaping the instruction switched
+            // off stays off: the suite's doe-0191 writes one inside an element inside a try. A variable
+            // buffers for later instead, and the specification lets a text node lose the flag on its way
+            // into one.
+            if (m_depth != 0)
+            {
+                if (StandsForFinalOutput)
+                {
+                    m_builder!.AddRawText(text);
+                    return;
+                }
+
                 WriteText(text);
                 return;
             }

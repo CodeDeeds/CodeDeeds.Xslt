@@ -1304,6 +1304,15 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="value">The value to read.</param>
         internal static double AsDoubleOrNaN(XPathValue value)
         {
+            // A type the cast table has no route from has not failed to be read as a number: there was
+            // never a reading to attempt, and the text it happens to carry is not one. xs:anyURI is the
+            // case that shows it — xs:anyURI('1') has the text of a number and no cast to one, so
+            // fn:number() of it is NaN and not 1, which the suite's K-NodeNumberFunc-13 asks for.
+            if (value.TypeCode is XdmTypeCode.AnyUri or XdmTypeCode.QName)
+            {
+                return double.NaN;
+            }
+
             try
             {
                 return CastToDouble(value, "xs:double");

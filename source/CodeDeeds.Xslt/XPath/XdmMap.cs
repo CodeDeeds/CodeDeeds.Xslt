@@ -271,6 +271,18 @@ namespace CodeDeeds.Xslt.XPath
                             0.0);
                     }
 
+                    // A decimal that no double names exactly keys by its own digits. op:same-key compares
+                    // numeric keys by what they are worth and promotes neither to the other's type, so
+                    // xs:decimal('1.0000000000100000000001') and xs:double('1.00000000001') are two keys
+                    // although the first converts to exactly the second — the suite's map-put-023, whose
+                    // sibling map-remove-016 says outright that a decimal is not promoted to a double.
+                    // A decimal that a double does name exactly keys as that double, which is what makes
+                    // 1.5 and 1.5e0 one key.
+                    if (value.TypeCode == XdmTypeCode.Decimal && !NamesExactly(number, value.ToDecimal()))
+                    {
+                        return new XdmKey(Family.Text, value, "x:" + value.ToStringValue(), 0L, 0.0);
+                    }
+
                     return new XdmKey(Family.Real, value, null, 0L, number);
                 }
 
@@ -280,6 +292,68 @@ namespace CodeDeeds.Xslt.XPath
                         "A map key has to be a single atomic value, and this is "
                         + Describe(value.Kind) + ".");
             }
+        }
+
+        /// <summary>
+        /// Whether a double is worth exactly what a decimal is worth, neither rounded to the other.
+        /// </summary>
+        /// <remarks>
+        /// Both are exact numbers written in different bases: a decimal is <c>n / 10^s</c> and a double is
+        /// <c>m * 2^e</c>, so they are the same number exactly when <c>n * 2^-e = m * 10^s</c>, which whole
+        /// numbers answer with nothing rounded. Converting one to the other and comparing would answer a
+        /// different question, which is the one that put two keys in one bucket.
+        /// </remarks>
+        /// <param name="approximation">The double, which is the decimal converted.</param>
+        /// <param name="exact">The decimal.</param>
+        private static bool NamesExactly(double approximation, decimal exact)
+        {
+            if (double.IsNaN(approximation) || double.IsInfinity(approximation))
+            {
+                return false;
+            }
+
+            int[] parts = decimal.GetBits(exact);
+            int scale = (parts[3] >> 16) & 0xFF;
+            System.Numerics.BigInteger digits =
+                (new System.Numerics.BigInteger((uint)parts[2]) << 64)
+                + (new System.Numerics.BigInteger((uint)parts[1]) << 32)
+                + (uint)parts[0];
+
+            if ((parts[3] & unchecked((int)0x80000000)) != 0)
+            {
+                digits = -digits;
+            }
+
+            long bits = BitConverter.DoubleToInt64Bits(approximation);
+            long mantissa = bits & 0xFFFFFFFFFFFFFL;
+            int exponent = (int)((bits >> 52) & 0x7FF);
+
+            // A subnormal has no hidden bit and the exponent one step up from what the field says.
+            if (exponent == 0)
+            {
+                exponent = 1;
+            }
+            else
+            {
+                mantissa |= 1L << 52;
+            }
+
+            exponent -= 1075;
+            System.Numerics.BigInteger binary = bits < 0 ? -mantissa : mantissa;
+
+            System.Numerics.BigInteger left = digits;
+            System.Numerics.BigInteger right = binary * System.Numerics.BigInteger.Pow(10, scale);
+
+            if (exponent >= 0)
+            {
+                right *= System.Numerics.BigInteger.Pow(2, exponent);
+            }
+            else
+            {
+                left *= System.Numerics.BigInteger.Pow(2, -exponent);
+            }
+
+            return left == right;
         }
 
         /// <summary>The type together with the text, so a date is never the same key as a string of it.</summary>
@@ -313,6 +387,16 @@ namespace CodeDeeds.Xslt.XPath
             if (value.TypeCode is XdmTypeCode.Date or XdmTypeCode.Time or XdmTypeCode.DateTime)
             {
                 return (int)value.TypeCode + ":" + value.AsDateTime().Key;
+            }
+
+            // A name is its namespace and its local part. The canonical form of one is the way it was
+            // written, prefix and all, and two names written the same way in two namespaces are two names:
+            // the suite's same-key-021 puts QName((), 'abc') and QName('http://example.org', 'abc') into one
+            // map and asks for both.
+            if (value.TypeCode == XdmTypeCode.QName)
+            {
+                XdmQName name = value.AsQName();
+                return (int)value.TypeCode + ":" + name.NamespaceUri + "}" + name.LocalName;
             }
 
             return (int)value.TypeCode + ":" + value.ToCanonicalString();

@@ -768,7 +768,13 @@ namespace CodeDeeds.Xslt.Model
                         // allows comments and processing instructions around it and no character data at
                         // all. Keeping it made a document node with a text child, which the built-in rule
                         // then copied — a newline appearing in the result because the input file ended in one.
-                        if (!builder.InsideElement)
+                        //
+                        // A fragment has no document element to be outside of, and whitespace at its top is
+                        // character data like any other: fn:parse-xml-fragment('  ') is a document node
+                        // whose string value is two spaces, which the suite's parse-xml-fragment-008 asks
+                        // for in as many words.
+                        if (!builder.InsideElement
+                            && reader.Settings?.ConformanceLevel != ConformanceLevel.Fragment)
                         {
                             break;
                         }

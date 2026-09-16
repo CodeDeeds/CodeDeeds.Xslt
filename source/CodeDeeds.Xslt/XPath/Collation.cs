@@ -324,6 +324,14 @@ namespace CodeDeeds.Xslt.XPath
                 return Fold(subject).StartsWith(Fold(prefix), StringComparison.Ordinal);
             }
 
+            // A prefix that weighs nothing is a prefix of every string, the empty one included:
+            // 'alternate=blanked' makes a run of punctuation collate as nothing at all, and a question
+            // about what a string begins with is a question about weight rather than about characters.
+            if (m_compare.Compare(prefix, string.Empty, m_options) == 0)
+            {
+                return true;
+            }
+
             if (m_compare.IsPrefix(subject, prefix, m_options))
             {
                 return true;
@@ -344,6 +352,12 @@ namespace CodeDeeds.Xslt.XPath
             if (m_compare is null)
             {
                 return Fold(subject).EndsWith(Fold(suffix), StringComparison.Ordinal);
+            }
+
+            // As in StartsWith: a suffix that weighs nothing ends every string.
+            if (m_compare.Compare(suffix, string.Empty, m_options) == 0)
+            {
+                return true;
             }
 
             if (m_compare.IsSuffix(subject, suffix, m_options))

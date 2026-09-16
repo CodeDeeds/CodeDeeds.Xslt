@@ -57,8 +57,19 @@ namespace CodeDeeds.Xslt.Conformance
     {
         public string? Name { get; private init; }
 
-        /// <summary>The file supplying the context item, relative to the catalog root.</summary>
+        /// <summary>The file supplying the context item, relative to <see cref="Directory"/>.</summary>
         public string? ContextFile { get; private init; }
+
+        /// <summary>
+        /// The directory the environment's files are named relative to, under the catalog root.
+        /// </summary>
+        /// <remarks>
+        /// An environment declared in <c>catalog.xml</c> names its files from the root; one declared inside
+        /// a test set names them from that test set's own directory, which is how <c>fn/collection.xml</c>
+        /// reaches <c>../docs/bib.xml</c>. Resolving every one of them from the root left 767 tests skipped
+        /// as "context document would not load", none of which had anything wrong with it.
+        /// </remarks>
+        public string Directory { get; set; } = string.Empty;
 
         /// <summary>
         /// Whether the environment declares the static base URI to be undefined, which is what

@@ -6318,6 +6318,101 @@ The 2.0 run goes from 5,599 of 5,622 to **5,600 of 5,623**: the denominator move
 judged now rather than skipped. The XPath runs are unmoved at 17,592 and 14,144, the two backends agree test
 for test, and nothing that was passing fails. Nine new unit tests, 2,778 in all.
 
+### A round of what was left
+
+With the DocBook pair closed, what remained across the five runs was a list rather than a theme: forty-odd
+tests, each its own small thing. This is that list worked through. Two of them turned out to be the
+driver's rather than the engine's, and one of those was hiding six hundred tests.
+
+**A skip that was reading the wrong directory.** A QT3 environment names its source documents with a file
+path, and where that path is relative to depends on where the environment was written: one in `catalog.xml`
+names its files from the root of the suite, one written inside a test set names them from that test set's
+own directory. The driver resolved every one of them from the root, so `fn/collection.xml`'s
+`../docs/bib.xml` pointed outside the suite and **767 tests were being skipped** as *context document would
+not load*, not one of which had anything wrong with it. The environment now carries the directory it was
+read in. 664 of those tests run, and 644 of them pass.
+
+**A catalog read with the whitespace thrown away.** XLinq drops a text node that is whitespace and nothing
+else, so an `assert-string-value` holding one character reference for a carriage return arrived as the empty
+string — and every result but the empty one was reported as differing from it. Reading the catalogs with
+`LoadOptions.PreserveWhitespace` fixed two tests and immediately found a third: `fn:parse-xml-fragment('  ')`
+is a document node whose string value is two spaces, and this engine was dropping them. Whitespace above the
+document element is not part of a *document*, which is why it was dropped; a fragment has no document
+element to be above.
+
+Then the engine, in no particular order.
+
+**A string ordered by code unit rather than by code point.** `lt` on two strings fell back to
+`string.CompareOrdinal` where no collation was in scope, and that orders by UTF-16 code unit. Every
+character above the basic plane is written there as a surrogate pair beginning D800-DBFF, which sorts below
+the ordinary E000-FFFF — so U+11170 came out below U+EA60, where by code point it is far above it. The
+code point collation was there and doing this correctly; two places were not asking it. The other was
+`xsl:sort` with no language named.
+
+**Two map keys that were one.** A key written as an `xs:QName` was keyed by its canonical form, which is the
+lexical name — so `QName((), 'abc')` and `QName('http://example.org', 'abc')` landed in one bucket. A name
+is its namespace and its local part. And `op:same-key` compares numeric keys by what they are worth without
+promoting one to the other's type, so `xs:decimal('1.0000000000100000000001')` and
+`xs:double('1.00000000001')` are two keys although the first converts to exactly the second. A decimal now
+keys by its own digits unless a double names it exactly, which is answered by comparing `n * 2^-e` with
+`m * 10^s` in whole numbers rather than by converting either to the other.
+
+**A duration that could not be written.** `xs:dayTimeDuration('P9223372036854775807D') div 0.5` came out as
+an `OverflowException` from the code that writes the answer down, a day count being a 64-bit integer. More
+seconds than that has no spelling, which makes it out of range rather than merely large: `FODT0002`, checked
+where the arithmetic happens rather than left to the write.
+
+**Four reserved names and when each became one.** `array`, `function`, `map` and `switch` are names the
+grammar reserves, so `switch()` is a sentence with no reading rather than a call to a function nobody
+declared. The list grew with the language — 3.0 added two and 3.1 the other two — and a name a later
+version reserves is an ordinary function name in an earlier one, so a 2.0 stylesheet writing
+`function() { 1 }` is still calling something that does not exist.
+
+**A star the scanner could not place.** The scanner decides between the wildcard and the multiplication
+operator from what comes before, and what comes before in `xs:integer? * 3` is `?`, which ends no operand.
+That is the right answer for `?*`, the lookup of every entry in a map, and the wrong one here. Only the
+parser knows a sequence type has just ended, and after one a `*` can be nothing but the operator, so it
+rereads the token.
+
+**An arrow that would not take a placeholder.** `"$" => concat(?)` is `concat#2` with the first argument
+bound and the second open, which is a function of one argument. The argument list of an `=>` call was
+refusing a placeholder outright; it is an argument list like any other, and the arrow's own argument is
+simply one more that is already supplied.
+
+**Several functions answering the wrong question.** `fn:number()` is defined as a cast whose failure is
+answered rather than raised — but a type the cast table has no route from has not *failed* to be read as a
+number, and `xs:anyURI('1')` has the text of one and no cast to it, so the answer is `NaN`. `fn:parse-xml`'s
+result takes the static base URI of the call, which the specification states outright and which had been
+left empty. `fn:parse-xml-fragment` reads external parsed entity syntax, where a text declaration must carry
+an `encoding` and may not carry a `standalone`. `fn:starts-with` and `fn:ends-with` say yes where the prefix
+weighs nothing under the collation — `alternate=blanked` makes a run of punctuation weigh nothing, and the
+question is about weight rather than characters. And `fn:path` of the namespace node with no name writes the
+function in its result out in full, a path being an expression somebody else may evaluate.
+
+**`fn:serialize`'s parameters, which are three rules that run together and are not the same.** A child of
+`output:serialization-parameters` in the serialization namespace that is not a parameter, one carrying
+anything but its `value`, and a value the parameter will not take are `SEPM0017`. A child in *another*
+namespace is ignored, being a vendor's own parameter for a vendor that is not this one. Two children of one
+name are `SEPM0019` however they are named, and two mappings for one character are `SEPM0018`. An element
+that is not `output:serialization-parameters` at all is `XPTY0004`, the argument being declared as that
+element. `use-character-maps` is a parameter like the others and was refused outright; it is written as
+`output:character-map` children in the element form and as a map in the map form. Seventeen tests, and they
+were only visible because the directory fix brought them into the run.
+
+**And output escaping through an `xsl:try`.** A try holds its body back so that an error can take it away
+again, and that buffer stands in for the final output: nothing else is between the instruction and the
+serializer, so a text node written with the escaping off is still written with it off. The flag was being
+kept only for a text node at the top of the buffer and lost for one inside an element, which is where
+`doe-0191` puts it. A variable is not that buffer and still loses it, as the specification allows and as
+`doe-0184` and `doe-0186` require.
+
+The two XPath runs go from 17,592 of 17,629 to **18,268 of 18,285** and from 14,144 of 14,173 to
+**14,553 of 14,577**, the denominators moving because the directory fix brought 664 tests into the first
+and 404 into the second. The XSLT 3.0 run goes from 7,906 of 7,924 to **7,907** and the schema-aware run
+from 8,467 of 8,526 to **8,468**, both of them doe-0191; the 2.0 run is unmoved at 5,600 of 5,623. The two
+backends agree test for test on all three XSLT runs, and nothing that was passing fails. Four new unit
+tests, 2,782 in all.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error
