@@ -6567,6 +6567,43 @@ is about, the value having no element or attribute named beside it before.
 Nothing moves: 7,909 of 7,924 on the 3.0 run, and the rest where they were. One new unit test, 2,787 in
 all.
 
+### Where a function's arity belongs
+
+`package-021err` and `package-022err` were left as stylesheets that do not compile, which was right and
+was not the end of it. The suite's own change log says what happened to them.
+
+Draft erratum E36 required a function named in an `xsl:accept` or an `xsl:expose` to carry its arity, and
+in February 2020 the tests were swept through to add it. Two of the edits put the `#0` somewhere it does
+not belong: on `xsl:function`'s `name`, which is an `EQName`, in `package-021err-used`, and on
+`xsl:accept`'s `component`, which is one of six words, in `package-022err-includeC`. Neither spelling
+appears anywhere else in the suite — not once in fourteen thousand test cases — which is as good as a
+signature.
+
+Their unedited twins were corrected again on 8 September 2020, `package-021` carrying the note *function
+names in xsl:accept/expose must now have an explicit arity*, and those files are right. Then in March 2023
+the erratum was walked back over `decl/accept` and `decl/expose`, a dozen tests at a time, under the note
+*remove unintended error, missing arity on function name*. The two `err` files were touched by neither
+pass: they were last modified on 18 February 2020 and still carry what that sweep left.
+
+That last part is worth keeping in view, because the tempting reading of E36 is to require an arity on
+every explicit function name in an `xsl:accept`. The suite required exactly that for three years and then
+stopped, so this engine does not; a wildcard never carried one, and an explicit name without one still
+means the function of that name.
+
+What the two tests are *about* has been implemented since: a component that two namings of one package
+both leave in view is `XTSE3050` — see *Count a used package once per naming of it*. Correcting the two
+files by hand makes both of them pass. As they stand they cannot, and the `XTSE0020` they get is a correct
+account of a stylesheet that is not XSLT.
+
+So what was left to do was to say it better. An arity written in either of those two places is now named
+for what it is: on a declaration, that a function takes its arity from its `xsl:param` children and the
+name meant is the one without the suffix; on a `component`, that the arity belongs on the name in `names`.
+It is a mistake the specification's own editors made twice, which is a fair argument that the message
+should do more than say the value is not a name.
+
+Nothing moves: 7,909 of 7,924 on the 3.0 run and the rest where they were. Two new unit tests, 2,788 in
+all.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error

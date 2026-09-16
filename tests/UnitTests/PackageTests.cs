@@ -536,6 +536,57 @@ namespace CodeDeeds.Xslt.UnitTests
                 Refuses(Using("9.9.9"), new VersionedLibrary().Add("urn:lib", "1.0.0", Versioned("1.0.0"))));
         }
 
+        [TestMethod]
+        public void AnArityWrittenWhereItDoesNotBelongSaysWhereItDoes()
+        {
+            // A function carries its arity where one package refers to another's function, in the 'names'
+            // of an xsl:accept or an xsl:expose. Not where it is declared, and not on the 'component' that
+            // says which kind of thing is meant. Both are refused, and both say what was probably meant:
+            // the W3C suite makes each mistake once, in package-021err and package-022err, so it is worth
+            // more than "that is not a name".
+            PlainLibrary files = new PlainLibrary().Add(
+                "urn:lib",
+                Package("urn:lib", "<xsl:function name=\"p:f\" visibility=\"public\">one</xsl:function>"));
+
+            string declaring = Assert.ThrowsExactly<XsltException>(
+                () => Run(
+                    Package(
+                        "urn:main",
+                        "<xsl:function name=\"p:f#0\" visibility=\"public\"/>"
+                        + "<xsl:template name=\"main\" visibility=\"public\"><out/></xsl:template>"),
+                    files))
+                .Message;
+
+            StringAssert.Contains(declaring, "takes its arity from its parameters");
+            StringAssert.Contains(declaring, "'p:f'");
+
+            string accepting = Assert.ThrowsExactly<XsltException>(
+                () => Run(
+                    Package(
+                        "urn:main",
+                        "<xsl:use-package name=\"urn:lib\">"
+                        + "<xsl:accept component=\"function#0\" names=\"p:f\" visibility=\"public\"/>"
+                        + "</xsl:use-package>"
+                        + "<xsl:template name=\"main\" visibility=\"public\"><out/></xsl:template>"),
+                    files))
+                .Message;
+
+            StringAssert.Contains(accepting, "names=\"prefix:local#0\"");
+            StringAssert.Contains(accepting, "component=\"function\"");
+
+            // And the arity where it does belong is read as it always was.
+            Assert.AreEqual(
+                "<out/>",
+                Run(
+                    Package(
+                        "urn:main",
+                        "<xsl:use-package name=\"urn:lib\">"
+                        + "<xsl:accept component=\"function\" names=\"p:f#0\" visibility=\"hidden\"/>"
+                        + "</xsl:use-package>"
+                        + "<xsl:template name=\"main\" visibility=\"public\"><out/></xsl:template>"),
+                    files));
+        }
+
         /// <summary>A package declaring the one public variable these two tests are about.</summary>
         private static string Declares(string value) =>
             $"<xsl:variable name=\"v\" select=\"'{value}'\" visibility=\"public\"/>";

@@ -7642,11 +7642,18 @@ namespace CodeDeeds.Xslt.Compiler
 
             if (component is not ("template" or "function" or "attribute-set" or "variable" or "mode" or "*"))
             {
+                // An arity written here is a particular mistake and worth naming: it belongs on the
+                // function in 'names', which is where a package's two functions of one name are told
+                // apart. The W3C suite makes it twice, in package-022err-includeC.
                 throw XsltErrors.Error(
                     XsltErrorCode.XTSE0020,
                     $"'{component}' is not a kind of component a package offers. Only a template, a "
                     + "function, an attribute set, a variable or a mode is one, and '*' means every kind "
-                    + "of them at once.");
+                    + "of them at once."
+                    + (component.IndexOf('#') is int hash && hash > 0
+                        ? $" An arity belongs on the name in 'names', as names=\"prefix:local{component[hash..]}\","
+                            + $" rather than on the kind: component=\"{component[..hash]}\"."
+                        : string.Empty));
             }
 
             string said = GetAttribute(element, "visibility")?.Trim()
@@ -10421,10 +10428,21 @@ namespace CodeDeeds.Xslt.Compiler
 
                 if (!IsLexicalQName(value))
                 {
+                    // A function is named with its arity where one package refers to another's, in the
+                    // 'names' of an xsl:accept or xsl:expose. It is not named that way where it is
+                    // declared: what a declaration's arity is, its xsl:param children say. The W3C suite
+                    // writes it the wrong way round in package-021err-used.
+                    string arity = value.IndexOf('#') is int hash && hash > 0 && IsLexicalQName(value[..hash])
+                        ? $" An arity is written on a function name in the 'names' of an xsl:accept or an "
+                            + $"xsl:expose; a declaration takes its arity from its parameters, so this is "
+                            + $"'{value[..hash]}'."
+                        : string.Empty;
+
                     throw XsltErrors.Error(
                         XsltErrorCode.XTSE0020,
                         $"'{value}' is not a name. The '{written}' of '{QualifiedNameOf(element)}' is a "
-                        + "QName written out, not an expression and not an attribute value template.");
+                        + "QName written out, not an expression and not an attribute value template."
+                        + arity);
                 }
 
                 if (shape.Declares
