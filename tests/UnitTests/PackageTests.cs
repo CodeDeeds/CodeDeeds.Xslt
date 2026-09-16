@@ -506,6 +506,36 @@ namespace CodeDeeds.Xslt.UnitTests
                 Run(Diamond(), files));
         }
 
+        [TestMethod]
+        public void AVersionRangeThatIsNotOneIsRefusedAsText()
+        {
+            // XTSE0020, the code for an attribute value outside the set the grammar allows, and not
+            // XTSE3000, which the specification gives for a package that could not be located. A text that
+            // is not a range has not failed to locate anything; it has failed to be a range, and nothing is
+            // looked for. The suite asks for both codes on this one shape and this is the reading it asks
+            // for four times out of five.
+            PlainLibrary files = new PlainLibrary().Add("urn:lib", Package("urn:lib", Declares("one")));
+
+            foreach (string range in new[] { "'1.0.0'", "TotallyInvalid", "-3.6", "-alpha", "2.0.0-alpha:beta" })
+            {
+                Assert.AreEqual(
+                    "XTSE0020",
+                    Refuses(
+                        Package(
+                            "urn:main",
+                            $"<xsl:use-package name=\"urn:lib\" package-version=\"{range}\"/>"
+                            + "<xsl:template name=\"main\" visibility=\"public\"><out/></xsl:template>"),
+                        files),
+                    range);
+            }
+
+            // And a range that is one, naming a version nothing has, is the other error: there the name and
+            // the range were read and no package answered to them.
+            Assert.AreEqual(
+                "XTSE3000",
+                Refuses(Using("9.9.9"), new VersionedLibrary().Add("urn:lib", "1.0.0", Versioned("1.0.0"))));
+        }
+
         /// <summary>A package declaring the one public variable these two tests are about.</summary>
         private static string Declares(string value) =>
             $"<xsl:variable name=\"v\" select=\"'{value}'\" visibility=\"public\"/>";

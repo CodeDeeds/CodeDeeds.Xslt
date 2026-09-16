@@ -2623,16 +2623,24 @@ namespace CodeDeeds.Xslt.Compiler
                 ? PackageVersionRange.Any
                 : PackageVersionRange.TryParse(wantedVersions)
                     // XTSE0020, the code for an attribute value outside the set the grammar allows, and not
-                    // XTSE3000, which is for a package that could not be found. The suite asks for both on
-                    // the same shape and is four to one: use-package-291 to 294 write '2.0.0-alpha:beta',
-                    // 'TotallyInvalid', '-3.6' and '-alpha' and expect XTSE0020, and package-200 writes
-                    // "'1.0.0'" with the apostrophes in it and expects XTSE3000. A text that is not a range
-                    // is refused as a text, before anything is looked for.
+                    // XTSE3000, which is for a package that could not be located. The specification's own
+                    // words for that one are quoted by the suite's error-3000a: "it is a static error if no
+                    // package matching the package name and version specified in an xsl:use-package
+                    // declaration can be located". Locating is a thing done with a name and a range; a text
+                    // that is not a range has not failed to locate anything, it has failed to be a range.
+                    //
+                    // The suite asks for both codes on one shape. use-package-291 to 294 write
+                    // '2.0.0-alpha:beta', 'TotallyInvalid', '-3.6' and '-alpha' and expect XTSE0020;
+                    // package-200 writes "'1.0.0'", apostrophes and all, and expects XTSE3000. Nothing
+                    // separates the two cases — the same attribute of the same element, and in both the
+                    // named package is available at several versions — so one of them has to be wrong, and
+                    // it is the one that reads a lexical error as a failure to find something.
                     ?? throw XsltErrors.Error(
                         XsltErrorCode.XTSE0020,
-                        $"'{wantedVersions}' is not a package version range. One is a version such as 2.0.5 "
-                        + "or 3.10-alpha, a prefix such as 1.3.*, a bound such as 1.3+ or to 4.0, a span such "
-                        + "as 1 to 5, any of those separated by commas, or *.");
+                        $"The package-version of the xsl:use-package naming '{name}' is "
+                        + $"'{wantedVersions}', which is not a package version range. One is a version such "
+                        + "as 2.0.5 or 3.10-alpha, a prefix such as 1.3.*, a bound such as 1.3+ or to 4.0, a "
+                        + "span such as 1 to 5, any of those separated by commas, or *.");
 
             if (m_options.PackageResolver is null)
             {

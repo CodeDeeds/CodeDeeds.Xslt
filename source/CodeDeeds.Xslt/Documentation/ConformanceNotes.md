@@ -6422,9 +6422,9 @@ stylesheet does. None of the three moves, and each is worth writing down for a d
 `package-version="'1.0.0'"` — the apostrophes are inside the attribute — and asks for `XTSE3000`, which
 is the code for a package that could not be found. `use-package-291` to `294` write
 `2.0.0-alpha:beta`, `TotallyInvalid`, `-3.6` and `-alpha` in the same attribute and ask for `XTSE0020`,
-which is the code for an attribute value outside the set the grammar allows. Both readings are arguable:
-a range that parses as nothing does find nothing. The suite is four to one, and this engine refuses the
-text as a text before anything is looked for. Changing it to `XTSE3000` was tried and cost those four.
+which is the code for an attribute value outside the set the grammar allows. This engine refuses the text
+as a text before anything is looked for; changing it to `XTSE3000` was tried and cost those four. Taken
+up again below, where the reasons are put rather than counted.
 
 **Two stylesheets the suite broke while correcting them.** `package-021err` and `package-022err` ask for
 `XTSE3050` and get `XTSE0020`, and the `XTSE0020` is right: neither stylesheet is well-formed XSLT. Both
@@ -6539,6 +6539,33 @@ The 3.0 run goes from 7,907 of 7,924 to **7,909** and the schema-aware run from 
 **8,470**, which are the same two tests read twice; `decl/use-package` has no failures left on either. The
 2.0 run is unmoved at 5,600 of 5,623, the XPath runs at 18,268 and 14,553, the two backends agree test for
 test, and nothing that was passing fails. Two new unit tests, 2,786 in all.
+
+### Which error an unreadable version range is
+
+`package-200` was left as the suite disagreeing with itself, four tests to one, which is a count rather
+than a reason. The reasons are these, and they go the same way.
+
+Nothing separates the two cases. Both write an unreadable value in the `package-version` of an
+`xsl:use-package`; in both the package named is available, at several versions in the `291` to `294`
+environment and at exactly the one asked for in `package-200`'s. Correcting `package-200`'s range to
+`1.0.0` by hand makes its transformation *complete* — the package is found, loaded and run — so the test
+rests on the invalid range and on nothing else, and so do the other four.
+
+What settles it is what `XTSE3000` is for. The suite quotes the specification in the description of
+`error-3000a`: *it is a static error if no package matching the package name and version specified in an
+`xsl:use-package` declaration can be located*. Locating is something done with a name and a range. A text
+that is not a range has not failed to locate a package; it has failed to be a range, and nothing was
+looked for — which leaves the general rule, that an attribute value outside the set the grammar allows
+is `XTSE0020`. `package-200`'s own stylesheet writes its author's reading in a comment, that an invalid
+version number "should raise a package-not-found error", and that is the step the other four do not take.
+
+So `package-200` stays failing and the reading is written down in a unit test rather than in a comment
+alone: the five texts the suite uses between them, all refused as `XTSE0020`, and a range that *is* one
+naming a version nothing has, which is the other error. The message now says which `xsl:use-package` it
+is about, the value having no element or attribute named beside it before.
+
+Nothing moves: 7,909 of 7,924 on the 3.0 run, and the rest where they were. One new unit test, 2,787 in
+all.
 
 ### Which results the suite asks for and does not get
 
