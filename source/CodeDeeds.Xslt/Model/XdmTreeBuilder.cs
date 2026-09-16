@@ -1908,6 +1908,35 @@ namespace CodeDeeds.Xslt.Model
             m_attributeType[m_attributeCount - 1] = typeId;
         }
 
+        /// <summary>
+        /// Records that the attribute most recently added is an ID, or a reference to one, without
+        /// annotating it with the type that says so.
+        /// </summary>
+        /// <remarks>
+        /// What <c>validation="strip"</c> leaves behind. §25.4.1 replaces the type annotation of everything
+        /// inside a stripped element, and then says "The values of the <c>is-id</c> and <c>is-idrefs</c>
+        /// properties are unchanged" — a stylesheet can no longer ask what type an attribute was validated
+        /// as, and can still find it with <c>id()</c>. Everywhere else the two properties are read off the
+        /// annotation; with no annotation left to read them off they are recorded the way a document type
+        /// declaration's are.
+        /// </remarks>
+        /// <param name="reference">Whether it is a reference to an ID rather than an ID.</param>
+        internal void MarkLastAttributeAsId(bool reference)
+        {
+            if (m_attributeCount == 0)
+            {
+                return;
+            }
+
+            // Appended in the order the attributes are added, which is the ascending order the lists are
+            // searched in.
+            List<int> entries = reference
+                ? m_idrefAttributeEntries ??= new List<int>()
+                : m_idAttributeEntries ??= new List<int>();
+
+            entries.Add(m_attributeCount - 1);
+        }
+
         private void CopyAttributes(XmlReader reader, TreeValidation? validation = null)
         {
             // The element's name as written, which is what a declaration's attribute list is keyed by —

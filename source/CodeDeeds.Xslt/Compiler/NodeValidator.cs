@@ -107,15 +107,23 @@ namespace CodeDeeds.Xslt.Compiler
         }
 
         /// <summary>
-        /// Validates one constructed element against the schemas, strictly or laxly, without the
-        /// document-level ID and identity constraints, which apply only to a validated document node.
+        /// Validates one constructed element against the schemas, strictly or laxly.
         /// </summary>
+        /// <remarks>
+        /// §25.4.1 divides the rules in two for a constructed element. "Validation Root Valid (ID/IDREF)"
+        /// is not applied, so a repeated ID or a dangling reference inside the subtree is not a failure;
+        /// "Identity-constraint Satisfied" — <c>xs:unique</c>, <c>xs:key</c>, <c>xs:keyref</c> — should be,
+        /// so it is, and a violation makes the element invalid like a broken content model.
+        /// </remarks>
         /// <param name="tree">The tree, rooted at a document node whose one element child is validated.</param>
         /// <param name="strict">Whether an undeclared element is an error rather than untyped.</param>
         public TypeOverlay ValidateElement(XdmTree tree, bool strict)
         {
             int element = FirstElement(tree);
-            return element < 0 ? new TypeOverlay(m_schemas) : ValidateFrom(tree, element, strict, identityConstraints: false);
+
+            return element < 0
+                ? new TypeOverlay(m_schemas)
+                : ValidateFrom(tree, element, strict, identityConstraints: true, documentLevel: false);
         }
 
         /// <summary>
@@ -139,7 +147,8 @@ namespace CodeDeeds.Xslt.Compiler
         }
 
         /// <summary>Finds the single element child of the constructed document node, and validates from it.</summary>
-        private TypeOverlay ValidateFrom(XdmTree tree, int element, bool strict, bool identityConstraints)
+        private TypeOverlay ValidateFrom(
+            XdmTree tree, int element, bool strict, bool identityConstraints, bool documentLevel = true)
         {
             // Strict validation is against a top-level declaration of the element; lax leaves an undeclared
             // one, and everything under it, untyped. An xsi:type supplies the type where there is no
@@ -158,7 +167,9 @@ namespace CodeDeeds.Xslt.Compiler
                 return new TypeOverlay(m_schemas);
             }
 
-            return Run(tree, element, partial: null, strict, XsltErrorCode.XTTE1510, XsltErrorCode.XTTE1515, identityConstraints);
+            return Run(
+                tree, element, partial: null, strict,
+                XsltErrorCode.XTTE1510, XsltErrorCode.XTTE1515, identityConstraints, documentLevel);
         }
 
         /// <summary>
@@ -298,7 +309,8 @@ namespace CodeDeeds.Xslt.Compiler
             bool strict,
             XsltErrorCode invalid,
             XsltErrorCode laxInvalid,
-            bool identityConstraints)
+            bool identityConstraints,
+            bool documentLevel = true)
         {
             TypeOverlay overlay = new TypeOverlay(m_schemas);
             Problems problems = new Problems();
@@ -340,16 +352,23 @@ namespace CodeDeeds.Xslt.Compiler
 
             // A document-level constraint — one ID used twice, a reference to an undeclared ID — is always
             // XTTE1555, whatever the mode; a value or content-model failure is the mode's own error.
-            if (problems.Identity is string identity)
+            //
+            // Where what is validated is an element rather than a document, §25.4.1 says the rule
+            // "Validation Root Valid (ID/IDREF)" "is not applied. This means that validation will not fail
+            // if there are non-unique ID values or dangling IDREF values in the subtree being validated."
+            // The identity constraints in the next sentence — xs:unique, xs:key, xs:keyref — are a different
+            // rule, which "should be applied", and a failure of one of those is the element being invalid
+            // like any other.
+            if (documentLevel && problems.Identity is string identity)
             {
                 throw XsltErrors.Error(XsltErrorCode.XTTE1555, $"The document is not valid: {identity}");
             }
 
-            if (problems.Count > 0)
+            if (problems.FirstOrdinary is string invalidity)
             {
                 throw XsltErrors.Error(
                     partial is not null ? invalid : strict ? invalid : laxInvalid,
-                    $"The constructed node is not valid: {problems.First}");
+                    $"The constructed node is not valid: {invalidity}");
             }
 
             return overlay;
@@ -421,6 +440,37 @@ namespace CodeDeeds.Xslt.Compiler
                         problems.MarkIdentityFrom(mark);
                     }
                 }
+            }
+
+            // The attributes the declaration supplies a value for and the element did not write. They
+            // are asked for before the attributes are closed off, which is when the validator still
+            // knows which of them are missing.
+            System.Collections.ArrayList supplied = new System.Collections.ArrayList();
+            validator.GetUnspecifiedDefaultAttributes(supplied);
+
+            foreach (object? entry in supplied)
+            {
+                if (entry is not XmlSchemaAttribute declared)
+                {
+                    continue;
+                }
+
+                string? value = declared.FixedValue ?? declared.DefaultValue;
+
+                if (value is null)
+                {
+                    continue;
+                }
+
+                overlay.Supply(
+                    element,
+                    new TypeOverlay.SuppliedAttribute(
+                        declared.QualifiedName.Namespace,
+                        declared.QualifiedName.Name,
+                        value,
+                        declared.AttributeSchemaType is XmlSchemaType supplied2
+                            ? m_schemas.TypeIdOf(supplied2)
+                            : (ushort)0));
             }
 
             validator.ValidateEndOfAttributes(info);
@@ -548,6 +598,23 @@ namespace CodeDeeds.Xslt.Compiler
 
             /// <summary>The first problem reported, for the message an ordinary invalidity carries.</summary>
             public string First => m_seen[0].Message;
+
+            /// <summary>The first problem that is not about an ID, or null where every one of them is.</summary>
+            public string? FirstOrdinary
+            {
+                get
+                {
+                    foreach ((bool identity, string message) in m_seen)
+                    {
+                        if (!identity)
+                        {
+                            return message;
+                        }
+                    }
+
+                    return null;
+                }
+            }
 
             /// <summary>Records what the validator reported.</summary>
             public void Add(string message)

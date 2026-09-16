@@ -6655,7 +6655,7 @@ Applied to a clone of the suite, both tests raise the `XTSE3050` they were writt
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
 validation settles about a constructed node*. With all five the 3.0 run reads **7,914 of 7,924** and the
-schema-aware run **8,485 of 8,526**. The patch is not applied here, and the figures in these notes do not
+schema-aware run **8,503 of 8,526**. The patch is not applied here, and the figures in these notes do not
 include it. A measurement is worth something because of what it is taken against, and a patch kept in the
 repository and offered upstream is worth more than five tests counted differently at home.
 
@@ -6816,6 +6816,106 @@ from eleven failures to three. Nothing moves elsewhere: 7,911 of 7,924 at 3.0 on
 5,623 at 2.0, 18,268 and 14,553 on the two XPath runs, with those failure sets identical test for test — the
 copy and separator changes are version-independent and the rest are about annotations nothing else carries.
 Seven new unit tests, 2,799 in all.
+
+### What a schema import asks for, and what strip leaves behind
+
+`decl/import-schema` had seventeen failures on the schema-aware run. Sixteen are gone, and the causes were
+four rules and a driver.
+
+**A schema-location is a hint, and a namespace already in scope is the answer.** Six tests —
+`import-schema-185a`, `b`, `c`, `186`, `187` and `202` — name a `schema-location` that is not there at all,
+or one holding a schema for a different namespace, while the schema for the namespace they ask for has
+been supplied to the transformation already. §3.14 is explicit about both halves: the `namespace`
+attribute "indicates that a schema for the given namespace is required by the stylesheet" and "may be
+enough on its own to enable an implementation to locate the required schema components", while
+`schema-location` "gives a hint indicating where a schema document ... may be found" — and "it is not
+intrinsically an error if no schema document can be located for a namespace identified in an
+`xsl:import-schema` declaration". So an import that names a namespace already in scope is satisfied where
+it stands and the hint is not consulted; following it anyway would mean reading a second document for a
+namespace that already has one, which XSD allows only where the two do not conflict. An import that names
+no namespace is not covered by that — "already in scope" would there mean no more than that some other
+no-namespace schema had been imported — and `import-schema-200` and `201`, which are the error cases for a
+location whose schema is for the wrong namespace, keep their `XTSE0220`.
+
+**Only the highest-precedence import of a namespace is used.** `import-schema-177` imports one schema for
+`sch002` in the principal module and another for the same namespace in a module it imports, which §3.14
+settles: "If two `xsl:import-schema` declarations specify the same namespace ... then only the one with
+highest import precedence is used." This engine read both and .NET's schema set refused the pair for
+declaring one element twice. That is the driver's half as much as the engine's: the catalog marks the
+second schema `role="secondary"`, and the driver was handing every schema an environment declares to
+`XsltOptions.Schemas` as though the caller had supplied it. A secondary schema is one of the others' parts,
+to be reached by location; it is served by the resolver and no longer put in scope before the stylesheet
+is read.
+
+**Strip is not the absence of validation.** §25.4.1: `validation="strip"` gives "the new node *and each of
+the contained nodes*" the untyped annotation, and "any previous type annotation present on a contained
+element or attribute node ... is also replaced". Strip is also the *default*, so this is the ordinary case:
+an `xsl:attribute` that named a `type`, or an `xsl:copy-of` that preserved one, loses it again on the way
+into the element it goes in. This engine treated strip as nothing to do — the targets had a `StripContent`
+for it and nothing ever called one. `import-schema-016`, `019`, `196` and `198` are four ways of asking,
+two of them by writing `default-validation="strip"` where it was already the default, which is how they
+make the point.
+
+Fixing it showed up two more things. `default-validation` is a standard attribute (§3.4), so on a literal
+result element it is spelled `xsl:default-validation`, and the walk that looked for the nearest one in
+scope only ever looked at XSLT elements — which `import-schema-197`, the `preserve` twin of `196`, caught
+at once. And the rest of the strip rule matters: "In the case of elements the `nilled` property is set to
+false. The values of the `is-id` and `is-idrefs` properties are **unchanged**." Those two are read off the
+type annotation everywhere else, so with the annotation gone they have to be recorded on their own, the way
+a document type declaration's are. `import-schema-005` is called *Test that type information is lost with
+validation="strip", but the is-id property on a node is not lost* and asks for both halves in one
+expression.
+
+**Preserve annotates `xs:anyType`, which is not the same as no annotation.** `import-schema-076` is called
+*Distinguish XS_ANY_TYPE from XDT_UNTYPED* and asks the difference six ways. §25.4.1 for `xsl:element` and
+a literal result element: "the new element has a type annotation of `xs:anyType`, and the type annotations
+of contained nodes are retained unchanged"; for `xsl:copy`, the same annotation, and it does not depend on
+what was copied from carrying one — `xs:anyType` is what the element is, not what it inherited.
+
+**A document node holds one element and nothing else beside it.** XPath 3.1 §2.5.5.2: `document-node(E)`
+"matches any document node that contains exactly one element node, optionally accompanied by one or more
+comment and processing instruction nodes". The list is exhaustive. This engine matched on the first element
+child it found and asked no further, so a document holding two of them was still a
+`document-node(schema-element(address))` — which is what `import-schema-055` builds, with an
+`xsl:apply-templates` to show that the pattern agrees with the type.
+
+**A constructed element is held to its identity constraints and not to ID uniqueness.** §25.4.1 divides
+the document-level rules in two for an element: "Validation Root Valid (ID/IDREF)" "is not applied. This
+means that validation will not fail if there are non-unique ID values or dangling IDREF values in the
+subtree being validated", while "Identity-constraint Satisfied" — `xs:unique`, `xs:key`, `xs:keyref` —
+"should be applied". This engine applied neither. `import-schema-120` writes two elements with one
+`id` under an `xs:unique` and asks for `XTTE1510`; the constraint is checked now, and a repeated `xs:ID`
+value inside the subtree still is not a failure, which is the other half of the same sentence.
+
+**An `xsl:import-schema` holds one `xs:schema` at most.** `import-schema-157` writes two, which is not a
+second hint to choose between but a stylesheet that is not XSLT: the content model is `xs:schema?` and the
+code is `XTSE0010`. This engine took the first and ignored the rest, and then failed on what the stylesheet
+did next.
+
+**Validating is not only a check.** §25.4.1: "If default values for elements or attributes are defined in
+the schema, the validation process will where necessary create new nodes containing these default values."
+`import-schema-048` validates three elements against a type declaring `discount` fixed and `cost` with a
+default, and asks for those attributes on the result. They are supplied now, carried in the same overlay
+that carries the annotations and written by the copy that writes the validated tree out — which is what
+makes it cheap: the tree is not rebuilt, the attributes are added as it is copied to where it was going
+anyway.
+
+One failure is left in the set, and it is a disagreement between two tests rather than with this engine.
+`import-schema-136` and `137` are the same stylesheet — an element whose name no schema declares, written
+with `xsl:validation="strict"` — and ask for different codes: `136` for `XTTE1512`, `137` for `XTTE1510`.
+§25.4.1 names both together, "If there is no matching element declaration, or if the element is not
+considered valid, the transformation fails [see ERR XTTE1510], [see ERR XTTE1512]", and `XTTE1512`'s own
+definition settles which is which: "there is no matching top-level declaration in the schema". That is
+what this engine raises, and it is what `136` asks for. Like *Which error an unreadable version range is*,
+this is a question about which of two codes the specification means rather than a mistake in a file, so it
+is not in the correction patch.
+
+The schema-aware run goes from 8,480 of 8,526 to **8,498**, and `decl/import-schema` from seventeen
+failures to one. The other runs do not move: 7,911 of 7,924 at 3.0 on both backends, 5,602 of 5,623 at 2.0,
+18,268 and 14,553 on the two XPath runs, those failure sets identical test for test — everything here
+needs a schema in scope except the document node test, which nothing outside this set was asking wrongly.
+One unit test moved, having written down what an enclosing element used to leave alone, and five are new,
+for 2,804.
 
 ### Which results the suite asks for and does not get
 

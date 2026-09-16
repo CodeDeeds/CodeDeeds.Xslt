@@ -564,12 +564,24 @@ namespace CodeDeeds.Xslt.UnitTests
         [TestMethod]
         public void AConstructedAttributeIsValidatedAgainstItsType()
         {
+            // The attribute is validated where it is written, and then the element it goes into has its
+            // own say: a literal result element's default validation is strip, and §25.4.1 gives strip "the
+            // new node and each of the contained nodes". So the annotation is put on and taken off again,
+            // which is what the suite's import-schema-016 and 196 are about. What survives is the value.
             Assert.AreEqual(
-                "true,8",
+                "false,8",
                 Both(ConstructSheet(
                     "<xsl:variable name=\"e\" as=\"element()\"><wrap><xsl:attribute name=\"a\" type=\"xs:int\" select=\"'7'\"/></wrap></xsl:variable>"
                     + Value("$e/@a instance of attribute(a, xs:int), $e/@a + 1"))));
 
+            // Written where no constructor encloses it, the annotation stands.
+            Assert.AreEqual(
+                "true,8",
+                Both(ConstructSheet(
+                    "<xsl:variable name=\"a\" as=\"attribute()\"><xsl:attribute name=\"a\" type=\"xs:int\" select=\"'7'\"/></xsl:variable>"
+                    + Value("$a instance of attribute(a, xs:int), $a + 1"))));
+
+            // And a value the type refuses is refused wherever it is written.
             Assert.AreEqual(
                 "XTTE1540",
                 Fails(ConstructSheet("<wrap><xsl:attribute name=\"a\" type=\"xs:int\" select=\"'x'\"/></wrap>")));

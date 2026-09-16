@@ -24,6 +24,17 @@ namespace CodeDeeds.Xslt.UnitTests
             + "<xs:complexType name=\"noteType\" mixed=\"true\">"
             + "<xs:sequence><xs:element name=\"em\" type=\"xs:string\" maxOccurs=\"unbounded\"/></xs:sequence>"
             + "</xs:complexType>"
+            + "<xs:element name=\"z\" type=\"t:zType\"/>"
+            + "<xs:complexType name=\"zType\">"
+            + "<xs:attribute name=\"price\" type=\"xs:decimal\"/>"
+            + "<xs:attribute name=\"cost\" type=\"xs:decimal\" default=\"20.01\"/>"
+            + "</xs:complexType>"
+            + "<xs:element name=\"tagged\"><xs:complexType><xs:sequence>"
+            + "<xs:element name=\"item\" maxOccurs=\"unbounded\"><xs:complexType>"
+            + "<xs:attribute name=\"code\" type=\"xs:string\"/></xs:complexType></xs:element>"
+            + "</xs:sequence></xs:complexType>"
+            + "<xs:unique name=\"oneCode\"><xs:selector xpath=\"t:item\"/><xs:field xpath=\"@code\"/></xs:unique>"
+            + "</xs:element>"
             + "<xs:element name=\"list\"><xs:complexType><xs:sequence>"
             + "<xs:element ref=\"t:count\" maxOccurs=\"unbounded\"/></xs:sequence></xs:complexType></xs:element>"
             + "</xs:schema>";
@@ -203,6 +214,108 @@ namespace CodeDeeds.Xslt.UnitTests
             Assert.AreEqual(
                 "<t:list xmlns:t=\"urn:t\">\n  <t:count>1</t:count>\n</t:list>",
                 Run(listing, "<r/>").Replace("\r\n", "\n"));
+        }
+        // ---- What strip and preserve leave on a constructed node --------------------------------------------
+
+        [TestMethod]
+        public void AnElementStripsTheAnnotationsOfWhatIsBuiltInsideIt()
+        {
+            // §25.4.1: strip gives "the new node and each of the contained nodes" the untyped annotation, and
+            // "any previous type annotation present on a contained element or attribute node ... is also
+            // replaced". Strip is the default, so an xsl:attribute that named a type inside an ordinary
+            // literal result element loses it again on the way in.
+            Assert.AreEqual(
+                "<out>false true</out>",
+                Run(
+                    Sheet(
+                        "<xsl:variable name=\"v\">"
+                        + "<e><xsl:attribute name=\"id\" type=\"xs:ID\">A001</xsl:attribute></e></xsl:variable>"
+                        + "<xsl:value-of select=\"$v/@id instance of attribute(*, xs:ID), exists($v/id('A001'))\"/>"),
+                    "<r/>"));
+
+            // preserve keeps them, and annotates the element it builds xs:anyType rather than leaving it
+            // untyped: "the new element has a type annotation of xs:anyType".
+            Assert.AreEqual(
+                "<out>true false true</out>",
+                Run(
+                    Sheet(
+                        "<xsl:variable name=\"v\" as=\"element()\">"
+                        + "<e xsl:default-validation=\"preserve\">"
+                        + "<xsl:attribute name=\"id\" type=\"xs:ID\">A001</xsl:attribute></e></xsl:variable>"
+                        + "<xsl:value-of select=\"$v/@id instance of attribute(*, xs:ID), "
+                        + "$v instance of element(*, xs:untyped), $v instance of element(*, xs:anyType)\"/>"),
+                    "<r/>"));
+        }
+
+        [TestMethod]
+        public void StrippingLeavesBehindWhatMakesAnAttributeAnId()
+        {
+            // The rest of that rule: "In the case of elements the nilled property is set to false. The values
+            // of the is-id and is-idrefs properties are unchanged." So id() still finds the attribute whose
+            // annotation has just been taken off it, which is what the suite's import-schema-005 measures.
+            Assert.AreEqual(
+                "<out>e4</out>",
+                Run(
+                    Sheet(
+                        "<xsl:variable name=\"v\">"
+                        + "<x validation=\"strip\">"
+                        + "<e3><xsl:attribute name=\"id\" type=\"xs:ID\">A003</xsl:attribute></e3>"
+                        + "<e4><xsl:attribute name=\"id\" type=\"xs:ID\">A004</xsl:attribute></e4>"
+                        + "</x></xsl:variable>"
+                        + "<xsl:value-of select=\"$v/id('A004')/local-name()\"/>"),
+                    "<r/>"));
+        }
+
+        // ---- What validation adds and what it checks -------------------------------------------------------
+
+        [TestMethod]
+        public void ValidationSuppliesTheAttributesTheSchemaDeclaresADefaultFor()
+        {
+            // §25.4.1: "If default values for elements or attributes are defined in the schema, the validation
+            // process will where necessary create new nodes containing these default values." So validating
+            // is not only a check: the element comes out of it carrying an attribute it never wrote.
+            Assert.AreEqual(
+                "<out><t:z xmlns:t=\"urn:t\" price=\"2.50\" cost=\"20.01\"/></out>",
+                Run(Sheet("<t:z price=\"2.50\" xsl:validation=\"strict\"/>"), "<r/>"));
+        }
+
+        [TestMethod]
+        public void AConstructedElementIsHeldToItsIdentityConstraintsAndNotToIdUniqueness()
+        {
+            // §25.4.1 divides the document-level rules in two for a constructed element. "Validation Root
+            // Valid (ID/IDREF)" is not applied, so two equal IDs inside the subtree are not a failure;
+            // "Identity-constraint Satisfied" should be, so a broken xs:unique is the element being invalid.
+            Assert.AreEqual(
+                "XTTE1510",
+                Refuses(
+                    Sheet("<t:tagged xsl:validation=\"strict\"><t:item code=\"a\"/><t:item code=\"a\"/></t:tagged>"),
+                    "<r/>"));
+
+            Assert.AreEqual(
+                "<out><t:tagged xmlns:t=\"urn:t\"><t:item code=\"a\"/><t:item code=\"b\"/></t:tagged></out>",
+                Run(
+                    Sheet("<t:tagged xsl:validation=\"strict\"><t:item code=\"a\"/><t:item code=\"b\"/></t:tagged>"),
+                    "<r/>"));
+        }
+
+        [TestMethod]
+        public void ADocumentTestWantsOneElementAndNothingElseBesideIt()
+        {
+            // XPath 3.1 §2.5.5.2: document-node(E) "matches any document node that contains exactly one
+            // element node, optionally accompanied by one or more comment and processing instruction nodes".
+            // The list is exhaustive, so a second element is a document this does not describe.
+            Assert.AreEqual(
+                "<out>true false</out>",
+                Run(
+                    Sheet(
+                        "<xsl:variable name=\"one\" as=\"document-node()\">"
+                        + "<xsl:document><t:count>1</t:count></xsl:document></xsl:variable>"
+                        + "<xsl:variable name=\"two\" as=\"document-node()\">"
+                        + "<xsl:document validation=\"preserve\">"
+                        + "<t:count>1</t:count><t:count>2</t:count></xsl:document></xsl:variable>"
+                        + "<xsl:value-of select=\"$one instance of document-node(element(t:count)), "
+                        + "$two instance of document-node(element(t:count))\"/>"),
+                    "<r/>"));
         }
     }
 }

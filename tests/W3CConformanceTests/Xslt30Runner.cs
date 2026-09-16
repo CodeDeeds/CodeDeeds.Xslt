@@ -1115,8 +1115,20 @@ namespace CodeDeeds.Xslt.Conformance
                 XmlResolver = new System.Xml.XmlUrlResolver(),
             };
 
-            foreach ((string file, string? _) in environment.Schemas)
+            foreach ((string file, string? role) in environment.Schemas)
             {
+                // A secondary schema is one of the others' parts — what a schema includes or imports, or
+                // what a stylesheet fetches for itself by location — and not a schema the caller supplies.
+                // Handing it over as though the caller had supplied it puts components in scope that the
+                // stylesheet never asked for, and import-schema-177 is the case that shows what that costs:
+                // two schemas for one namespace, only the higher-precedence import of which is to be used,
+                // and both of them in the set before the stylesheet is read at all. The resolver still
+                // serves it by location, which is how it is meant to be reached.
+                if (role == "secondary")
+                {
+                    continue;
+                }
+
                 set.Add(null, Path.Combine(directory, file));
             }
 

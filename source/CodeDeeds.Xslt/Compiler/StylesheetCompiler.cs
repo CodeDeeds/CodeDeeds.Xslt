@@ -1922,6 +1922,8 @@ namespace CodeDeeds.Xslt.Compiler
             string? location = GetAttribute(element, "schema-location");
             string? inline = null;
 
+            // The content model is xs:schema? — one inline schema at most, and nothing else. A second one is
+            // not a second hint to choose between but a stylesheet that is not XSLT, which is XTSE0010.
             for (int child = FirstIncludedChild(element); child >= 0; child = NextIncludedSibling(child))
             {
                 if (m_tree.KindOf(child) != NodeKind.Element)
@@ -1931,17 +1933,29 @@ namespace CodeDeeds.Xslt.Compiler
 
                 int fingerprint = m_tree.FingerprintOf(child);
 
-                if (m_tree.NameTable.GetNamespaceUri(fingerprint) == XdmType.SchemaNamespace
-                    && m_tree.NameTable.GetLocalName(fingerprint) == "schema")
+                if (m_tree.NameTable.GetNamespaceUri(fingerprint) != XdmType.SchemaNamespace
+                    || m_tree.NameTable.GetLocalName(fingerprint) != "schema")
                 {
-                    // Handed to the schema reader as text, which is the one form it reads; serialized
-                    // with its in-scope namespaces, so that a prefix declared on the stylesheet element is
-                    // there for the schema to use.
-                    inline = Serializer.Serialize(
-                        XdmSequence.Items(XPathValue.FromNodeSet(NodeSet.Singleton(m_tree, child))),
-                        XPathValue.FromSequence(XdmSequence.Empty));
-                    break;
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XTSE0010,
+                        $"xsl:import-schema holds '{QualifiedNameOf(child)}', and the only element it may "
+                        + "hold is one xs:schema.");
                 }
+
+                if (inline is not null)
+                {
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XTSE0010,
+                        "xsl:import-schema holds more than one xs:schema, and it may hold one at most. "
+                        + "Write an xsl:import-schema for each.");
+                }
+
+                // Handed to the schema reader as text, which is the one form it reads; serialized
+                // with its in-scope namespaces, so that a prefix declared on the stylesheet element is
+                // there for the schema to use.
+                inline = Serializer.Serialize(
+                    XdmSequence.Items(XPathValue.FromNodeSet(NodeSet.Singleton(m_tree, child))),
+                    XPathValue.FromSequence(XdmSequence.Empty));
             }
 
             m_schemas!.Import(targetNamespace, location, inline, StaticBaseUriAt(element) ?? moduleUri);
@@ -9181,7 +9195,9 @@ namespace CodeDeeds.Xslt.Compiler
                 attributes.ToArray(),
                 body,
                 attributeSets,
-                ReadInheritNamespaces(element, xslt: true));
+                ReadInheritNamespaces(element, xslt: true),
+                StripsContent(element, literal: true),
+                PreservesTypes(element, literal: true));
 
             return WithValidation(element, literal, ValidationShape.Element, literal: true);
         }
@@ -10983,7 +10999,8 @@ namespace CodeDeeds.Xslt.Compiler
                         Claims30(element),
                         ReadDeclarationFlag(element, "copy-accumulators"),
                         ReadInheritNamespaces(element),
-                        PreservesTypesOnCopy(element));
+                        PreservesTypesOnCopy(element),
+                        PreservesTypes(element, literal: false));
                     output.Add(WithValidation(element, copy, ValidationShape.Copy));
 
                     return;
@@ -10998,7 +11015,9 @@ namespace CodeDeeds.Xslt.Compiler
                         CompileSequence(element),
                         NamespacesOn(element),
                         sets,
-                        ReadInheritNamespaces(element));
+                        ReadInheritNamespaces(element),
+                        StripsContent(element, literal: false),
+                        PreservesTypes(element, literal: false));
                     output.Add(WithValidation(element, elementInstruction, ValidationShape.Element));
                     return;
                 }
@@ -13086,6 +13105,59 @@ namespace CodeDeeds.Xslt.Compiler
             return (DefaultValidationInScope(element), null);
         }
 
+        /// <summary>
+        /// Whether a constructed element's content is to be stripped of its type annotations.
+        /// </summary>
+        /// <remarks>
+        /// §25.4.1: <c>validation="strip"</c> means "the new node <em>and each of the contained nodes</em>
+        /// will have the type annotation <c>xs:untyped</c> if it is an element, or <c>xs:untypedAtomic</c>
+        /// if it is an attribute. Any previous type annotation present on a contained element or attribute
+        /// node ... is also replaced." So strip is not merely the absence of validation: an
+        /// <c>xsl:attribute</c> that named a <c>type</c>, or an <c>xsl:copy-of</c> that preserved one,
+        /// loses it again on the way into an element that strips. Strip is also the default, which is what
+        /// makes this the ordinary case rather than the exotic one.
+        /// </remarks>
+        /// <param name="element">The constructor.</param>
+        /// <param name="literal">Whether it is a literal result element, whose attributes are XSLT's.</param>
+        private bool StripsContent(int element, bool literal)
+        {
+            if (m_schemas is null)
+            {
+                // Nothing carries an annotation without a schema, so there is nothing to strip and the
+                // bookkeeping is not worth the run time.
+                return false;
+            }
+
+            (string mode, XdmSchemaType? type) = EffectiveValidation(element, literal);
+
+            return type is null && mode == "strip";
+        }
+
+        /// <summary>
+        /// Whether a constructed element is annotated <c>xs:anyType</c>, which <c>preserve</c> asks.
+        /// </summary>
+        /// <remarks>
+        /// §25.4.1 for <c>xsl:element</c> and a literal result element: "the new element has a type
+        /// annotation of <c>xs:anyType</c>, and the type annotations of contained nodes are retained
+        /// unchanged"; for <c>xsl:copy</c> of an element, the same annotation for a reason it gives in
+        /// full. It does not depend on what the element is copied from carrying an annotation itself:
+        /// <c>xs:anyType</c> is what the element is, not what it inherited.
+        /// </remarks>
+        /// <param name="element">The constructor.</param>
+        /// <param name="literal">Whether it is a literal result element, whose attributes are XSLT's.</param>
+        private bool PreservesTypes(int element, bool literal)
+        {
+            if (m_schemas is null)
+            {
+                // Nothing carries an annotation without a schema, and xs:anyType is one.
+                return false;
+            }
+
+            (string mode, XdmSchemaType? type) = EffectiveValidation(element, literal);
+
+            return type is null && mode == "preserve";
+        }
+
         /// <summary>The type a <c>type</c> attribute names, among the schema components in scope.</summary>
         /// <exception cref="XsltException"><c>XTSE1520</c> where the name is not a QName or names no type in scope.</exception>
         private XdmSchemaType ResolveNamedType(int element, string type)
@@ -13140,13 +13212,25 @@ namespace CodeDeeds.Xslt.Compiler
         }
 
         /// <summary>The nearest <c>default-validation</c> above an element, or <c>strip</c> where none is.</summary>
+        /// <remarks>
+        /// A standard attribute (§3.4), so it is spelled <c>default-validation</c> on an XSLT element and
+        /// <c>xsl:default-validation</c> on a literal result element, and applies to the element it is
+        /// written on as well as to everything inside it.
+        /// </remarks>
         private string DefaultValidationInScope(int element)
         {
             for (int current = element; current >= 0; current = m_tree.ParentOf(current))
             {
-                if (m_tree.KindOf(current) == NodeKind.Element
-                    && IsXsltElement(current, out _)
-                    && GetAttribute(current, "default-validation") is string said)
+                if (m_tree.KindOf(current) != NodeKind.Element)
+                {
+                    continue;
+                }
+
+                string? said = IsXsltElement(current, out _)
+                    ? GetAttribute(current, "default-validation")
+                    : GetXsltAttribute(current, "default-validation");
+
+                if (said is not null)
                 {
                     return said.Trim();
                 }

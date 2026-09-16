@@ -125,9 +125,11 @@ namespace CodeDeeds.Xslt.Compiler
                 return;
             }
 
+            // The overlay goes with the tree: it holds the annotations, which the tree carries already,
+            // and the attributes validation supplied, which only it knows about.
             for (int child = annotated.FirstChildOf(XdmTree.RootNode); child >= 0; child = annotated.NextSiblingOf(child))
             {
-                NodeCopier.CopyDeep(annotated, child, runtime.Output, runtime: runtime);
+                NodeCopier.CopyDeep(annotated, child, runtime.Output, runtime: runtime, types: overlay);
             }
         }
 

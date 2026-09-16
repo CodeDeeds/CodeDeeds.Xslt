@@ -412,16 +412,36 @@ namespace CodeDeeds.Xslt.XPath
                 return true;
             }
 
-            // document-node(element(x)) asks about the one element child a document has.
+            // XPath 3.1 §2.5.5.2: document-node(E) "matches any document node that contains exactly one
+            // element node, optionally accompanied by one or more comment and processing instruction
+            // nodes, if E ... matches the element node". The list is exhaustive, so a second element or
+            // any text at all is a document this does not describe — which is the difference between a
+            // tree that could be serialized as a document and one that could not.
+            int only = -1;
+
             for (int child = tree.FirstChildOf(node); child >= 0; child = tree.NextSiblingOf(child))
             {
-                if (tree.KindOf(child) == NodeKind.Element)
+                switch (tree.KindOf(child))
                 {
-                    return m_content.Matches(tree, child);
+                    case NodeKind.Element:
+                        if (only >= 0)
+                        {
+                            return false;
+                        }
+
+                        only = child;
+                        break;
+
+                    case NodeKind.Comment:
+                    case NodeKind.ProcessingInstruction:
+                        break;
+
+                    default:
+                        return false;
                 }
             }
 
-            return false;
+            return only >= 0 && m_content.Matches(tree, only);
         }
 
         /// <summary>

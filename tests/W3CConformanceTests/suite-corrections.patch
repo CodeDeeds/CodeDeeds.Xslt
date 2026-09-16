@@ -56,7 +56,7 @@ Apply from the root of a clone of https://github.com/w3c/xslt30-test:
     git apply suite-corrections.patch
 
 With this applied the xslt30-test 3.0 run here goes from 7,911 of 7,924 to
-7,914, and the schema-aware run from 8,480 of 8,526 to 8,485.
+7,914, and the schema-aware run from 8,498 of 8,526 to 8,503.
 
 Not included: package-200, which asks for XTSE3000 where use-package-291 to 294
 ask for XTSE0020 on the same shape - an unreadable package-version range on

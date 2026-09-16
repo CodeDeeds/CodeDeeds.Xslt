@@ -1115,7 +1115,7 @@ namespace CodeDeeds.Xslt.Compiler
                     child >= 0;
                     child = annotated.NextSiblingOf(child))
                 {
-                    NodeCopier.CopyDeep(annotated, child, output, runtime: runtime);
+                    NodeCopier.CopyDeep(annotated, child, output, runtime: runtime, types: overlay);
                 }
             }
             finally

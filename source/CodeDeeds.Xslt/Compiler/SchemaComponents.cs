@@ -109,6 +109,22 @@ namespace CodeDeeds.Xslt.Compiler
                     + "schema comes from one or the other.");
             }
 
+            // A namespace already in scope, from the caller or an earlier import, is the whole of what
+            // this declaration asks for. §3.14: the namespace attribute "indicates that a schema for the
+            // given namespace is required by the stylesheet" and "may be enough on its own to enable an
+            // implementation to locate the required schema components", while schema-location "gives a
+            // hint indicating where a schema document ... may be found". There is nothing left for the
+            // hint to do here, and following it anyway would mean reading a second document for a
+            // namespace that already has one — which XSD allows only where the two do not conflict.
+            //
+            // An inline schema is not covered: it is written where it stands and is read where it stands.
+            // Neither is an import that names no namespace, where "already in scope" would be nothing more
+            // than some other no-namespace schema having been imported.
+            if (inlineSchema is null && targetNamespace is { Length: > 0 } named && m_set.Contains(named))
+            {
+                return;
+            }
+
             XmlSchema schema;
 
             if (inlineSchema is not null)
@@ -124,8 +140,8 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 string wanted = targetNamespace ?? string.Empty;
 
-                // Already in scope, from the caller or an earlier import: nothing to fetch, and the
-                // declaration then only says the stylesheet relies on it.
+                // Already in scope with no namespace named, which the check above does not cover: still
+                // nothing to fetch, the declaration then only saying the stylesheet relies on it.
                 if (m_set.Contains(wanted))
                 {
                     return;

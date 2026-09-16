@@ -129,10 +129,38 @@ namespace CodeDeeds.Xslt.Runtime
         /// <summary>
         /// Marks the element most recently started as one whose content is untyped, which is what
         /// <c>validation="strip"</c> asks: whatever annotations are written inside it, until it ends, are
-        /// dropped (XSLT 3.0 §27.4).
+        /// dropped (XSLT 3.0 §25.4.1).
         /// </summary>
         internal virtual void StripContent()
         {
+        }
+
+        /// <summary>
+        /// Keeps what a stripped attribute's annotation would have said about its being an ID.
+        /// </summary>
+        /// <remarks>
+        /// §25.4.1 strips the type annotations inside an element and then says "The values of the
+        /// <c>is-id</c> and <c>is-idrefs</c> properties are unchanged" — so an attribute built with
+        /// <c>type="xs:ID"</c> inside a stripped element is no longer an <c>attribute(*, xs:ID)</c> and is
+        /// still what <c>id()</c> finds. The suite's import-schema-005 is about exactly that pair.
+        /// </remarks>
+        /// <param name="builder">The tree being built.</param>
+        /// <param name="typeId">The annotation that is being dropped.</param>
+        private protected static void MarkStrippedId(XdmTreeBuilder builder, ushort typeId)
+        {
+            if (XPath.XdmSchemaType.ById(typeId) is not XPath.XdmSchemaType type)
+            {
+                return;
+            }
+
+            if (type.IsIdType)
+            {
+                builder.MarkLastAttributeAsId(reference: false);
+            }
+            else if (type.IsIdrefType)
+            {
+                builder.MarkLastAttributeAsId(reference: true);
+            }
         }
 
         /// <summary>
@@ -486,10 +514,18 @@ namespace CodeDeeds.Xslt.Runtime
         /// <inheritdoc/>
         internal override void AnnotateAttribute(ushort typeId)
         {
-            if (m_depth > 0 && m_stripDepth < 0)
+            if (m_depth == 0)
+            {
+                return;
+            }
+
+            if (m_stripDepth < 0)
             {
                 m_builder!.AnnotateLastAttribute(typeId);
+                return;
             }
+
+            MarkStrippedId(m_builder!, typeId);
         }
 
         /// <inheritdoc/>
@@ -946,7 +982,10 @@ namespace CodeDeeds.Xslt.Runtime
             if (m_stripDepth < 0)
             {
                 m_builder.AnnotateLastAttribute(typeId);
+                return;
             }
+
+            MarkStrippedId(m_builder, typeId);
         }
 
         /// <inheritdoc/>

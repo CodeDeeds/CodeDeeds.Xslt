@@ -67,5 +67,50 @@ namespace CodeDeeds.Xslt.Model
 
         /// <summary>Every element found nilled.</summary>
         public IEnumerable<int> Nilled => m_nilled ?? (IEnumerable<int>)Array.Empty<int>();
+
+        /// <summary>An attribute a schema supplies a value for where the element wrote none.</summary>
+        /// <param name="NamespaceUri">Its namespace, usually none.</param>
+        /// <param name="LocalName">Its local name.</param>
+        /// <param name="Value">The default or fixed value the schema declares.</param>
+        /// <param name="TypeId">The type it is annotated with.</param>
+        public readonly record struct SuppliedAttribute(
+            string NamespaceUri, string LocalName, string Value, ushort TypeId);
+
+        private Dictionary<int, List<SuppliedAttribute>>? m_supplied;
+
+        /// <summary>Whether validation supplied any attribute that was not written.</summary>
+        public bool SuppliesAttributes => m_supplied is not null;
+
+        /// <summary>
+        /// Records an attribute the schema supplies a default or fixed value for.
+        /// </summary>
+        /// <remarks>
+        /// XSLT 3.0 §25.4.1: "If default values for elements or attributes are defined in the schema, the
+        /// validation process will where necessary create new nodes containing these default values." So
+        /// validating is not only a check: an element that declared none of them comes out of it carrying
+        /// the attributes its declaration says it has.
+        /// </remarks>
+        /// <param name="element">The element the attribute belongs to.</param>
+        /// <param name="attribute">What to add.</param>
+        public void Supply(int element, SuppliedAttribute attribute)
+        {
+            m_supplied ??= new Dictionary<int, List<SuppliedAttribute>>();
+
+            if (!m_supplied.TryGetValue(element, out List<SuppliedAttribute>? held))
+            {
+                m_supplied[element] = held = new List<SuppliedAttribute>();
+            }
+
+            held.Add(attribute);
+        }
+
+        /// <summary>The attributes validation supplied for an element, in declaration order.</summary>
+        /// <param name="element">The element.</param>
+        public IReadOnlyList<SuppliedAttribute> SuppliedFor(int element)
+        {
+            return m_supplied is not null && m_supplied.TryGetValue(element, out List<SuppliedAttribute>? held)
+                ? held
+                : Array.Empty<SuppliedAttribute>();
+        }
     }
 }

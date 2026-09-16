@@ -174,11 +174,28 @@ namespace CodeDeeds.Xslt.Compiler
         }
     }
 
+    /// <summary>Values shared by the instructions that construct elements.</summary>
+    internal static class Instructions
+    {
+        /// <summary>
+        /// The annotation an element constructed under <c>validation="preserve"</c> carries.
+        /// </summary>
+        /// <remarks>
+        /// Told from no annotation at all, which is <c>xs:untyped</c>. The two say different things: an
+        /// untyped element is one nothing has validated, an <c>xs:anyType</c> one is an element whose
+        /// content kept whatever types it had while the element itself was not measured against anything.
+        /// </remarks>
+        public static readonly ushort AnyTypeId = XPath.XdmSchemaType.BuiltInNamed("anyType")!.Id;
+    }
+
     /// <summary>A literal result element — an element written directly in the stylesheet.</summary>
     internal sealed class LiteralElementInstruction : Instruction
     {
         /// <summary>Whether the element passes its namespaces on to the children built inside it.</summary>
         private readonly bool m_inheritNamespaces;
+
+        /// <summary>The annotation <c>validation="preserve"</c> puts on a constructed element.</summary>
+        private static readonly ushort AnyTypeId = Instructions.AnyTypeId;
 
         private readonly string m_prefix;
         private readonly string m_namespaceUri;
@@ -187,6 +204,20 @@ namespace CodeDeeds.Xslt.Compiler
         private readonly LiteralAttribute[] m_attributes;
         private readonly ExpandedName[] m_attributeSets;
         private readonly Instruction[] m_body;
+
+        /// <summary>Whether what is built inside the element is untyped, which strip asks (§25.4.1).</summary>
+        private readonly bool m_stripsContent;
+
+        /// <summary>
+        /// Whether the element is annotated <c>xs:anyType</c>, which <c>validation="preserve"</c> asks.
+        /// </summary>
+        /// <remarks>
+        /// §25.4.1: under <c>preserve</c> "the new element has a type annotation of <c>xs:anyType</c>, and
+        /// the type annotations of contained nodes are retained unchanged". That is not the same as no
+        /// annotation at all, which is <c>xs:untyped</c>: the suite's import-schema-076 is called
+        /// <em>Distinguish XS_ANY_TYPE from XDT_UNTYPED</em> and asks the difference six ways.
+        /// </remarks>
+        private readonly bool m_anyTypeOnPreserve;
 
         /// <summary>Initializes a literal result element.</summary>
         public LiteralElementInstruction(
@@ -197,8 +228,12 @@ namespace CodeDeeds.Xslt.Compiler
             LiteralAttribute[] attributes,
             Instruction[] body,
             ExpandedName[]? attributeSets = null,
-            bool inheritNamespaces = true)
+            bool inheritNamespaces = true,
+            bool stripsContent = false,
+            bool anyTypeOnPreserve = false)
         {
+            m_stripsContent = stripsContent;
+            m_anyTypeOnPreserve = anyTypeOnPreserve;
             m_inheritNamespaces = inheritNamespaces;
             m_prefix = prefix;
             m_namespaceUri = namespaceUri;
@@ -213,6 +248,15 @@ namespace CodeDeeds.Xslt.Compiler
         public override void Execute(ref DynamicContext context, XsltRuntime runtime)
         {
             runtime.Output.StartElement(m_prefix, m_namespaceUri, m_localName);
+
+            if (m_stripsContent)
+            {
+                runtime.Output.StripContent();
+            }
+            else if (m_anyTypeOnPreserve)
+            {
+                runtime.Output.AnnotateElement(AnyTypeId, nilled: false);
+            }
 
             if (!m_inheritNamespaces)
             {
@@ -2183,7 +2227,7 @@ namespace CodeDeeds.Xslt.Compiler
     internal sealed class CopyInstruction : Instruction
     {
         /// <summary>The annotation a shallow copy of an element carries under <c>validation="preserve"</c>.</summary>
-        private static readonly ushort AnyTypeId = XPath.XdmSchemaType.BuiltInNamed("anyType")!.Id;
+        private static readonly ushort AnyTypeId = Instructions.AnyTypeId;
 
         /// <summary>Whether the copied element passes its namespaces on to the children built inside it.</summary>
         private readonly bool m_inheritNamespaces;
@@ -2194,6 +2238,7 @@ namespace CodeDeeds.Xslt.Compiler
         private readonly Expr? m_select;
         private readonly bool m_copiesItems;
         private readonly bool m_copyAccumulators;
+        private readonly bool m_anyTypeOnPreserve;
 
         /// <summary>Initializes a copy instruction.</summary>
         /// <param name="body">What fills the copied element.</param>
@@ -2216,8 +2261,10 @@ namespace CodeDeeds.Xslt.Compiler
             bool copiesItems = false,
             bool copyAccumulators = false,
             bool inheritNamespaces = true,
-            bool preserveTypes = true)
+            bool preserveTypes = true,
+            bool anyTypeOnPreserve = false)
         {
+            m_anyTypeOnPreserve = anyTypeOnPreserve;
             m_inheritNamespaces = inheritNamespaces;
             m_body = body;
             m_attributeSets = attributeSets ?? Array.Empty<ExpandedName>();
@@ -2373,7 +2420,7 @@ namespace CodeDeeds.Xslt.Compiler
                     // constructor makes, so the source's type says nothing about what is here. Strict and
                     // lax reach this through the validating wrapper; strip and the default leave it
                     // untyped.
-                    if (m_preserveTypes && tree.HasTypeAnnotations)
+                    if (m_anyTypeOnPreserve)
                     {
                         runtime.Output.AnnotateElement(AnyTypeId, nilled: false);
                     }
@@ -2428,6 +2475,23 @@ namespace CodeDeeds.Xslt.Compiler
         /// </summary>
         private readonly IReadOnlyDictionary<string, string> m_inScope;
 
+        /// <summary>The annotation <c>validation="preserve"</c> puts on a constructed element.</summary>
+        private static readonly ushort AnyTypeId = Instructions.AnyTypeId;
+
+        /// <summary>Whether what is built inside the element is untyped, which strip asks (§25.4.1).</summary>
+        private readonly bool m_stripsContent;
+
+        /// <summary>
+        /// Whether the element is annotated <c>xs:anyType</c>, which <c>validation="preserve"</c> asks.
+        /// </summary>
+        /// <remarks>
+        /// §25.4.1: under <c>preserve</c> "the new element has a type annotation of <c>xs:anyType</c>, and
+        /// the type annotations of contained nodes are retained unchanged". That is not the same as no
+        /// annotation at all, which is <c>xs:untyped</c>: the suite's import-schema-076 is called
+        /// <em>Distinguish XS_ANY_TYPE from XDT_UNTYPED</em> and asks the difference six ways.
+        /// </remarks>
+        private readonly bool m_anyTypeOnPreserve;
+
         /// <summary>Initializes an element instruction.</summary>
         public ElementInstruction(
             AttributeValueTemplate name,
@@ -2435,8 +2499,12 @@ namespace CodeDeeds.Xslt.Compiler
             Instruction[] body,
             IReadOnlyDictionary<string, string> inScope,
             ExpandedName[]? attributeSets = null,
-            bool inheritNamespaces = true)
+            bool inheritNamespaces = true,
+            bool stripsContent = false,
+            bool anyTypeOnPreserve = false)
         {
+            m_stripsContent = stripsContent;
+            m_anyTypeOnPreserve = anyTypeOnPreserve;
             m_inheritNamespaces = inheritNamespaces;
             m_name = name;
             m_namespaceUri = namespaceUri;
@@ -2455,10 +2523,20 @@ namespace CodeDeeds.Xslt.Compiler
 
             runtime.Output.StartElement(prefix, namespaceUri, localName);
 
+            if (m_stripsContent)
+            {
+                runtime.Output.StripContent();
+            }
+            else if (m_anyTypeOnPreserve)
+            {
+                runtime.Output.AnnotateElement(AnyTypeId, nilled: false);
+            }
+
             if (!m_inheritNamespaces)
             {
                 runtime.Output.MarkNoInheritedNamespaces();
             }
+
             AttributeSetApplier.Apply(m_attributeSets, ref context, runtime);
             ExecuteAll(m_body, ref context, runtime);
             runtime.Output.EndElement();
@@ -3250,6 +3328,22 @@ namespace CodeDeeds.Xslt.Compiler
             for (int i = 0; i < attributeCount; i++)
             {
                 CopyShallow(tree, tree.AttributeAt(element, i), output, preserveTypes: preserveTypes, types: types);
+            }
+
+            // Then the ones the schema supplied a value for and the element did not write. They exist
+            // because validation created them (§25.4.1), so they are written after the element's own and
+            // carry the type the declaration gives them.
+            if (types is null)
+            {
+                return;
+            }
+
+            foreach (TypeOverlay.SuppliedAttribute attribute in types.SuppliedFor(element))
+            {
+                output.WriteAttribute(
+                    string.Empty, attribute.NamespaceUri, attribute.LocalName, attribute.Value);
+
+                output.AnnotateAttribute(attribute.TypeId);
             }
         }
     }
