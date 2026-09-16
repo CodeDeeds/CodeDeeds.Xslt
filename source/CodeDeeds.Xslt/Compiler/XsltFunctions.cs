@@ -1243,10 +1243,13 @@ namespace CodeDeeds.Xslt.Compiler
         public static bool IsElementAvailable(
             string namespaceUri, string localName, bool implements30 = true, bool dynamicEvaluation = true)
         {
-            // Anything outside the XSLT namespace would be an extension element, and none are implemented.
+            // Anything outside the XSLT namespace would be an extension element, and EXSLT's exsl:document
+            // is the one implemented. Answered whatever version is in force: EXSLT is not a version of XSLT,
+            // and a 1.0 stylesheet asking is the whole reason the element is here.
             if (namespaceUri != StylesheetCompiler.XsltNamespace)
             {
-                return false;
+                return namespaceUri == ExsltFunctionExpr.CommonNamespace
+                    && localName == ExsltFunctionExpr.DocumentElement;
             }
 
             // XSLT 3.0 widened the question from the instructions to every element the specification defines

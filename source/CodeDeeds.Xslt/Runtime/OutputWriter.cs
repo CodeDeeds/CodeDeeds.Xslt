@@ -1445,6 +1445,49 @@ namespace CodeDeeds.Xslt.Runtime
             m_writer.Write('>');
         }
 
+        /// <summary>
+        /// Settles what has to be settled before text goes out at the top of a document, and says whether
+        /// the text was held back rather than written.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Two things happen above the document element and nowhere else. Whitespace waits with whatever
+        /// else is waiting for the method decision, an html document element being still able to follow it,
+        /// and anything else settles the method as xml — an html document element cannot follow text (§26).
+        /// </para>
+        /// <para>
+        /// Then the declaration goes out, because it is the first thing in a document or it is not a
+        /// declaration at all. A comment and a processing instruction have always done this; text had not,
+        /// so a stylesheet writing its own document type declaration with
+        /// <c>disable-output-escaping</c> — which is how the DocBook XHTML5 stylesheets write
+        /// <c>&lt;!DOCTYPE html&gt;</c> — got the two the wrong way round and a result nothing would parse.
+        /// </para>
+        /// </remarks>
+        /// <param name="text">The text about to be written.</param>
+        private bool SettleTopBefore(string text)
+        {
+            if (m_elementNames.Count != 0)
+            {
+                return false;
+            }
+
+            if (DefersAtTop)
+            {
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    Touch();
+                    (m_deferredTop ??= new System.Text.StringBuilder()).Append(text);
+                    return true;
+                }
+
+                m_methodDecided = true;
+                ApplyIndentDefault();
+            }
+
+            WriteXmlDeclaration();
+            return false;
+        }
+
         /// <summary>Whether the last thing written was an atomic value, with nothing after it yet.</summary>
         private bool m_lastWasAtomic;
 
@@ -1494,22 +1537,11 @@ namespace CodeDeeds.Xslt.Runtime
                 return;
             }
 
-            // Text at the top after something held back keeps its place behind it: whitespace waits with
-            // it, and anything else settles the method as xml — an html document element cannot follow
-            // text (§26) — which lets the declaration and the rest out ahead of the text.
-            if (m_deferredTop is not null && DefersAtTop)
+            if (SettleTopBefore(text))
             {
-                if (string.IsNullOrWhiteSpace(text))
-                {
-                    Touch();
-                    m_deferredTop.Append(text);
-                    return;
-                }
-
-                m_methodDecided = true;
-                ApplyIndentDefault();
-                WriteXmlDeclaration();
+                return;
             }
+
             BeginItem();
 
             Touch();
@@ -1741,6 +1773,12 @@ namespace CodeDeeds.Xslt.Runtime
             {
                 return;
             }
+
+            if (SettleTopBefore(text))
+            {
+                return;
+            }
+
             BeginItem();
 
             Touch();

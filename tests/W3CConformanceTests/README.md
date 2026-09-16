@@ -320,6 +320,14 @@ out of the text carries it. The driver already ran the transformation a second t
 schema-aware run, where a type annotation cannot survive the round trip either; it does so on every run
 now, and only for an assertion that has something to gain by asking again.
 
+A fragment first, and a document only if that fails. Most results are a fragment — a bare string, two
+elements side by side, a comment on its own — and what a fragment may not carry is a document type
+declaration, so a result that has one could not be read at all and the test was set aside as *the result is
+not well-formed XML*. A stylesheet writes its own doctype where `xsl:output` has no attribute for the one it
+wants, which is how the DocBook XHTML5 stylesheets write the HTML 5 form, and `docbook-001` counts the
+elements underneath it. Four tests are still skipped for that reason and are right to be: their stylesheets
+produce HTML, where `<meta>` and `<br>` are written with no closing tag, and no reading of that is XML.
+
 ### What `assert-xml` is measured against
 
 Not the result as the stylesheet asked for it. The catalog says so in as many words: the assertion supplies
@@ -592,7 +600,7 @@ tree** for the substring a branch processes, there being no atomic context item 
 written; there is one now, and a path written in a branch no longer walks a tree that was never in the
 stylesheet.
 
-The largest clusters behind the current **5,599 of 5,622, 99.6%**, and no one cause dominates:
+The largest clusters behind the current **5,600 of 5,623, 99.6%**, and no one cause dominates:
 
 | | |
 |---|---|
@@ -611,7 +619,7 @@ The largest skip left is not a failure either: **6,518 are XSLT 3.0 tests**, rea
 
 ## What the 3.0 run says
 
-That opt-in run measures the XSLT 3.0 half at **7,905 of 7,924, 99.8%**, from 4,994 of 6,427 when it was first
+That opt-in run measures the XSLT 3.0 half at **7,906 of 7,924, 99.8%**, from 4,994 of 6,427 when it was first
 taken. It reads more tests than it did as well as passing more of them, which is the part worth reading twice:
 opening a feature the suite writes *around* stops whole files being skipped, so the denominator moves too — and
 the percentage can fall while the work goes forward, which is why the two numbers are always given together.

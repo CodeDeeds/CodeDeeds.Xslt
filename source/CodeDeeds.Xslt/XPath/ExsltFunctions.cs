@@ -44,6 +44,12 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>The namespace the EXSLT Common module is named by.</summary>
         public const string CommonNamespace = "http://exslt.org/common";
 
+        /// <summary>
+        /// The local name of the module's extension element, which is compiled as an
+        /// <c>xsl:result-document</c> and named here because this is where the namespace is.
+        /// </summary>
+        public const string DocumentElement = "document";
+
         private readonly ExsltCommonFunction m_function;
         private readonly Expr m_argument;
 

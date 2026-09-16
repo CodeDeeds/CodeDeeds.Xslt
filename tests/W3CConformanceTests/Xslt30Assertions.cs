@@ -532,11 +532,43 @@ namespace CodeDeeds.Xslt.Conformance
         // ---- Reading the result --------------------------------------------------------------------------
 
         /// <summary>Parses a serialized result, which may be a fragment rather than a whole document.</summary>
+        /// <remarks>
+        /// A fragment first, because most results are one: a bare string, two elements side by side, a
+        /// comment on its own. What a fragment may not carry is a document type declaration, and a result
+        /// that has one is a document rather than a fragment — so a text that a fragment reader refuses is
+        /// offered to a document reader before it is given up on. Nothing of a doctype reaches the tree an
+        /// assertion is put to, and reading the same text twice costs only the tests that need it. The
+        /// DocBook XHTML5 stylesheets write <c>&lt;!DOCTYPE html&gt;</c>, and docbook-001 counts the
+        /// elements underneath it.
+        /// </remarks>
         private static XdmTree? Parse(string result)
         {
+            string text = StripDeclaration(result);
+
             try
             {
-                return XdmTreeBuilder.FromXml(StripDeclaration(result), fragment: true);
+                return XdmTreeBuilder.FromXml(text, fragment: true);
+            }
+            catch (XmlException)
+            {
+                // Tried again below, as a document.
+            }
+
+            try
+            {
+                XmlReaderSettings settings = new XmlReaderSettings
+                {
+                    ConformanceLevel = ConformanceLevel.Document,
+
+                    // The internal subset and no more: a result document's declaration is read for the
+                    // entities it defines, and nothing is fetched to read it.
+                    DtdProcessing = DtdProcessing.Parse,
+                    XmlResolver = null,
+                    MaxCharactersFromEntities = 10_000_000,
+                };
+
+                using XmlReader reader = XmlReader.Create(new StringReader(text), settings);
+                return XdmTreeBuilder.FromXml(reader);
             }
             catch (XmlException)
             {

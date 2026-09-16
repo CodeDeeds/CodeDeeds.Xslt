@@ -44,5 +44,46 @@ namespace CodeDeeds.Xslt.UnitTests
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?><!-- c -->text<root/>",
                 Run("<xsl:comment> c </xsl:comment><xsl:text>text</xsl:text><root/>"));
         }
+
+        [TestMethod]
+        public void TheDeclarationPrecedesTextWrittenAtTheTop()
+        {
+            // Text with nothing before it had been going out on its own, with the declaration written
+            // afterwards when the first element arrived. A declaration is the first thing in a document or
+            // it is not a declaration at all.
+            Assert.AreEqual(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>text<root/>",
+                Run("<xsl:text>text</xsl:text><root/>"));
+
+            // Whitespace decides nothing: an html document element may still follow it, so it waits with
+            // whatever else is waiting and comes out after the declaration, or after no declaration.
+            Assert.AreEqual(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>  <root/>",
+                Run("<xsl:text>  </xsl:text><root/>"));
+
+            Assert.AreEqual("  <html></html>", Run("<xsl:text>  </xsl:text><html/>"));
+        }
+
+        [TestMethod]
+        public void TheDeclarationPrecedesADoctypeAStylesheetWritesItself()
+        {
+            // The case this was found in. A stylesheet that wants the HTML 5 document type declaration on
+            // an XML result writes it as text with the escaping off, there being no xsl:output attribute
+            // that produces a doctype naming no DTD. That is what the DocBook XHTML5 stylesheets do, and
+            // the declaration was coming out behind it: the suite's docbook-001 produced
+            // "<!DOCTYPE html><?xml ...?><html ...>", which no parser will read.
+            Assert.AreEqual(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><!DOCTYPE html><r/>",
+                Run(
+                    "<xsl:text disable-output-escaping=\"yes\">&lt;!DOCTYPE html&gt;</xsl:text><r/>",
+                    "<xsl:output method=\"xml\"/>"));
+
+            // And with the declaration omitted, the doctype is still the first thing out.
+            Assert.AreEqual(
+                "<!DOCTYPE html><r/>",
+                Run(
+                    "<xsl:text disable-output-escaping=\"yes\">&lt;!DOCTYPE html&gt;</xsl:text><r/>",
+                    "<xsl:output method=\"xml\" omit-xml-declaration=\"yes\"/>"));
+        }
     }
 }

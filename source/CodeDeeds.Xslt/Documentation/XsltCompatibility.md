@@ -13,17 +13,17 @@ implemented. The reasoning behind each decision, and the history of the conforma
 | Conformance level | Basic: not schema-aware, not streaming. |
 | Backends | Interpreted (default) and compiled to IL (`XsltOptions.Backend`), which produce the same results. |
 
-Conformance as last measured, on 15 September 2026, against the W3C suites (see `tests/W3CConformanceTests`):
+Conformance as last measured, on 16 September 2026, against the W3C suites (see `tests/W3CConformanceTests`):
 
 | Suite | Result |
 | --- | --- |
-| XSLT 3.0 test suite, 3.0 processor | 7,905 of 7,924, 99.8% |
-| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,599 of 5,622, 99.6% |
+| XSLT 3.0 test suite, 3.0 processor | 7,906 of 7,924, 99.8% |
+| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,600 of 5,623, 99.6% |
 | QT3 (XPath), 3.1 | 17,592 of 17,629, 99.8% |
 | QT3 (XPath), 2.0 | 14,144 of 14,173, 99.8% |
 
 The 2,900 streaming tests are skipped by design. The 686 schema-aware tests are read only by the driver's
-opt-in `--schema` run, which stands at 8,466 of 8,526 (99.3%), the same on both backends; the figures
+opt-in `--schema` run, which stands at 8,467 of 8,526 (99.3%), the same on both backends; the figures
 above are the run without it.
 
 ## Not implemented, and not planned
@@ -32,7 +32,7 @@ above are the run without it.
 | --- | --- |
 | Schema awareness | Mostly built; see *Schema awareness* under Partly implemented for what stands and what is left. Off by default: `xsl:import-schema` is `XTSE1650`, `validation="strict"` and a `type` attribute are `XTSE1660`, no document is validated, and nothing carries a type annotation, so element and attribute content atomizes to `xs:untypedAtomic`. A 2.0 processor accepts only `validation="strip"`; a 3.0 one accepts `strip`, `preserve` and `lax`, as the specification lets a basic processor do. |
 | Streaming | `streamable="yes"` and `xsl:source-document` are accepted and processed over a tree held in memory; accumulators work the same way. `system-property('xsl:supports-streaming')` is `no`. |
-| Extension elements and functions | No extension element is implemented, and there is no way to register one: an extension instruction takes its `xsl:fallback` when reached, and is `XTDE1450` without one. The extension functions provided are EXSLT's Common module, `exsl:node-set()` and `exsl:object-type()` — the pair an XSLT 1.0 stylesheet guards itself with, and the only ones there are: a caller cannot add more. A call to any other unknown function is `XPST0017` when the stylesheet is compiled. `element-available()` and `function-available()` answer truthfully for all of it. |
+| Extension elements and functions | What is provided is EXSLT's Common module, whole: the functions `exsl:node-set()` and `exsl:object-type()`, and the element `exsl:document`, which writes a secondary result and is read as an `xsl:result-document` with EXSLT's own attributes — `href` required, and `method`, `version`, `encoding`, `omit-xml-declaration`, `standalone`, `doctype-public`, `doctype-system`, `cdata-section-elements`, `indent` and `media-type`, each an attribute value template. It is an extension element, so the prefix has to be named in `extension-element-prefixes` for it to be one; anything else there is written as part of the result. Nothing else is provided and a caller cannot register any: a call to an unknown function is `XPST0017` when the stylesheet is compiled, and any other extension instruction takes its `xsl:fallback` when reached and is `XTDE1450` without one. `element-available()` and `function-available()` answer truthfully for all of it. |
 | `fn:load-xquery-module` | `XPST0017`. It needs an XQuery processor. |
 | XInclude | Not applied to any document read. |
 
@@ -70,7 +70,7 @@ above are the run without it.
 
 | Area | Behaviour |
 | --- | --- |
-| Nothing is reachable by default | `xsl:include` and `xsl:import` need `XsltOptions.StylesheetResolver`; `document()`, `doc()`, `unparsed-text()` and `json-doc()` need `DocumentResolver`; `collection()` and `uri-collection()` need `CollectionResolver`, which names what a collection holds, and `DocumentResolver`, which reads it; `xsl:use-package` needs `PackageResolver`; external entities need `EntityResolver`; `xsl:result-document` needs `ResultStreamResolver` or `ResultResolver`; `environment-variable()` needs `EnvironmentVariablesEnabled`. Without one, the reference is an error and a stylesheet cannot reach the file system, the network or the process's environment. `FileResolver` serves a directory; `UriResolver` serves HTTP and HTTPS as well as a directory. Both serve a directory as a collection, its files in name order, narrowed by `?select=*.xml;recurse=yes`. |
+| Nothing is reachable by default | `xsl:include` and `xsl:import` need `XsltOptions.StylesheetResolver`; `document()`, `doc()`, `unparsed-text()` and `json-doc()` need `DocumentResolver`; `collection()` and `uri-collection()` need `CollectionResolver`, which names what a collection holds, and `DocumentResolver`, which reads it; `xsl:use-package` needs `PackageResolver`; external entities need `EntityResolver`; `xsl:result-document` and `exsl:document` need `ResultStreamResolver` or `ResultResolver`; `environment-variable()` needs `EnvironmentVariablesEnabled`. Without one, the reference is an error and a stylesheet cannot reach the file system, the network or the process's environment. `FileResolver` serves a directory; `UriResolver` serves HTTP and HTTPS as well as a directory. Both serve a directory as a collection, its files in name order, narrowed by `?select=*.xml;recurse=yes`. |
 | Tunnel parameters and `xsl:function` | A function starts with an empty tunnel set, so templates it invokes do not see what its caller was tunnelling. `tunnel="yes"` on a function parameter is refused. The specification never settled this corner. |
 | Character maps | A map's own `xsl:output-character` children override the maps it draws in with `use-character-maps`. The map also applies to text written with `disable-output-escaping` and inside CDATA sections. |
 | Result tree fragments (1.0) | Represented as trees, so they can be navigated. This accepts more than XSLT 1.0 allows and rejects nothing it permits. |

@@ -6255,13 +6255,68 @@ stands between this engine and `docbook-001`, the XHTML half of the same pair. T
 its first `exsl:node-set()` before; it now runs the entire DocBook chunker and stops on
 `element-available('exsl:document')`, which is false here, as `saxon:output` and Xalan's `redirect:write`
 are, so the chunker takes its last branch and terminates. Implementing extension elements is a larger
-decision than implementing two functions, and is left as one.
+decision than implementing two functions, and is left as one — and taken in the round after this, under
+*What EXSLT writes a second document with*.
 
 The 3.0 run goes from 7,904 of 7,924 to **7,905**, the 2.0 run from 5,598 of 5,622 to **5,599** and the
 schema-aware run from 8,465 of 8,526 to **8,466**. That last baseline had moved by one of its own since the
 previous round: `call-template-1001` is a recursion-depth test that lands either side of the limit from run
 to run. The XPath runs are unmoved at 17,592 and 14,144, the two backends agree test for test, and nothing
 that was passing fails. Seven new unit tests, 2,769 in all.
+
+### What EXSLT writes a second document with
+
+`exsl:document` is the Common module's third part and the only extension element this engine implements.
+EXSLT wrote it before XSLT had `xsl:result-document`, and it is the same instruction: a document named by
+an `href`, written with serialization attributes spelt the way `xsl:output` spells them. So the reading was
+taken out of `xsl:result-document` and given to both, with EXSLT's own attribute list checked in front of
+it — eleven names, the `href` required, and `version` where the later element says `output-version`, having
+had `version` taken by the stylesheet's own. An attribute in nobody's namespace that is not one of the
+eleven is refused: a misspelt `omit-xml-declaration` quietly dropped writes a declaration nobody asked for
+and says nothing about why. An attribute in somebody else's namespace is somebody else's business and is
+left alone.
+
+Nothing about the element itself makes it an instruction. `extension-element-prefixes` is the whole of what
+tells an extension element from an element of the result, so a stylesheet that never named the prefix goes
+on copying `exsl:document` out as it always did.
+
+That was the small part. `docbook-001` — the XHTML half of the DocBook pair, and the last test on either run
+with nothing implemented behind it — then failed twice more, each time for something older than anything
+written this round.
+
+**A declaration that came second.** There is no `xsl:output` attribute that produces an HTML 5 document type
+declaration, which names no DTD, so a stylesheet that wants one writes it as text with the escaping off. The
+DocBook XHTML5 stylesheets do exactly that. Text at the top of a document went straight out here, and the
+XML declaration was written when the first element arrived, so the result began
+
+```
+<!DOCTYPE html><?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml">
+```
+
+which no parser will read. A comment and a processing instruction had always let the declaration out ahead
+of them — it is the first thing in a document or it is not a declaration at all — and text had not. It does
+now, by the same rule and in the same place: whitespace at the top waits with whatever else is waiting for
+the output method to be decided, an `html` document element being still able to follow it, and anything else
+settles the method as xml and lets the declaration out in front.
+
+**A driver that would only read a fragment.** An `assert` is an XPath expression over the result, and the
+driver parses the serialized text to put it to. It parsed it as a fragment, because most results are one: a
+bare string, two elements side by side, a comment on its own. What a fragment may not carry is a document
+type declaration — so a result that has one could not be read at all, and the test was set aside as *the
+result is not well-formed XML*. Such a text is now offered to a document reader before it is given up on.
+
+That second one had been hiding a test as well as this one. `variable-4802` writes its own text at the top
+on the 2.0 run, so its result carried a misplaced declaration too and was being skipped for it; read now, it
+fails, and correctly — see *Which results the suite asks for and does not get*. A skip is not a neutral
+thing to leave in place.
+
+Four tests are still skipped for that reason and are right to be. Their stylesheets produce HTML, where
+`<meta>` and `<br>` are written with no closing tag, and no reading of that is XML.
+
+The 3.0 run goes from 7,905 of 7,924 to **7,906** and the schema-aware run from 8,466 of 8,526 to **8,467**.
+The 2.0 run goes from 5,599 of 5,622 to **5,600 of 5,623**: the denominator moved because `variable-4802` is
+judged now rather than skipped. The XPath runs are unmoved at 17,592 and 14,144, the two backends agree test
+for test, and nothing that was passing fails. Nine new unit tests, 2,778 in all.
 
 ### Which results the suite asks for and does not get
 
@@ -6284,24 +6339,20 @@ and close punctuation. `0985` asks for `[\d]` to match U+1369 to U+1371, the Eth
 the data came from the XML Schema test suite and that the matching and non-matching lists were worked out
 by hand. The engine reads `\w` and `\d` from the Unicode data .NET carries, which is current.
 
-**Three tests marked for a 2.0 processor that need 3.0.** `strip-space-025` writes `Q{}test1` in a
+**Tests marked for a 2.0 processor that need 3.0.** `strip-space-025` writes `Q{}test1` in a
 `strip-space` element list, `result-document-0286` and `0287` write an EQName in a `format` attribute.
 EQName syntax is 3.0's, and XSLT 2.0's forwards-compatible processing covers an XSLT element it does not
 know and an attribute it does not know — not a value in a syntax a later version defines. All three pass
 on the 3.0 run. `namespace-0912` is the same shape one step removed: it needs `xsl:mode`'s
 `on-no-match="shallow-copy"`, which a 2.0 processor does not have, and its variable then does not hold
-what it declared.
+what it declared. `variable-4802` is the same again: a `version="3.0"` stylesheet whose `expand-text="yes"`
+a 2.0 processor is required to ignore, being an attribute of an XSLT element it does not know, so the
+`<out>{.}</out>` it writes says `{.}` and means it. Both pass on the 3.0 run. This one had been skipped
+rather than counted until the declaration it writes at the top of its result came out in the right place.
 
 **Two tests that name something their stylesheet does not have.** `format-number-070` asks to start at a
 template called `main` and its stylesheet declares none — it has one template, and it matches `root`.
 `collection-006` asks for one called `a`.
-
-**And one of the two DocBook runs.** `docbook-001` transforms a real article through the real DocBook
-1.79.1 stylesheets to XHTML, and those stylesheets write each chunk with `exsl:document`. This engine
-implements no extension elements, so `element-available('exsl:document')` is false, as it is for
-`saxon:output` and for Xalan's `redirect:write`, and the chunker's last branch terminates the
-transformation outright. Its XSL-FO twin, `docbook-002`, passes — see *What a 1.0 stylesheet asks an
-extension library for*.
 
 ### The rest of 3.0
 

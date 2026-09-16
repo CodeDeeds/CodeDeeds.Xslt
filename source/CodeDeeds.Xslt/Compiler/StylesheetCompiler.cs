@@ -4822,6 +4822,148 @@ namespace CodeDeeds.Xslt.Compiler
         }
 
         /// <summary>
+        /// The attributes EXSLT gives <c>exsl:document</c>, every one of them an attribute value template.
+        /// </summary>
+        /// <remarks>
+        /// The same names <c>xsl:output</c> uses, which is why <see cref="ReadLocalOutputSettings"/> reads
+        /// them without being told which instruction it is reading. <c>version</c> is the one place the two
+        /// later specifications diverge: <c>xsl:result-document</c> spells it <c>output-version</c>, having
+        /// <c>version</c> taken by the stylesheet's own, and EXSLT kept <c>xsl:output</c>'s spelling.
+        /// </remarks>
+        private static readonly string[] s_exsltDocumentAttributes =
+        {
+            "href", "method", "version", "encoding", "omit-xml-declaration", "standalone",
+            "doctype-public", "doctype-system", "cdata-section-elements", "indent", "media-type",
+        };
+
+        /// <summary>
+        /// Checks an <c>exsl:document</c> against what EXSLT says one may carry.
+        /// </summary>
+        /// <remarks>
+        /// Not <see cref="ValidateXsltAttributes"/>, which answers from the element table and would have to
+        /// be told that this element is not in the XSLT namespace and that an <c>xsl:</c> attribute on it is
+        /// ordinary rather than an error. The list is short and closed, so it is checked here. Unknown
+        /// attributes are refused rather than ignored: a misspelt <c>omit-xml-declaration</c> that is quietly
+        /// dropped writes a declaration nobody asked for and says nothing about why.
+        /// </remarks>
+        /// <param name="element">The <c>exsl:document</c> element.</param>
+        private void ValidateExsltDocument(int element)
+        {
+            if (GetAttribute(element, "href") is null)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTSE0010,
+                    "'exsl:document' requires an 'href' attribute saying where its result is written.");
+            }
+
+            int count = m_tree.AttributeCountOf(element);
+            NameTable names = m_tree.NameTable;
+
+            for (int i = 0; i < count; i++)
+            {
+                int fingerprint = m_tree.FingerprintOf(m_tree.AttributeAt(element, i));
+
+                // An attribute in a namespace belongs to whoever owns the namespace. xsl:version and
+                // xsl:use-when are read for whatever element they are written on, and another processor's
+                // attribute in a namespace of its own is not this processor's to refuse.
+                if (names.GetNamespaceUri(fingerprint).Length != 0)
+                {
+                    continue;
+                }
+
+                string name = names.GetLocalName(fingerprint);
+
+                if (Array.IndexOf(s_exsltDocumentAttributes, name) < 0)
+                {
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XTSE0090,
+                        $"'exsl:document' has no '{name}' attribute in EXSLT. It takes "
+                        + $"{string.Join(", ", s_exsltDocumentAttributes)}.");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Compiles an instruction that writes a secondary result.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Two instructions reach this: <c>xsl:result-document</c>, and EXSLT's <c>exsl:document</c>, which
+        /// is the same thing written five years earlier. Both name the document with an <c>href</c> and
+        /// settle how it is written with serialization attributes carrying <c>xsl:output</c>'s own
+        /// spellings, so one reading serves both.
+        /// </para>
+        /// <para>
+        /// What the caller settles before calling is what the two do not share: which attributes the element
+        /// may carry and which it must. EXSLT names eleven and requires the <c>href</c>; XSLT names those
+        /// and a dozen more, requires none of them, and adds a <c>format</c> naming an output definition.
+        /// </para>
+        /// </remarks>
+        /// <param name="element">The instruction, whose attributes and content are read here.</param>
+        /// <param name="output">Where the compiled instruction is added.</param>
+        private void CompileResultDocument(int element, List<Instruction> output)
+        {
+            RejectSchemaValidation(element);
+
+            // A result document is a document node, so validation validates it as one; strip and
+            // preserve validate nothing.
+            bool validateResult = false;
+            bool strictResult = false;
+            XdmSchemaType? resultType = null;
+
+            if (m_schemas is not null)
+            {
+                (string resultMode, XdmSchemaType? resultNamedType) = EffectiveValidation(element, literal: false);
+                resultType = resultNamedType;
+                strictResult = resultMode == "strict";
+                validateResult = resultNamedType is not null || resultMode is "strict" or "lax";
+            }
+
+            // Serialization attributes written here override what xsl:output settled for the
+            // principal result, so one transformation can write XML and HTML at once. A format names
+            // an xsl:output declaration to start from instead of the unnamed one.
+            // Every serialization attribute may be an attribute value template, and so may the format.
+            // A template is taken out of the static reading here and applied when the instruction
+            // runs, over the settings the rest produced — or, where the format itself is computed,
+            // over that format's, every written attribute being applied then too.
+            AttributeValueTemplate? format = OptionalAttributeValueTemplate(element, "format");
+            bool formatComputed = format is not null && format.ConstantValue is null;
+
+            OutputSettings settings = format?.ConstantValue is string formatName
+                ? NamedOutputSettings(element, formatName)
+                : OutputSettingsFor(CurrentPackage).With(m_options.OmitXmlDeclaration);
+
+            List<(string Name, AttributeValueTemplate Template)> templated = new();
+            m_templatedOutput.Clear();
+
+            foreach (string name in SerializationAttributes.Templated)
+            {
+                if (OptionalAttributeValueTemplate(element, name) is AttributeValueTemplate template
+                    && (template.ConstantValue is null || formatComputed))
+                {
+                    templated.Add((name, template));
+                    m_templatedOutput.Add(name);
+                }
+            }
+
+            settings = ReadLocalOutputSettings(element, settings);
+            m_templatedOutput.Clear();
+
+            output.Add(new ResultDocumentInstruction(
+                OptionalAttributeValueTemplate(element, "href"),
+                settings,
+                CompileSequence(element),
+                Claims30(element),
+                templated.ToArray(),
+                formatComputed ? format : null,
+                formatComputed ? AllNamedOutputSettings() : null,
+                formatComputed || templated.Count != 0 ? PrefixesInScope() : null,
+                validateResult,
+                strictResult,
+                resultType));
+        }
+
+        /// <summary>
         /// Builds the settings a named <c>xsl:output</c> declaration describes.
         /// </summary>
         /// <remarks>
@@ -8625,12 +8767,28 @@ namespace CodeDeeds.Xslt.Compiler
                                 + "would go. An extension namespace has to be one nothing else has claimed.");
                         }
 
-                        // An extension element is an instruction, not part of the result, so it cannot simply
-                        // be copied out. This engine implements none, so every one of them falls back.
+                        // exsl:document is the one extension element this engine implements. EXSLT wrote it
+                        // before XSLT had xsl:result-document, and it is the same instruction: a document
+                        // named by an href, written with serialization attributes spelt as xsl:output spells
+                        // them. So it is read as one, and an xsl:fallback written inside it is ignored, as
+                        // one inside any implemented instruction is.
+                        if (NamespaceIn(m_tree, node) == ExsltFunctionExpr.CommonNamespace
+                            && LocalNameIn(m_tree, node) == ExsltFunctionExpr.DocumentElement)
+                        {
+                            m_scopeElement = node;
+                            ValidateExsltDocument(node);
+                            CompileResultDocument(node, output);
+                            Locate(output, before, node);
+                            return;
+                        }
+
+                        // Any other extension element is an instruction, not part of the result, so it
+                        // cannot simply be copied out. None of the rest are implemented, so they fall back.
                         output.Add(CompileFallback(
                             node,
-                            $"'{QualifiedNameOf(node)}' is an extension element, and this engine implements no "
-                            + "extension elements. Give it an xsl:fallback child to say what to do instead.",
+                            $"'{QualifiedNameOf(node)}' is an extension element, and exsl:document is the only "
+                            + "one this engine implements. Give it an xsl:fallback child to say what to do "
+                            + "instead.",
                             XsltErrorCode.XTDE1450));
                     }
                     else
@@ -10401,68 +10559,8 @@ namespace CodeDeeds.Xslt.Compiler
                     return;
 
                 case "result-document":
-                {
-                    RejectSchemaValidation(element);
-
-                    // A result document is a document node, so validation validates it as one; strip and
-                    // preserve validate nothing.
-                    bool validateResult = false;
-                    bool strictResult = false;
-                    XdmSchemaType? resultType = null;
-
-                    if (m_schemas is not null)
-                    {
-                        (string resultMode, XdmSchemaType? resultNamedType) = EffectiveValidation(element, literal: false);
-                        resultType = resultNamedType;
-                        strictResult = resultMode == "strict";
-                        validateResult = resultNamedType is not null || resultMode is "strict" or "lax";
-                    }
-
-                    // Serialization attributes written here override what xsl:output settled for the
-                    // principal result, so one transformation can write XML and HTML at once. A format names
-                    // an xsl:output declaration to start from instead of the unnamed one.
-                    // Every serialization attribute may be an attribute value template, and so may the format.
-                    // A template is taken out of the static reading here and applied when the instruction
-                    // runs, over the settings the rest produced — or, where the format itself is computed,
-                    // over that format's, every written attribute being applied then too.
-                    AttributeValueTemplate? format = OptionalAttributeValueTemplate(element, "format");
-                    bool formatComputed = format is not null && format.ConstantValue is null;
-
-                    OutputSettings settings = format?.ConstantValue is string formatName
-                        ? NamedOutputSettings(element, formatName)
-                        : OutputSettingsFor(CurrentPackage).With(m_options.OmitXmlDeclaration);
-
-                    List<(string Name, AttributeValueTemplate Template)> templated = new();
-                    m_templatedOutput.Clear();
-
-                    foreach (string name in SerializationAttributes.Templated)
-                    {
-                        if (OptionalAttributeValueTemplate(element, name) is AttributeValueTemplate template
-                            && (template.ConstantValue is null || formatComputed))
-                        {
-                            templated.Add((name, template));
-                            m_templatedOutput.Add(name);
-                        }
-                    }
-
-                    settings = ReadLocalOutputSettings(element, settings);
-                    m_templatedOutput.Clear();
-
-                    output.Add(new ResultDocumentInstruction(
-                        OptionalAttributeValueTemplate(element, "href"),
-                        settings,
-                        CompileSequence(element),
-                        Claims30(element),
-                        templated.ToArray(),
-                        formatComputed ? format : null,
-                        formatComputed ? AllNamedOutputSettings() : null,
-                        formatComputed || templated.Count != 0 ? PrefixesInScope() : null,
-                        validateResult,
-                        strictResult,
-                        resultType));
-
+                    CompileResultDocument(element, output);
                     return;
-                }
 
                 case "matching-substring":
                 case "non-matching-substring":

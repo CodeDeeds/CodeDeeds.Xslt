@@ -1926,10 +1926,12 @@ namespace CodeDeeds.Xslt.Runtime
         {
             if (m_options.ResultStreamResolver is null && m_options.ResultResolver is null)
             {
+                // Said of the document rather than of the instruction, there being two that write one:
+                // xsl:result-document and EXSLT's exsl:document.
                 throw new XsltException(
-                    $"This stylesheet uses xsl:result-document href=\"{href}\", but no result resolver was "
-                    + "configured. Set XsltOptions.ResultStreamResolver, or XsltOptions.ResultResolver, to "
-                    + "say where secondary results may go.");
+                    $"This stylesheet writes a secondary result document at href=\"{href}\", but no result "
+                    + "resolver was configured. Set XsltOptions.ResultStreamResolver, or "
+                    + "XsltOptions.ResultResolver, to say where secondary results may go.");
             }
 
             m_resultDocuments ??= new HashSet<string>(StringComparer.Ordinal);
