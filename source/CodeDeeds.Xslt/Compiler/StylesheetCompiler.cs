@@ -112,6 +112,24 @@ namespace CodeDeeds.Xslt.Compiler
         /// <summary>The package each <c>xsl:use-package</c> brought in, by the element that named it.</summary>
         private readonly Dictionary<ModuleElement, int> m_usePackageIds = new();
 
+        /// <summary>
+        /// Every <c>xsl:use-package</c> element: the package it names, and the package it is written in.
+        /// </summary>
+        /// <remarks>
+        /// A package is loaded once however often it is named, and that is right for what a package
+        /// <em>is</em>; it is not right for what a using package ends up holding. Two
+        /// <c>xsl:use-package</c> elements naming one package are two relationships with that package, each
+        /// with its own <c>xsl:accept</c> children, and a component both of them leave in view is in view
+        /// twice (§3.5.2, and the resolution of the working group's bug 30389). That count is what
+        /// <see cref="CheckUsedTwice"/> asks for, and it cannot be asked of a list of package identities.
+        /// <para>
+        /// Keyed by the element, because one is recorded more than once: a naming of a package already
+        /// loaded is recorded again so that its own acceptances are kept, and counting those as two
+        /// namings would find a conflict in every stylesheet that uses a package at all.
+        /// </para>
+        /// </remarks>
+        private readonly Dictionary<ModuleElement, (int Used, int Using)> m_packageUses = new();
+
         /// <summary>Every declaration spliced in from an <c>xsl:override</c>, and the <c>xsl:use-package</c> it stood in.</summary>
         private readonly Dictionary<ModuleElement, ModuleElement> m_overrideOf = new();
 
@@ -623,6 +641,7 @@ namespace CodeDeeds.Xslt.Compiler
             // Last, because whether two components of one name are both in view depends on everything the
             // acceptances said.
             CheckHomonyms();
+            CheckUsedTwice();
 
             // Before any body is compiled, so that an xsl:result-document naming a map finds it expanded.
             ExpandCharacterMaps();
@@ -2591,6 +2610,12 @@ namespace CodeDeeds.Xslt.Compiler
             PackageVersionRange range = wantedVersions is null
                 ? PackageVersionRange.Any
                 : PackageVersionRange.TryParse(wantedVersions)
+                    // XTSE0020, the code for an attribute value outside the set the grammar allows, and not
+                    // XTSE3000, which is for a package that could not be found. The suite asks for both on
+                    // the same shape and is four to one: use-package-291 to 294 write '2.0.0-alpha:beta',
+                    // 'TotallyInvalid', '-3.6' and '-alpha' and expect XTSE0020, and package-200 writes
+                    // "'1.0.0'" with the apostrophes in it and expects XTSE3000. A text that is not a range
+                    // is refused as a text, before anything is looked for.
                     ?? throw XsltErrors.Error(
                         XsltErrorCode.XTSE0020,
                         $"'{wantedVersions}' is not a package version range. One is a version such as 2.0.5 "
@@ -2729,6 +2754,7 @@ namespace CodeDeeds.Xslt.Compiler
         private void RecordUse(int usePackage, int used)
         {
             m_usePackageIds[new ModuleElement(m_tree, usePackage)] = used;
+            m_packageUses[new ModuleElement(m_tree, usePackage)] = (used, m_package);
 
             if (!m_uses.TryGetValue(m_package, out List<int>? uses))
             {
@@ -7111,6 +7137,141 @@ namespace CodeDeeds.Xslt.Compiler
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Refuses a package that takes one component of one used package in through two
+        /// <c>xsl:use-package</c> elements without hiding it in at least one of them.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <c>XTSE3050</c> again, and the case <see cref="CheckHomonyms"/> cannot see. A package is loaded
+        /// once however often it is named, so both namings reach the same components and that check counts
+        /// them once. But an <c>xsl:use-package</c> is a relationship rather than a reference: each one has
+        /// its own <c>xsl:accept</c> children, and what the using package ends up holding is what each
+        /// relationship brought. Two of them leaving one component in view leave a reference to its name
+        /// with two things it could mean, which is exactly what the error is for.
+        /// </para>
+        /// <para>
+        /// So the accepts are asked per <c>xsl:use-package</c> element and not per used package. The suite
+        /// pins both sides of it: package-021 and package-022 name one package two and three times over and
+        /// pass, because every component is left visible by exactly one of the namings; their <c>err</c>
+        /// variants leave one visible twice and ask for this error.
+        /// </para>
+        /// </remarks>
+        private void CheckUsedTwice()
+        {
+            for (int package = 0; package <= m_packageCount; package++)
+            {
+                Dictionary<(string, ExpandedName, int), int> visible = new();
+
+                // A name counts once per naming, however many declarations stand behind it: an attribute
+                // set declared in two pieces is one component, as it is in CheckHomonyms.
+                HashSet<(ModuleElement, string, ExpandedName, int)> counted = new();
+
+                foreach ((ModuleElement use, (int used, int inside)) in m_packageUses)
+                {
+                    if (inside != package)
+                    {
+                        continue;
+                    }
+
+                    foreach (PackageComponent component in m_components)
+                    {
+                        // Only what this used package declares itself. A component it took from a package
+                        // of its own reaches here through its own acceptance, and counting it again would
+                        // be counting one relationship twice.
+                        if (component.Package != used || component.IsParameter)
+                        {
+                            continue;
+                        }
+
+                        if (component.Effective is not (Visibility.Public or Visibility.Final
+                            or Visibility.Abstract))
+                        {
+                            continue;
+                        }
+
+                        (string, ExpandedName, int) key = (component.Kind, component.Name, component.Arity);
+
+                        if (!counted.Add((use, component.Kind, component.Name, component.Arity)))
+                        {
+                            continue;
+                        }
+
+                        // Overridden, and so replaced: what the using package holds under the name is its
+                        // own declaration, and the accepted one is not in view beside it.
+                        if (m_overridingKeys.Contains(
+                            (package, component.Kind, component.Name, component.Arity)))
+                        {
+                            continue;
+                        }
+
+                        if (AcceptedThrough(component, use, component.Effective)
+                            is Visibility.Hidden or Visibility.Absent)
+                        {
+                            continue;
+                        }
+
+                        visible[key] = visible.GetValueOrDefault(key) + 1;
+                    }
+                }
+
+                foreach (((string kind, ExpandedName name, int arity), int count) in visible)
+                {
+                    if (count > 1)
+                    {
+                        throw XsltErrors.Error(
+                            XsltErrorCode.XTSE3050,
+                            $"This package names one package in {count} xsl:use-package elements and each "
+                            + $"of them leaves the {kind} '{name.LocalName}'"
+                            + (arity >= 0 ? $" with {arity} parameter(s)" : string.Empty)
+                            + " in view. Each xsl:use-package is a relationship of its own, so the "
+                            + "component comes in once per naming; hide it in all but one of them.");
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// What one <c>xsl:use-package</c> element's own <c>xsl:accept</c> children take a component as.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="AcceptedAs"/> asked of one naming rather than of all of them together. The rules for
+        /// choosing among the accepts are the same, and so is what silence means.
+        /// </remarks>
+        /// <param name="component">The component being taken.</param>
+        /// <param name="use">The <c>xsl:use-package</c> element doing the taking.</param>
+        /// <param name="offered">The visibility the used package offers it with.</param>
+        private Visibility AcceptedThrough(PackageComponent component, ModuleElement use, Visibility offered)
+        {
+            Visibility? said = null;
+            int best = -1;
+
+            foreach (Acceptance acceptance in m_acceptances)
+            {
+                if (acceptance.Source.Tree != use.Tree
+                    || acceptance.Source.Tree.ParentOf(acceptance.Source.Element) != use.Element)
+                {
+                    continue;
+                }
+
+                Exposure accept = AcceptanceOf(acceptance);
+
+                if (BestMatch(accept, component, offeredToo: true) is int specificity
+                    && Rank(accept, specificity) >= best)
+                {
+                    best = Rank(accept, specificity);
+                    said = accept.Visibility;
+                }
+            }
+
+            return said ?? offered switch
+            {
+                Visibility.Public => Visibility.Private,
+                Visibility.Abstract => Visibility.Absent,
+                _ => offered,
+            };
         }
 
         /// <summary>

@@ -372,5 +372,55 @@ namespace CodeDeeds.Xslt.UnitTests
                         DocumentResolver = files,
                     }).Transform());
         }
+
+        [TestMethod]
+        public void OneComponentTakenThroughTwoNamingsIsInViewTwice()
+        {
+            // A package is loaded once however often it is named, but an xsl:use-package is a relationship
+            // rather than a reference: each has its own xsl:accept children, and what the using package
+            // ends up holding is what each relationship brought in. Two of them leaving one component in
+            // view leave a reference to its name with two things it could mean, which is XTSE3050.
+            PlainLibrary files = new PlainLibrary().Add(
+                "urn:lib",
+                Package(
+                    "urn:lib",
+                    "<xsl:variable name=\"v\" select=\"'one'\" visibility=\"public\"/>"
+                    + "<xsl:variable name=\"w\" select=\"'two'\" visibility=\"public\"/>"));
+
+            // The template writes a constant: what is being asked here is whether the package compiles at
+            // all, and a reference to the component would bring in the separate question of which naming
+            // a reference resolves through.
+            string Twice(string first, string second) => Package(
+                "urn:main",
+                $"<xsl:use-package name=\"urn:lib\">{first}</xsl:use-package>"
+                + $"<xsl:use-package name=\"urn:lib\">{second}</xsl:use-package>"
+                + "<xsl:template name=\"main\" visibility=\"public\"><out/></xsl:template>");
+
+            const string TakeV = "<xsl:accept component=\"variable\" names=\"v\" visibility=\"private\"/>";
+            const string HideAll = "<xsl:accept component=\"variable\" names=\"*\" visibility=\"hidden\"/>";
+
+            Assert.AreEqual("XTSE3050", Refuses(Twice(TakeV, TakeV), files));
+
+            // Hidden in one of them and the name means one thing again. That is the shape the suite's
+            // package-021 and package-022 are built on, and they pass.
+            Assert.AreEqual("<out/>", Run(Twice(TakeV, HideAll), files));
+            Assert.AreEqual("<out/>", Run(Twice(HideAll, TakeV), files));
+
+            // Saying nothing is not the same as hiding: a public component is taken as private, which is
+            // still a component the using package holds. So a naming with no xsl:accept at all beside one
+            // that takes the same component is the conflict too.
+            Assert.AreEqual("XTSE3050", Refuses(Twice(string.Empty, TakeV), files));
+
+            // And the count is per name. Taking v through one naming and w through the other is two
+            // components with two names, which is no conflict at all.
+            Assert.AreEqual(
+                "<out/>",
+                Run(
+                    Twice(
+                        TakeV + "<xsl:accept component=\"variable\" names=\"w\" visibility=\"hidden\"/>",
+                        "<xsl:accept component=\"variable\" names=\"w\" visibility=\"private\"/>"
+                        + "<xsl:accept component=\"variable\" names=\"v\" visibility=\"hidden\"/>"),
+                    files));
+        }
     }
 }

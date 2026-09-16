@@ -6413,6 +6413,59 @@ from 8,467 of 8,526 to **8,468**, both of them doe-0191; the 2.0 run is unmoved 
 backends agree test for test on all three XSLT runs, and nothing that was passing fails. Four new unit
 tests, 2,782 in all.
 
+### What the three package error codes turned out to be
+
+Three failures in `decl/package`, all of them about which code comes out rather than about what the
+stylesheet does. None of the three moves, and each is worth writing down for a different reason.
+
+**A suite that asks for two codes on one shape.** `package-200` writes
+`package-version="'1.0.0'"` — the apostrophes are inside the attribute — and asks for `XTSE3000`, which
+is the code for a package that could not be found. `use-package-291` to `294` write
+`2.0.0-alpha:beta`, `TotallyInvalid`, `-3.6` and `-alpha` in the same attribute and ask for `XTSE0020`,
+which is the code for an attribute value outside the set the grammar allows. Both readings are arguable:
+a range that parses as nothing does find nothing. The suite is four to one, and this engine refuses the
+text as a text before anything is looked for. Changing it to `XTSE3000` was tried and cost those four.
+
+**Two stylesheets the suite broke while correcting them.** `package-021err` and `package-022err` ask for
+`XTSE3050` and get `XTSE0020`, and the `XTSE0020` is right: neither stylesheet is well-formed XSLT. Both
+were edited in February 2020 for erratum E36, which requires a function's arity in `xsl:accept` and
+`xsl:expose`, and in both the `#0` landed somewhere it does not belong — on `xsl:function`'s `name`, which
+is an `EQName` and not a name and an arity, and on `xsl:accept`'s `component`, which is one of six words.
+Their unedited twins, `package-021` and `package-022`, have it right. There is no reading of either
+attribute that admits what is written, so the two tests cannot pass without accepting a stylesheet that is
+wrong.
+
+**And a rule hiding behind them.** With both files corrected locally, the transformation *completed* — where
+`XTSE3050` is what the specification asks for. So the tests were pointing at something real.
+
+A package is loaded once however often it is named: it is a thing rather than a text to be spliced in, and
+two namings cannot mean two copies of it. That is right about what a package *is*, and it was being used
+to answer a question about what a using package *holds*, which is not the same. An `xsl:use-package` is a
+relationship: each one carries its own `xsl:accept` children, and what the using package ends up holding
+is what each relationship brought in. Two of them leaving one component in view leave a reference to its
+name with two things it could mean, which is exactly what `XTSE3050` is for — and the acceptances were
+being read as one set per used package, so the second naming's `xsl:accept` was never consulted and the
+conflict could not be seen.
+
+The visibility check now asks the question per `xsl:use-package` element. The suite pins both sides of it:
+`package-021` and `package-022` name one package two and three times over and pass, because every
+component is left in view by exactly one of the namings; their `err` variants leave one in view twice. Two
+things were needed to keep the check honest. A naming is recorded more than once — a package already
+loaded is recorded again so that its own acceptances are kept — so the namings are counted by element
+rather than by how many times one was recorded; and a component declared in more than one piece, an
+attribute set in two halves, is one component, as it already is in the homonym check next to this one.
+Without either, every stylesheet that uses a package at all was refused.
+
+What is not per naming is the resolution of a reference. Where one package is named twice and a component
+is left in view by one naming and hidden by the other, a reference to it is resolved through the later
+claim rather than through the naming that kept it. That is the same merged reading, still in place where
+it decides what a name means; the check above is what decides whether the name means one thing at all.
+
+Nothing moves on any run. `package-200` is the suite disagreeing with itself, the other two are stylesheets
+that do not compile, and the rule the two of them are about has no other test. It is covered by a unit test
+instead, 2,783 in all, and with the two stylesheets corrected by hand the 3.0 run goes from 7,907 of 7,924
+to 7,909. The two backends agree test for test and nothing that was passing fails.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error
