@@ -267,6 +267,24 @@ namespace CodeDeeds.Xslt.Runtime
         }
 
         /// <summary>
+        /// Stops separating the top-level items written to this target, and says whether it was separating
+        /// them before.
+        /// </summary>
+        /// <remarks>
+        /// For content that has been through sequence normalization already: the separators are text nodes
+        /// in the tree being written out, and inserting them again would put two between every pair of
+        /// items. Only a serializer separates anything, so this is a no-op everywhere else.
+        /// </remarks>
+        /// <returns>Whether items were being separated, to hand back to <see cref="ResumeItemSeparation"/>.</returns>
+        internal virtual bool SuspendItemSeparation() => false;
+
+        /// <summary>Restores what <see cref="SuspendItemSeparation"/> turned off.</summary>
+        /// <param name="separating">What that call returned.</param>
+        internal virtual void ResumeItemSeparation(bool separating)
+        {
+        }
+
+        /// <summary>
         /// Records that the node most recently written was copied, with its accumulator values, from a node
         /// of another tree.
         /// </summary>
@@ -773,6 +791,38 @@ namespace CodeDeeds.Xslt.Runtime
         public string? BaseUri { get; init; }
 
         /// <summary>
+        /// Gets the separator that goes between adjacent items of the sequence this tree is normalized
+        /// from, or null where the tree is not the product of sequence normalization.
+        /// </summary>
+        /// <remarks>
+        /// §2.3.6.1: a result tree is built from the raw result "by applying the rules for the process of
+        /// sequence normalization", and <c>item-separator</c> is the only serialization parameter that
+        /// process reads. "If there is an item-separator, then it is used not only between adjacent atomic
+        /// values, but between any pair of items in the raw result" — so two elements written one after the
+        /// other arrive in the tree with a text node between them. That matters beyond the characters,
+        /// because validation is applied to the normalized tree: a separator that is not whitespace puts
+        /// text among a document node's children, where a validated document may have none.
+        /// </remarks>
+        public string? NormalizedItemSeparator { get; init; }
+
+        /// <summary>How many top-level items have been written, for the separator between them.</summary>
+        private int m_itemsWritten;
+
+        /// <summary>Marks the start of a top-level item, separating it from the one before it.</summary>
+        private void BeginItem()
+        {
+            if (NormalizedItemSeparator is null || m_builder.OpenElementDepth != 0)
+            {
+                return;
+            }
+
+            if (m_itemsWritten++ > 0)
+            {
+                m_builder.AddText(NormalizedItemSeparator);
+            }
+        }
+
+        /// <summary>
         /// Gets whether this tree is a final result of the transformation rather than a temporary one.
         /// </summary>
         /// <remarks>
@@ -803,6 +853,7 @@ namespace CodeDeeds.Xslt.Runtime
         /// <inheritdoc/>
         public override void StartElement(string prefix, string namespaceUri, string localName)
         {
+            BeginItem();
             m_builder.StartElement(prefix, namespaceUri, localName);
         }
 
@@ -910,6 +961,7 @@ namespace CodeDeeds.Xslt.Runtime
         /// <inheritdoc/>
         public override void WriteText(string text)
         {
+            BeginItem();
             m_builder.AddText(text);
         }
 
@@ -917,23 +969,36 @@ namespace CodeDeeds.Xslt.Runtime
         public override void WriteRawText(string text)
         {
             // Escaping is a serialization concern; a captured tree simply holds the characters.
+            BeginItem();
             m_builder.AddText(text);
         }
 
+        /// <inheritdoc/>
         public override void WriteAtomic(string text)
         {
+            // Where a separator is settling the whole sequence, it settles two adjacent atomic values
+            // too, and the single space the builder would otherwise put between them is not wanted.
+            if (NormalizedItemSeparator is not null && m_builder.OpenElementDepth == 0)
+            {
+                BeginItem();
+                m_builder.AddText(text);
+                return;
+            }
+
             m_builder.AddAtomic(text);
         }
 
         /// <inheritdoc/>
         public override void WriteComment(string text)
         {
+            BeginItem();
             m_builder.AddComment(text);
         }
 
         /// <inheritdoc/>
         public override void WriteProcessingInstruction(string target, string data)
         {
+            BeginItem();
             m_builder.AddProcessingInstruction(target, data);
         }
 

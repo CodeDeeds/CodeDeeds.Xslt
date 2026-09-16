@@ -2067,7 +2067,7 @@ namespace CodeDeeds.Xslt.Compiler
 
             if (value.Kind is not (XPathValueKind.Sequence or XPathValueKind.Node or XPathValueKind.Array))
             {
-                runtime.Output.WriteAtomic(value.ToStringValue());
+                CopyItem(value, runtime.Output);
                 return;
             }
 
@@ -2091,10 +2091,31 @@ namespace CodeDeeds.Xslt.Compiler
                     continue;
                 }
 
-                // Written as an atomic value, which is what puts a single space between it and an atomic value
-                // written just before — by this instruction or by the one before it, and never after a node.
-                runtime.Output.WriteAtomic(items[i].ToStringValue());
+                CopyItem(items[i], runtime.Output);
             }
+        }
+
+        /// <summary>Contributes an item that is not a node, which is to say one there is nothing to copy about.</summary>
+        /// <remarks>
+        /// §11.9.2: "If the item is an atomic value or a function item, the value is appended to the result
+        /// sequence, as with <c>xsl:sequence</c>", and the <c>type</c> and <c>validation</c> attributes "are
+        /// ignored when copying an item that is not an element, attribute or document node". So the value goes
+        /// on whole wherever the output can hold one — which is what keeps an <c>xs:date</c> an
+        /// <c>xs:date</c> rather than the string it would be written as. Where a tree is being built there is
+        /// nowhere for a value to go but into text, and its string value is what a node's content can hold.
+        /// </remarks>
+        /// <param name="item">The item.</param>
+        /// <param name="output">Where it goes.</param>
+        private static void CopyItem(XPathValue item, Runtime.OutputTarget output)
+        {
+            if (output.TryAppendValue(item))
+            {
+                return;
+            }
+
+            // Written as an atomic value, which is what puts a single space between it and an atomic value
+            // written just before — by this instruction or by the one before it, and never after a node.
+            output.WriteAtomic(item.ToStringValue());
         }
     }
 
@@ -2161,6 +2182,9 @@ namespace CodeDeeds.Xslt.Compiler
     /// <summary><c>xsl:copy</c>, which copies the current node without its children.</summary>
     internal sealed class CopyInstruction : Instruction
     {
+        /// <summary>The annotation a shallow copy of an element carries under <c>validation="preserve"</c>.</summary>
+        private static readonly ushort AnyTypeId = XPath.XdmSchemaType.BuiltInNamed("anyType")!.Id;
+
         /// <summary>Whether the copied element passes its namespaces on to the children built inside it.</summary>
         private readonly bool m_inheritNamespaces;
 
@@ -2341,18 +2365,17 @@ namespace CodeDeeds.Xslt.Compiler
                         tree.NameTable.GetNamespaceUri(fingerprint),
                         tree.NameTable.GetLocalName(fingerprint));
 
-                    // A shallow copy keeps the source element's type where validation="preserve" asks and
-                    // the source carries one; strict and lax reach this through the validating wrapper, and
-                    // strip and the default leave it untyped.
+                    // A shallow copy of an element under validation="preserve" is annotated xs:anyType,
+                    // and is not nilled — §25.4.1, and the reason it gives is the whole of the difference
+                    // between this instruction and xsl:copy-of: "because this instruction does not copy
+                    // the content of the element, it would be wrong to assume that the type is unchanged".
+                    // The element's name is the source's and its content is whatever the sequence
+                    // constructor makes, so the source's type says nothing about what is here. Strict and
+                    // lax reach this through the validating wrapper; strip and the default leave it
+                    // untyped.
                     if (m_preserveTypes && tree.HasTypeAnnotations)
                     {
-                        ushort typeId = tree.TypeIdOf(node);
-                        bool nilled = tree.IsNilled(node);
-
-                        if (typeId != 0 || nilled)
-                        {
-                            runtime.Output.AnnotateElement(typeId, nilled);
-                        }
+                        runtime.Output.AnnotateElement(AnyTypeId, nilled: false);
                     }
 
                     runtime.Output.MarkOwnNamespaces(root: true);

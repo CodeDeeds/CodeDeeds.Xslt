@@ -172,7 +172,17 @@ namespace CodeDeeds.Xslt.Compiler
         {
             int element = FirstElement(tree);
 
-            if (element < 0 || type.Definition is null)
+            if (element < 0)
+            {
+                return new TypeOverlay(m_schemas);
+            }
+
+            if (IsUntypedAtomic(type))
+            {
+                return AsUntypedAtomic(tree, element);
+            }
+
+            if (type.Definition is null)
             {
                 return new TypeOverlay(m_schemas);
             }
@@ -180,6 +190,50 @@ namespace CodeDeeds.Xslt.Compiler
             return Run(
                 tree, element, type.Definition, strict: true,
                 XsltErrorCode.XTTE1540, XsltErrorCode.XTTE1540, identityConstraints: false);
+        }
+
+        /// <summary>Whether a type is <c>xs:untypedAtomic</c>, which no schema defines and every rule about
+        /// it is written for by name.</summary>
+        /// <param name="type">The type named.</param>
+        private static bool IsUntypedAtomic(XdmSchemaType type)
+        {
+            return type.IsBuiltIn && type.LocalName == "untypedAtomic";
+        }
+
+        /// <summary>
+        /// Validates an element against <c>xs:untypedAtomic</c>.
+        /// </summary>
+        /// <remarks>
+        /// §25.4.1: "If an element or attribute node is validated against the type <c>xs:untypedAtomic</c>,
+        /// the effect is the same as specifying <c>[xsl:]type="xs:string"</c> except that when validation
+        /// succeeds, the returned element or attribute has a type annotation of <c>xs:untypedAtomic</c>.
+        /// Validation fails in the case of an element with element children." Every string is an
+        /// <c>xs:string</c>, so the children are the whole of what is left to check — and they are what makes
+        /// the rule worth stating, an element with element children having no simple content to be about.
+        /// </remarks>
+        /// <param name="tree">The tree holding the constructed element.</param>
+        /// <param name="element">The element.</param>
+        /// <exception cref="XsltException"><c>XTTE1540</c> where the element has an element child.</exception>
+        private TypeOverlay AsUntypedAtomic(XdmTree tree, int element)
+        {
+            for (int child = tree.FirstChildOf(element); child >= 0; child = tree.NextSiblingOf(child))
+            {
+                if (tree.KindOf(child) != NodeKind.Element)
+                {
+                    continue;
+                }
+
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTTE1540,
+                    "An element validated against xs:untypedAtomic is validated as though against "
+                    + $"xs:string, and '{tree.NameTable.GetLocalName(tree.FingerprintOf(element))}' has an element "
+                    + "child, which leaves it no simple content to be one.");
+            }
+
+            TypeOverlay overlay = new TypeOverlay(m_schemas);
+            overlay.Set(element, XdmSchemaType.BuiltInNamed("untypedAtomic")!.Id);
+
+            return overlay;
         }
 
         private static int FirstElement(XdmTree tree)
@@ -325,8 +379,14 @@ namespace CodeDeeds.Xslt.Compiler
                 }
             }
 
+            // The two xsi attributes that steer validation rather than being validated go in here, where
+            // the validator takes them as properties of the element: xsi:type says what to validate
+            // against, and xsi:nil says the element is allowed to be empty whatever its type would
+            // otherwise require. Left out, a nilled element is validated as though it had to hold a value,
+            // and an empty one of a numeric type is refused for holding nothing.
             XmlSchemaInfo info = new XmlSchemaInfo();
-            validator.ValidateElement(local, uri, info, XsiType(tree, element), null, null, null);
+            validator.ValidateElement(
+                local, uri, info, XsiType(tree, element), XsiNil(tree, element), null, null);
 
             int attributeCount = tree.AttributeCountOf(element);
             for (int i = 0; i < attributeCount; i++)
@@ -429,8 +489,24 @@ namespace CodeDeeds.Xslt.Compiler
         /// <summary>The value of an element's <c>xsi:type</c>, which steers what it is validated against.</summary>
         private static string? XsiType(XdmTree tree, int element)
         {
+            return XsiAttribute(tree, element, "type");
+        }
+
+        /// <summary>The value of an element's <c>xsi:nil</c>, which says it may stand for an absent value.</summary>
+        private static string? XsiNil(XdmTree tree, int element)
+        {
+            return XsiAttribute(tree, element, "nil");
+        }
+
+        /// <summary>One of the element's attributes in the XML Schema instance namespace, or null.</summary>
+        /// <param name="tree">The tree.</param>
+        /// <param name="element">The element.</param>
+        /// <param name="localName">The attribute's local name.</param>
+        private static string? XsiAttribute(XdmTree tree, int element, string localName)
+        {
             int attribute = tree.FindAttribute(
-                element, tree.NameTable.GetFingerprint("http://www.w3.org/2001/XMLSchema-instance", "type"));
+                element,
+                tree.NameTable.GetFingerprint("http://www.w3.org/2001/XMLSchema-instance", localName));
 
             return attribute < 0 ? null : tree.StringValueOf(attribute);
         }

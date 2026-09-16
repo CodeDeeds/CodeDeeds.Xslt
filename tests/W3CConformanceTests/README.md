@@ -216,7 +216,7 @@ now, as every other processor presents them.
 
 ## Where the suite is wrong
 
-Three tests cannot pass, and not for anything this engine does.
+Five tests cannot pass, and not for anything this engine does.
 
 `package-021err` and `package-022err` ask for `XTSE3050` — the code for a component that two namings of
 one package both leave in view — and neither stylesheet gets far enough to raise it, because neither is
@@ -235,18 +235,35 @@ set were amended for exactly that — *Make main template public*, eleven in Mar
 2023 — and this one was missed. It is the only test case in the suite that needs a private named template
 in an explicit package to serve as a way in.
 
-The corrections are kept here as [`suite-corrections.patch`](suite-corrections.patch), which `git apply`
-takes from the root of a clone of the suite. With it all three tests raise the code they were written for
-and the 3.0 run goes from 7,911 to **7,914**. It is checked in rather than applied: every figure in this
-document is measured against the suite as published, and the patch is there to be offered upstream rather
-than kept as a local advantage.
+`validation-0006` and `validation-1702` each ask for a code that is defined for something else.
+`validation-0006` builds a parentless attribute with `type="xs:integer"` and a zero-length value and
+asks for `XTTE1555`, which is the code for document-level constraints such as ID and IDREF — and
+nothing there validates a document node; the code for a constructed attribute invalid against its
+`type` is `XTTE1540`. `validation-1702` runs its stylesheet with `validation="lax"` and asks for
+`XTTE1510`, whose own definition begins "If the `validation` attribute ... has the effective value
+strict"; the lax code is `XTTE1515`. It is the strict test beside it with one parameter changed and
+the expected code left behind.
 
-One failure in `decl/package` is not of that kind. `package-200` asks for `XTSE3000` where
-`use-package-291` to `294` ask for `XTSE0020` on the same shape — an unreadable `package-version` range
-on an `xsl:use-package` naming a package that is there — so answering the one means failing the four.
-That is a question about which code the specification means rather than a mistake in a file, and it is
-settled the way the four have it. See *Which error an unreadable version range is* and *Where a
-function's arity belongs* in the conformance notes.
+The corrections are kept here as [`suite-corrections.patch`](suite-corrections.patch), which `git apply`
+takes from the root of a clone of the suite. With it all five tests raise the code they were written for
+and the 3.0 run goes from 7,911 to **7,914**, the schema-aware run from 8,480 to **8,485**. It is checked
+in rather than applied: every figure in this document is measured against the suite as published, and the
+patch is there to be offered upstream rather than kept as a local advantage.
+
+A sixth failure is not in the patch, and is not really the suite's fault. `validation-0201` compares
+the serialized result against a file, character for character, and that file records one processor's
+indentation — three spaces per level, and the document element on the same line as the XML declaration.
+The Serialization specification says a serializer MAY add whitespace and never says how much. The
+catalog's own documentation for `assert-serialization` says drivers "are free to ignore differences in
+the serialization that are known to be irrelevant"; this one does not. Of the 104 test cases that assert
+a serialization, it is the only one where comparing exactly costs a pass.
+
+`package-200`, the one failure left in `decl/package`, is a third kind of thing again. It asks for
+`XTSE3000` where `use-package-291` to `294` ask for `XTSE0020` on the same shape — an unreadable
+`package-version` range on an `xsl:use-package` naming a package that is there — so answering the one
+means failing the four. That is a question about which code the specification means rather than a mistake
+in a file, and it is settled the way the four have it. See *Which error an unreadable version range is*
+and *Where a function's arity belongs* in the conformance notes.
 
 ## Where one module ends and another begins
 

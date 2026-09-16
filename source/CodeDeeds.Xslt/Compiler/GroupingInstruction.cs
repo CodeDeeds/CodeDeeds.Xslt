@@ -963,12 +963,12 @@ namespace CodeDeeds.Xslt.Compiler
                         && principal is OutputWriter claimed)
                     {
                         SequenceCaptureTarget capture = new SequenceCaptureTarget();
-                        WriteBody(capture, ref context, runtime);
+                        WriteBody(capture, settings, ref context, runtime);
                         claimed.WriteSerialized(Serializer.Text(XdmSequence.Items(capture.Finish()), settings));
                     }
                     else
                     {
-                        WriteBody(principal, ref context, runtime);
+                        WriteBody(principal, settings, ref context, runtime);
                     }
 
                     runtime.ReleasePrincipalResult();
@@ -984,7 +984,7 @@ namespace CodeDeeds.Xslt.Compiler
                 if (runtime.Results is TransformResults collected)
                 {
                     TransformDestination gathered = collected.Open(resolved, settings);
-                    WriteBody(gathered.Target, ref context, runtime);
+                    WriteBody(gathered.Target, settings, ref context, runtime);
                     collected.Close(gathered);
                     return;
                 }
@@ -1028,18 +1028,19 @@ namespace CodeDeeds.Xslt.Compiler
             if (settings.Method is OutputMethod.Json or OutputMethod.Adaptive)
             {
                 SequenceCaptureTarget capture = new SequenceCaptureTarget();
-                WriteBody(capture, ref context, runtime);
+                WriteBody(capture, settings, ref context, runtime);
                 writer.Write(Serializer.Text(XdmSequence.Items(capture.Finish()), settings));
                 return;
             }
 
             OutputWriter output = new OutputWriter(writer, settings) { DeclaresWhenEmpty = true };
-            WriteBody(output, ref context, runtime);
+            WriteBody(output, settings, ref context, runtime);
             output.Flush();
         }
 
         /// <summary>Runs the body against a target, restoring the previous output whatever happens.</summary>
-        private void WriteBody(OutputTarget output, ref DynamicContext context, XsltRuntime runtime)
+        private void WriteBody(
+            OutputTarget output, OutputSettings settings, ref DynamicContext context, XsltRuntime runtime)
         {
             OutputTarget previous = runtime.Output;
             runtime.Output = output;
@@ -1048,7 +1049,7 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 if (m_validate)
                 {
-                    WriteValidatedBody(output, ref context, runtime);
+                    WriteValidatedBody(output, settings, ref context, runtime);
                 }
                 else
                 {
@@ -1071,13 +1072,19 @@ namespace CodeDeeds.Xslt.Compiler
         /// scope, and then writes it out. The serialized bytes do not depend on the type annotations, so
         /// what validation is for here is the error it raises on an invalid document.
         /// </summary>
-        private void WriteValidatedBody(OutputTarget output, ref DynamicContext context, XsltRuntime runtime)
+        private void WriteValidatedBody(
+            OutputTarget output, OutputSettings settings, ref DynamicContext context, XsltRuntime runtime)
         {
             SchemaComponents schemas = runtime.Schemas
                 ?? throw XsltErrors.Error(
                     XsltErrorCode.XTSE1660, "Validation was asked for, but the stylesheet imported no schema.");
 
-            ResultTreeBuilder builder = new ResultTreeBuilder();
+            // §25.1: validation "is applied to the document node produced as the result of sequence
+            // normalization", and §2.3.6.1 says what that process does — it reads one serialization
+            // parameter, item-separator, and puts its value between every pair of items. So the tree
+            // validated here is built with the separators in it, the specification saying outright that
+            // "an inappropriate choice of item-separator may cause the result to become invalid".
+            ResultTreeBuilder builder = new ResultTreeBuilder { NormalizedItemSeparator = settings.ItemSeparator };
             runtime.Output = builder;
 
             try
@@ -1098,9 +1105,22 @@ namespace CodeDeeds.Xslt.Compiler
 
             XdmTree annotated = built.WithTypeAnnotations(overlay);
 
-            for (int child = annotated.FirstChildOf(XdmTree.RootNode); child >= 0; child = annotated.NextSiblingOf(child))
+            // The separators are text nodes of this tree now, so the serializer must not put its own
+            // between the items it is handed as well.
+            bool separating = output.SuspendItemSeparation();
+
+            try
             {
-                NodeCopier.CopyDeep(annotated, child, output, runtime: runtime);
+                for (int child = annotated.FirstChildOf(XdmTree.RootNode);
+                    child >= 0;
+                    child = annotated.NextSiblingOf(child))
+                {
+                    NodeCopier.CopyDeep(annotated, child, output, runtime: runtime);
+                }
+            }
+            finally
+            {
+                output.ResumeItemSeparation(separating);
             }
         }
     }

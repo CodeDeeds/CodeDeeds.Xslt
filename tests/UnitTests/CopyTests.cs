@@ -192,5 +192,34 @@ namespace CodeDeeds.Xslt.UnitTests
                 "<out>&lt;?xml version=\"1.0\" encoding=\"UTF-8\"?&gt;&lt;bar/&gt;</out>",
                 Run(Root("<xsl:value-of select=\"serialize(/r/bar, map{'omit-xml-declaration': false()})\"/>"), "<r><bar/></r>"));
         }
+        [TestMethod]
+        public void CopyingAnAtomicValueLeavesItAsItIs()
+        {
+            // §11.9.2: "If the item is an atomic value or a function item, the value is appended to the
+            // result sequence, as with xsl:sequence." There is nothing to copy about a value, and turning
+            // it into a string is not copying it: the variable below is declared xs:integer and gets one.
+            Assert.AreEqual(
+                "<out>22</out>",
+                Run(
+                    "<xsl:variable name=\"v\" as=\"xs:integer\"><xsl:copy-of select=\"21\"/></xsl:variable>"
+                    + Root("<xsl:value-of select=\"$v + 1\"/>")));
+
+            // A sequence of mixed items keeps each item's own type, the nodes being copied and the rest
+            // passed along.
+            Assert.AreEqual(
+                "<out>int str date node</out>",
+                Run(
+                    "<xsl:variable name=\"v\" as=\"item()*\">"
+                    + "<xsl:copy-of select=\"(1, 'x', xs:date('2010-01-25'), /r)\"/></xsl:variable>"
+                    + Root(
+                        "<xsl:value-of select=\"for $i in $v return "
+                        + "if ($i instance of xs:integer) then 'int' "
+                        + "else if ($i instance of xs:date) then 'date' "
+                        + "else if ($i instance of xs:string) then 'str' else 'node'\"/>")));
+
+            // Where a tree is being built there is nowhere for a value to go but into text, which is what
+            // it has always done and is still what the specification's complex content rules say.
+            Assert.AreEqual("<out>21</out>", Run(Root("<xsl:copy-of select=\"21\"/>")));
+        }
     }
 }

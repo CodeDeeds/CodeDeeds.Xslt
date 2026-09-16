@@ -207,6 +207,23 @@ namespace CodeDeeds.Xslt.Runtime
         private readonly CharacterMap? m_characterMap;
         private readonly List<bool> m_elementHasText = new();
         private readonly List<bool> m_elementHasChildElements = new();
+
+        /// <summary>
+        /// Whether the whitespace inside each open element is the document's own, so that none of this
+        /// engine's may be added to it.
+        /// </summary>
+        /// <remarks>
+        /// Indentation is normally decided from what has been written so far: an element that has held
+        /// text already is left alone. That is as much as a serializer streaming a result can know, and it
+        /// is one child too late for <c>&lt;p&gt;&lt;span&gt;Date: &lt;/span&gt;29 May 1917&lt;/p&gt;</c>,
+        /// where the text arrives after the first element. A validated result says it in advance: the
+        /// Serialization specification (§5.1.4) permits whitespace in the immediate content of an element
+        /// annotated <c>xs:untyped</c> or <c>xs:anyType</c> with element children, and of one whose content
+        /// model is element-only, and says it SHOULD NOT be added in the immediate content of an element
+        /// annotated with anything else whose content model is mixed — because there the whitespace would
+        /// be part of what the element says.
+        /// </remarks>
+        private readonly List<bool> m_elementKeepsSpace = new();
         private bool m_prologWritten;
 
         /// <summary>
@@ -214,7 +231,7 @@ namespace CodeDeeds.Xslt.Runtime
         /// result — a comment beside a number as much as two numbers — rather than only between adjacent
         /// atomic values, which is what a tree does with a single space.
         /// </summary>
-        private readonly bool m_sequence;
+        private bool m_sequence;
 
         /// <summary>How many top-level items a sequence result has had written.</summary>
         private int m_itemsWritten;
@@ -358,6 +375,7 @@ namespace CodeDeeds.Xslt.Runtime
                 m_elementNamespaces.Add(namespaceUri);
                 m_elementHasText.Add(false);
                 m_elementHasChildElements.Add(false);
+                m_elementKeepsSpace.Add(false);
                 m_namespaceMarks.Add(m_namespaces.Count);
                 m_elementNamespaceState.Add(default);
                 return;
@@ -400,6 +418,7 @@ namespace CodeDeeds.Xslt.Runtime
             m_elementNamespaces.Add(namespaceUri);
             m_elementHasText.Add(false);
             m_elementHasChildElements.Add(false);
+            m_elementKeepsSpace.Add(false);
             m_startTagOpen = true;
 
             if (m_settings.IncludeContentType && IsHtmlHead(namespaceUri, localName))
@@ -485,6 +504,54 @@ namespace CodeDeeds.Xslt.Runtime
         /// Marks the start of a top-level item of a sequence result, writing the item separator before every
         /// one but the first. A tree result has no items to separate, and nothing happens.
         /// </summary>
+        /// <inheritdoc/>
+        /// <remarks>
+        /// The serializer keeps none of the annotation — the bytes it writes do not depend on it — but it
+        /// does read what the type says about whitespace, which is the one thing about an element's type
+        /// that a serializer has to know. See <see cref="m_elementKeepsSpace"/>.
+        /// </remarks>
+        internal override void AnnotateElement(ushort typeId, bool nilled)
+        {
+            if (m_elementKeepsSpace.Count > 0)
+            {
+                m_elementKeepsSpace[^1] = !AdmitsAddedSpace(typeId);
+            }
+        }
+
+        /// <summary>Whether whitespace may be added in the immediate content of an element of a type.</summary>
+        /// <param name="typeId">The type the element was annotated with, or 0 for none.</param>
+        private static bool AdmitsAddedSpace(ushort typeId)
+        {
+            if (XPath.XdmSchemaType.ById(typeId) is not XPath.XdmSchemaType type)
+            {
+                // No annotation, which is xs:untyped: whitespace between its element children is this
+                // engine's to add, as it is for every unvalidated result.
+                return true;
+            }
+
+            if (type.IsBuiltIn && type.LocalName is "untyped" or "anyType")
+            {
+                return true;
+            }
+
+            return type.Content == System.Xml.Schema.XmlSchemaContentType.ElementOnly;
+        }
+
+        /// <inheritdoc/>
+        internal override bool SuspendItemSeparation()
+        {
+            bool separating = m_sequence;
+            m_sequence = false;
+
+            return separating;
+        }
+
+        /// <inheritdoc/>
+        internal override void ResumeItemSeparation(bool separating)
+        {
+            m_sequence = separating;
+        }
+
         private void BeginItem()
         {
             if (!m_sequence || m_elementNames.Count != 0)
@@ -699,7 +766,7 @@ namespace CodeDeeds.Xslt.Runtime
                 return;
             }
 
-            if (m_elementHasText[^1])
+            if (m_elementHasText[^1] || m_elementKeepsSpace[^1])
             {
                 return;
             }
@@ -1371,7 +1438,7 @@ namespace CodeDeeds.Xslt.Runtime
             string localName = m_elementLocalNames[^1];
             string namespaceUri = m_elementNamespaces[^1];
             bool hadChildElements = m_elementHasChildElements[^1];
-            bool hadText = m_elementHasText[^1];
+            bool hadText = m_elementHasText[^1] || m_elementKeepsSpace[^1];
 
             if (m_suppressDepth == m_elementNames.Count)
             {
@@ -1383,6 +1450,7 @@ namespace CodeDeeds.Xslt.Runtime
             m_elementNamespaces.RemoveAt(m_elementNamespaces.Count - 1);
             m_elementHasChildElements.RemoveAt(m_elementHasChildElements.Count - 1);
             m_elementHasText.RemoveAt(m_elementHasText.Count - 1);
+            m_elementKeepsSpace.RemoveAt(m_elementKeepsSpace.Count - 1);
 
             m_elementNamespaceState.RemoveAt(m_elementNamespaceState.Count - 1);
 

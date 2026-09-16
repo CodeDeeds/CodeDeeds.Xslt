@@ -6642,7 +6642,7 @@ mistakes in the suite's own files, and the third is a disagreement about which c
 means. Saying so a third time would have added nothing, so this round wrote the correction down instead.
 
 `tests/W3CConformanceTests/suite-corrections.patch` is a diff against the published suite. Two of its
-three corrections are in `decl/package`. It takes the `#0` off `xsl:function`'s `name` in
+corrections are in `decl/package`. It takes the `#0` off `xsl:function`'s `name` in
 `package-021err-used.xsl`, where a function's arity comes from its `xsl:param` children and never from
 its name; and it moves the `#0` from `xsl:accept`'s `component` to the name in `names` in
 `package-022err-includeC.xsl`, which is where erratum E36 meant to put it — the shape the unbroken tests
@@ -6651,12 +6651,13 @@ anywhere else in the 14,601 test cases, `package-021`
 and `package-022` were corrected again on 8 September 2020 and are right, and the erratum was walked back
 across `decl/accept` and `decl/expose` on 5 March 2023 while these two files were touched by neither pass.
 
-Applied to a clone of the suite, both tests raise the `XTSE3050` they were written for. The third
+Applied to a clone of the suite, both tests raise the `XTSE3050` they were written for. A third
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
-as* — and with all three the 3.0 run reads **7,914 of 7,924**. The patch is not applied here, and the
-figures in these notes do not include it. A measurement is worth something because of what it is taken
-against, and a patch kept in the repository and offered upstream is worth more than three tests counted
-differently at home.
+as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
+validation settles about a constructed node*. With all five the 3.0 run reads **7,914 of 7,924** and the
+schema-aware run **8,485 of 8,526**. The patch is not applied here, and the figures in these notes do not
+include it. A measurement is worth something because of what it is taken against, and a patch kept in the
+repository and offered upstream is worth more than five tests counted differently at home.
 
 `package-200` is deliberately not in it. It asks for `XTSE3000` where `use-package-291` to `294` ask for
 `XTSE0020` on the same shape, so one of the five is wrong about a rule rather than about a character — see
@@ -6721,6 +6722,100 @@ Nothing moves on the suite as it is published: 7,911 of 7,924 at 3.0 on both bac
 identical test for test. The two changes pay off only together and only against the corrected file: with
 the code alone the test cannot start, and with the correction alone it raises `XTTE0570`. Four new unit
 tests and one amended — it had written down the old code — for 2,792 in all.
+
+### What validation settles about a constructed node
+
+`attr/validation` had eleven failures on the schema-aware run, and no two of them were the same thing.
+Eight are gone; of the three left, two are the suite's and one is not a question of conformance at all.
+
+**A copy of something that is not a node.** `validation-0203` and `0206` write
+`<xsl:variable as="xs:date"><xsl:copy-of select="$d"/></xsl:variable>` and got a string back. §11.9.2:
+"If the item is an atomic value or a function item, the value is appended to the result sequence, as with
+`xsl:sequence`", and the `type` and `validation` attributes "are ignored when copying an item that is not
+an element, attribute or document node". There is nothing to copy about a value; this engine was writing
+its string value instead of passing it on. The instruction now hands the item to the output whole wherever
+the output can hold one, and falls back on the string only where a tree is being built and text is all a
+node's content can take. Neither test is really about schemas — they import one to have something for the
+`validation` attribute to be ignored *against*.
+
+**`xs:untypedAtomic` as a type to validate against.** No schema defines it, so looking it up finds
+nothing, and `validation-0108` and `0109` are about the rule the specification writes for it by name
+(§25.4.1): validating against it "is the same as specifying `[xsl:]type="xs:string"` except that when
+validation succeeds, the returned element or attribute has a type annotation of `xs:untypedAtomic`.
+Validation fails in the case of an element with element children." The attribute half already worked. An
+element is now annotated as the rule says, and one with element children is `XTTE1540`, which is the point
+of the sentence: an element with element children has no simple content to be a value of anything.
+
+**`xsi:nil`.** The validator was being told an element's `xsi:type` and not its `xsi:nil`, and the two are
+the same kind of thing — a property of the element that steers validation rather than content to be
+validated. Without it `<count xsi:nil="true"/>`, declared `nillable` and typed `xs:integer`, was refused
+for holding nothing at all, which is the one thing `xsi:nil` says it may do. `validation-1202` and `1204`
+were failing on the error rather than on the answer.
+
+**What a shallow copy keeps.** With that out of the way `validation-1204` disagreed about a second thing,
+and the specification is unusually explicit about it. For `xsl:copy` under `validation="preserve"`, where
+the node copied is an element, "the copied element will have a type annotation of `xs:anyType` (because
+this instruction does not copy the content of the element, it would be wrong to assume that the type is
+unchanged)", and its `nilled`, `is-id` and `is-idrefs` are handled as `xsl:element`'s are, which is to say
+set to false. This engine was keeping the original's annotation and its nilling. `xsl:copy-of`, which does
+copy the content, keeps both, which is why `1202` and `1204` ask for different answers from the same
+source. The same rule is the fifth answer `import-schema-076` asks for.
+
+**The item separator is part of sequence normalization, not only of serializing.** `validation-0214`
+writes a comment, an `html` and a comment into an `xsl:result-document` that is validated, with
+`item-separator="+++"` on the `xsl:output`, and asks for `XTTE1550`. §25.1 says validation "is applied to
+the document node produced as the result of sequence normalization", §2.3.6.1 says that process reads one
+serialization parameter and it is `item-separator`, and the note beside the rule says outright that "an
+inappropriate choice of item-separator may cause the result to become invalid". So the separators are text
+nodes of the tree before it is validated, and text among a document node's children is what `XTTE1550`
+refuses. This engine inserted them at the serializer and the validated tree never saw them.
+
+**What the serializer may add inside an element it knows the type of.** `validation-0202` asks that the
+first text node of a `<p>` be the date in it. This engine was writing
+`<p>⏎    <span class="label">Date: </span>29 May 1917</p>` — indentation before the first child,
+because a serializer that streams decides from what it has written so far, and the text that makes the
+element mixed arrives one child too late. A validated result says it in advance. Serialization §5.1.4
+permits added whitespace in the immediate content of an element annotated `xs:untyped` or `xs:anyType`
+that has element children, and of one whose content model is element-only, and says it SHOULD NOT be added
+in the immediate content of an element annotated with anything else whose content model is mixed — with a
+note that reads "It is usually not safe to indent document types that include elements with mixed
+content." The serializer now reads the annotation for that one question and nothing else. An unvalidated
+result is untyped and indents as it always did.
+
+Two of the three left are the suite's, and both are now in the correction patch — see *The correction the
+suite needs*, which covers five tests and takes the 3.0 run to **7,914 of 7,924** and the schema-aware run
+to **8,485 of 8,526** when applied.
+
+- `validation-0006` builds a parentless attribute with `type="xs:integer"` and a zero-length value and
+  asks for `XTTE1555`. That is the code for "when validating a document node, document-level constraints
+  (such as ID/IDREF constraints) are not satisfied", and nothing here validates a document node. The code
+  is `XTTE1540`, whose own note in the specification gives
+  `<xsl:attribute name="dob" type="xs:date">1999-02-29</xsl:attribute>` as the example. Every other
+  `XTTE1555` expectation in the suite is a duplicate ID, a dangling IDREF or a broken identity constraint.
+- `validation-1702` runs `validation-1701.xsl` with `validation="lax"` and asks for `XTTE1510`, which
+  begins "If the `validation` attribute ... has the effective value **strict**". The lax code is
+  `XTTE1515`. It is `validation-1701` with one parameter changed and the expected code left behind: 1701
+  is strict and right, 1703 and 1704 are preserve and strip and expect a result, and all four were made
+  on one day.
+
+The third is not a conformance question. `validation-0201` compares the serialized result against
+`schvalid001.out`, character for character, and that file records one processor's indentation: three
+spaces per level, and the document element on the same line as the XML declaration. Both are choices the
+Serialization specification leaves open — it says the serializer MAY add whitespace and never says how
+much — and this engine indents by two and starts the element on its own line. The suite's own catalog
+documentation says of this assertion that "in principle, the serialization must match exactly" but that
+test drivers "are free to ignore differences in the serialization that are known to be irrelevant (that
+is, capable of being produced by a conformant implementation", and adds that the assertion "should not be
+used except where the purpose of the test is to test the serializer". This driver compares exactly. 104
+test cases in the suite assert a serialization, and this is the only one where comparing exactly costs a
+pass — the two others that fail, `result-document-0286` and `0287`, never reach the serializer. Relaxing
+the comparison for one test that is measuring indent width would cost more than it is worth.
+
+The schema-aware run goes from 8,472 of 8,526 to **8,480**, the same on both backends, and `attr/validation`
+from eleven failures to three. Nothing moves elsewhere: 7,911 of 7,924 at 3.0 on both backends, 5,602 of
+5,623 at 2.0, 18,268 and 14,553 on the two XPath runs, with those failure sets identical test for test — the
+copy and separator changes are version-independent and the rest are about annotations nothing else carries.
+Seven new unit tests, 2,799 in all.
 
 ### Which results the suite asks for and does not get
 
