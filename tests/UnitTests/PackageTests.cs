@@ -456,5 +456,75 @@ namespace CodeDeeds.Xslt.UnitTests
                 Assert.ThrowsExactly<XsltException>(() => Run(Twice(HideAll, HideAll), files)).Message,
                 "$v");
         }
+
+        [TestMethod]
+        public void TwoPackagesOverridingOneLibraryEachSeeTheirOwn()
+        {
+            // The diamond: D declares a component, B and C each use D and override it differently, and A
+            // uses both B and C. B's own code has to see B's override and C's C's, which means the two
+            // routes hold their own copy of what D declared rather than sharing one.
+            PlainLibrary files = new PlainLibrary()
+                .Add("urn:d", Package("urn:d", "<xsl:variable name=\"v\" select=\"'ddddd'\" visibility=\"public\"/>"))
+                .Add(
+                    "urn:b",
+                    Package(
+                        "urn:b",
+                        "<xsl:use-package name=\"urn:d\"><xsl:override>"
+                        + "<xsl:variable name=\"v\" select=\"'bbbbb'\" visibility=\"public\"/>"
+                        + "</xsl:override></xsl:use-package>"
+                        + "<xsl:template name=\"b\" visibility=\"public\">"
+                        + "<b><xsl:value-of select=\"$v\"/></b></xsl:template>"))
+                .Add(
+                    "urn:c",
+                    Package(
+                        "urn:c",
+                        "<xsl:use-package name=\"urn:d\"><xsl:override>"
+                        + "<xsl:variable name=\"v\" select=\"'ccccc'\" visibility=\"private\"/>"
+                        + "</xsl:override></xsl:use-package>"
+                        + "<xsl:template name=\"c\" visibility=\"public\">"
+                        + "<c><xsl:value-of select=\"$v\"/></c></xsl:template>"));
+
+            Assert.AreEqual(
+                "<out><bb><b>bbbbb</b></bb><cc><c>ccccc</c></cc></out>",
+                Run(Diamond(), files));
+        }
+
+        [TestMethod]
+        public void TwoVersionsOfOneLibraryAreTwoLibraries()
+        {
+            // The same diamond by version rather than by override: B takes 1.0.* of a library and C takes
+            // 2.0.*, and the two versions declare the same name differently. A package is its name and its
+            // version, so these are two packages and each route reads its own.
+            VersionedLibrary files = new VersionedLibrary()
+                .Add("urn:d", "1.0.1", Package("urn:d", Declares("bbbbb"), "1.0.1"))
+                .Add("urn:d", "2.0.1", Package("urn:d", Declares("ccccc"), "2.0.1"))
+                .Add("urn:b", null, Package("urn:b", Takes("1.0.*") + Writes("b")))
+                .Add("urn:c", null, Package("urn:c", Takes("2.0.*") + Writes("c")));
+
+            Assert.AreEqual(
+                "<out><bb><b>bbbbb</b></bb><cc><c>ccccc</c></cc></out>",
+                Run(Diamond(), files));
+        }
+
+        /// <summary>A package declaring the one public variable these two tests are about.</summary>
+        private static string Declares(string value) =>
+            $"<xsl:variable name=\"v\" select=\"'{value}'\" visibility=\"public\"/>";
+
+        /// <summary>An <c>xsl:use-package</c> naming the library at a version range.</summary>
+        private static string Takes(string range) =>
+            $"<xsl:use-package name=\"urn:d\" package-version=\"{range}\"/>";
+
+        /// <summary>A public template writing what the package holds the variable as.</summary>
+        private static string Writes(string name) =>
+            $"<xsl:template name=\"{name}\" visibility=\"public\">"
+            + $"<{name}><xsl:value-of select=\"$v\"/></{name}></xsl:template>";
+
+        /// <summary>The package at the top of the diamond, which calls into both routes.</summary>
+        private static string Diamond() => Package(
+            "urn:main",
+            "<xsl:use-package name=\"urn:b\"/><xsl:use-package name=\"urn:c\"/>"
+            + "<xsl:template name=\"main\" visibility=\"public\"><out>"
+            + "<bb><xsl:call-template name=\"b\"/></bb>"
+            + "<cc><xsl:call-template name=\"c\"/></cc></out></xsl:template>");
     }
 }

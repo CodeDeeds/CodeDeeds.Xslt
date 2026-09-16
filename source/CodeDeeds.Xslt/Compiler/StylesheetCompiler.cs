@@ -570,6 +570,16 @@ namespace CodeDeeds.Xslt.Compiler
                     // below, which are about globals and cannot be about a local declaration.
                     m_scope[i].Declaration?.MarkRead();
 
+                    // A global is read as the package this code belongs to holds it. The scope above
+                    // answers by name alone and gives the last declaration of it anywhere, which is the
+                    // same answer until one library is overridden by two packages — and then each of them
+                    // has to read its own override rather than whichever was declared last.
+                    if (isGlobal
+                        && GlobalsByPackage().TryGetValue((CurrentPackage, name), out int held))
+                    {
+                        slot = held;
+                    }
+
                     // A global variable is not in scope within its own declaration (XSLT 3.0 §9.7). The
                     // reference is to a variable that has not been declared where it stands, which is
                     // XPST0008 — so an inline function bound to a global cannot recurse by naming the
@@ -2774,6 +2784,7 @@ namespace CodeDeeds.Xslt.Compiler
             }
 
             uses.Add((naming, used));
+            m_globalOfPackage = null;
 
             for (int child = FirstIncludedChild(usePackage); child >= 0; child = NextIncludedSibling(child))
             {
@@ -3526,6 +3537,7 @@ namespace CodeDeeds.Xslt.Compiler
 
             m_globals.Add(global);
             m_globalElements.Add(source);
+            m_globalOfPackage = null;
 
             if (IsOverriding(element))
             {
@@ -6175,6 +6187,115 @@ namespace CodeDeeds.Xslt.Compiler
 
         /// <summary>The package whose module is being compiled.</summary>
         internal int CurrentPackage => PackageOf(m_tree);
+
+        /// <summary>Which slot each package holds a global of a given name in, or null before it is built.</summary>
+        /// <remarks>
+        /// Dropped whenever a global is declared or a package is named, which are the two things that can
+        /// change an answer in it. Built again at the next reference, which is when it is next wanted.
+        /// </remarks>
+        private Dictionary<(int Package, ExpandedName Name), int>? m_globalOfPackage;
+
+        /// <summary>
+        /// Which slot each package holds a global of each name in.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A global reference is resolved by name against one flat scope, later declarations shadowing
+        /// earlier ones, which is what import precedence asks for and is the whole answer while there is
+        /// one package. It stops being the answer where a component is overridden twice: a package that
+        /// uses a library and overrides part of it holds <em>its own</em> version, and its own code has to
+        /// read that one and not whatever the next package to override the same name happened to say.
+        /// </para>
+        /// <para>
+        /// So a reference is resolved against the package the code belongs to, where that package holds a
+        /// declaration of the name. The used package's own code is the one case where the answer is not its
+        /// own declaration: an override replaces a component for everyone, the used package included, so
+        /// where exactly one package overrode it that is what the used package reads too. Where two did, a
+        /// component of the used package would have to be bound afresh for each route through it, which
+        /// this engine does not do, and it reads its own declaration.
+        /// </para>
+        /// <para>
+        /// A package that does not declare the name holds whatever it took from a package it uses, through
+        /// however many namings it takes to reach a declaration. A package can hold only one of a name —
+        /// two would be <c>XTSE3050</c> — so the first naming that reaches one is the answer. Whether it
+        /// may be referred to at all is a separate question, asked afterwards by
+        /// <see cref="GlobalIsVisible"/>; this only says which of the declarations is the one meant.
+        /// </para>
+        /// </remarks>
+        private Dictionary<(int Package, ExpandedName Name), int> GlobalsByPackage()
+        {
+            if (m_globalOfPackage is not null)
+            {
+                return m_globalOfPackage;
+            }
+
+            Dictionary<(int, ExpandedName), int> byPackage = new();
+            Dictionary<(int, ExpandedName), List<int>> overrides = new();
+            HashSet<ExpandedName> names = new();
+
+            for (int i = 0; i < m_globals.Count; i++)
+            {
+                // The later declaration of a name in one package wins, as the backwards scope search has it.
+                byPackage[(PackageOf(m_globalElements[i].Tree), m_globals[i].Name)] = m_globals[i].Slot;
+                names.Add(m_globals[i].Name);
+
+                if (m_overrideOf.TryGetValue(m_globalElements[i], out ModuleElement usePackage)
+                    && m_usePackageIds.TryGetValue(usePackage, out int used))
+                {
+                    (int, ExpandedName) key = (used, m_globals[i].Name);
+
+                    if (!overrides.TryGetValue(key, out List<int>? slots))
+                    {
+                        overrides[key] = slots = new List<int>();
+                    }
+
+                    slots.Add(m_globals[i].Slot);
+                }
+            }
+
+            foreach (((int used, ExpandedName name), List<int> slots) in overrides)
+            {
+                if (slots.Count == 1)
+                {
+                    byPackage[(used, name)] = slots[0];
+                }
+            }
+
+            int? Held(int package, ExpandedName name, int depth)
+            {
+                if (byPackage.TryGetValue((package, name), out int already))
+                {
+                    return already;
+                }
+
+                if (depth > m_packageCount
+                    || !m_uses.TryGetValue(package, out List<(ModuleElement Use, int Used)>? namings))
+                {
+                    return null;
+                }
+
+                foreach ((ModuleElement _, int used) in namings)
+                {
+                    if (Held(used, name, depth + 1) is int found)
+                    {
+                        byPackage[(package, name)] = found;
+                        return found;
+                    }
+                }
+
+                return null;
+            }
+
+            for (int package = 0; package <= m_packageCount; package++)
+            {
+                foreach (ExpandedName name in names)
+                {
+                    Held(package, name, 0);
+                }
+            }
+
+            return m_globalOfPackage = byPackage;
+        }
 
         private readonly Dictionary<int, Dictionary<(ExpandedName Name, int Arity), UserFunction>>
             m_functionsSeenByPackage = new();

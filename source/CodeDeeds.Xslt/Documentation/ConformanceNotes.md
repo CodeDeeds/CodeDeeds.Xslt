@@ -6494,13 +6494,51 @@ twice had been doubling every acceptance it carries.
 
 This is still not the diamond of `use-package-175` and `176`, which is a different shape: a package used by
 two others that each override it differently, where each route needs its own copy of the components rather
-than its own view of them. Those two stay where they were.
+than its own view of them — see *Which package a name is read in*, next.
 
 Nothing moves here either, and for the same reason: the shape has no test but the two the suite broke. It
 is fourteen call sites into the most tangled part of the compiler, so what it is measured against is that
 nothing else moved — 7,907 of 7,924 on the 3.0 run, 5,600 of 5,623 on the 2.0 one and 8,468 of 8,526
 schema-aware, the two backends agreeing test for test, and the two XPath runs where they were at 18,268 and
 14,553. One more unit test, 2,784 in all.
+
+### Which package a name is read in
+
+`use-package-175` and `176` are one shape twice. A library **D** is reached by two routes: **B** uses it and
+overrides one of its variables, **C** uses it and overrides the same variable differently, and **A** uses B
+and C and calls into both. `B`'s own template has to read B's override and `C`'s C's. In `176` the two
+routes take two *versions* of the library instead, which are two packages because a package is its name and
+its version, and each declares the variable differently.
+
+Both came out the same way here, and both wrong: whichever declaration was read last won for everybody.
+A global reference was resolved by name against one flat scope, later declarations shadowing earlier ones.
+That is exactly what import precedence asks for, and it is the whole answer while there is one package: a
+module importing another and redeclaring a global means the redeclaration, wherever the reference stands.
+It stops being the answer the moment two packages hold the same name and mean different things by it.
+
+A reference is now resolved against the package the code belongs to. What each package holds under each
+name is worked out once from the declarations: what the package declares itself, an `xsl:override`
+included — an override is a declaration of the package that wrote it — and failing that, what it took from
+a package it uses, through however many namings it takes to reach a declaration. A package can hold only
+one of a name, two being `XTSE3050`, so the first naming that reaches one is the answer. Whether the name
+may be referred to at all is a separate question and is asked where it always was.
+
+The second half is what `176` needed and `175` did not. Neither B nor C declares the variable there: each
+took it from a different version of the library, and the answer is in the naming rather than in anything
+either package wrote.
+
+One case is not the package's own declaration. An override replaces a component for everyone, the used
+package included: a body in D that read the original reads the override from then on, which is what the
+specification says and what this engine already did by giving the override the original's slot. So where
+exactly one package overrode a component, D reads that override too. Where two did, a component of D would
+have to be bound afresh for each route through it — the same body meaning B's variable when B called it
+and C's when C did — and this engine binds a body once. D reads its own declaration there, which is the
+answer that tells nobody a lie about which override they are getting.
+
+The 3.0 run goes from 7,907 of 7,924 to **7,909** and the schema-aware run from 8,468 of 8,526 to
+**8,470**, which are the same two tests read twice; `decl/use-package` has no failures left on either. The
+2.0 run is unmoved at 5,600 of 5,623, the XPath runs at 18,268 and 14,553, the two backends agree test for
+test, and nothing that was passing fails. Two new unit tests, 2,786 in all.
 
 ### Which results the suite asks for and does not get
 
