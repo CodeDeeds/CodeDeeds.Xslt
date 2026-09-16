@@ -422,5 +422,39 @@ namespace CodeDeeds.Xslt.UnitTests
                         + "<xsl:accept component=\"variable\" names=\"v\" visibility=\"hidden\"/>"),
                     files));
         }
+
+        [TestMethod]
+        public void AReferenceResolvesThroughTheNamingThatKeptTheComponent()
+        {
+            // The other half of the same rule. Which naming a reference means is settled per naming too:
+            // one that hides the component says nothing about the one that took it, whichever was written
+            // first. Read as one set of acceptances per used package, the later claim won and a reference
+            // to a component the first naming had taken was out of scope.
+            PlainLibrary files = new PlainLibrary().Add(
+                "urn:lib",
+                Package(
+                    "urn:lib",
+                    "<xsl:variable name=\"v\" select=\"'one'\" visibility=\"public\"/>"
+                    + "<xsl:variable name=\"w\" select=\"'two'\" visibility=\"public\"/>"));
+
+            string Twice(string first, string second) => Package(
+                "urn:main",
+                $"<xsl:use-package name=\"urn:lib\">{first}</xsl:use-package>"
+                + $"<xsl:use-package name=\"urn:lib\">{second}</xsl:use-package>"
+                + "<xsl:template name=\"main\" visibility=\"public\">"
+                + "<out><xsl:value-of select=\"$v\"/></out></xsl:template>");
+
+            const string TakeV = "<xsl:accept component=\"variable\" names=\"v\" visibility=\"private\"/>";
+            const string HideAll = "<xsl:accept component=\"variable\" names=\"*\" visibility=\"hidden\"/>";
+
+            Assert.AreEqual("<out>one</out>", Run(Twice(TakeV, HideAll), files));
+            Assert.AreEqual("<out>one</out>", Run(Twice(HideAll, TakeV), files));
+
+            // Hidden by every naming and it is out of scope, which is the answer the merged reading gave
+            // for both orders above and is right only here.
+            StringAssert.Contains(
+                Assert.ThrowsExactly<XsltException>(() => Run(Twice(HideAll, HideAll), files)).Message,
+                "$v");
+        }
     }
 }

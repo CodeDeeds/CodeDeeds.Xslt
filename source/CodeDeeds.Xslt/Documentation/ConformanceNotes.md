@@ -6456,15 +6456,51 @@ rather than by how many times one was recorded; and a component declared in more
 attribute set in two halves, is one component, as it already is in the homonym check next to this one.
 Without either, every stylesheet that uses a package at all was refused.
 
-What is not per naming is the resolution of a reference. Where one package is named twice and a component
-is left in view by one naming and hidden by the other, a reference to it is resolved through the later
-claim rather than through the naming that kept it. That is the same merged reading, still in place where
-it decides what a name means; the check above is what decides whether the name means one thing at all.
+What was not per naming, at the end of that round, was the resolution of a reference: where one package
+was named twice and a component was left in view by one naming and hidden by the other, a reference to it
+was still resolved through the later claim rather than through the naming that kept it. The merged
+reading stayed where it decided what a name means, and the check above decided only whether the name
+meant one thing at all. That was the wrong half to leave — see *The other half of a naming*, next.
 
 Nothing moves on any run. `package-200` is the suite disagreeing with itself, the other two are stylesheets
 that do not compile, and the rule the two of them are about has no other test. It is covered by a unit test
 instead, 2,783 in all, and with the two stylesheets corrected by hand the 3.0 run goes from 7,907 of 7,924
 to 7,909. The two backends agree test for test and nothing that was passing fails.
+
+### The other half of a naming
+
+Asking per `xsl:use-package` whether a component is in view, and then asking all the namings together
+what it is, is half a rule. The half that was left decided what a reference means, which is the half a
+stylesheet notices: a package naming a library twice, taking a component in the first naming and hiding
+everything in the second, could not refer to what it had taken. The acceptances were read as one set per
+used package and the later claim won, so the hiding reached back over the taking.
+
+Both halves ask the same question now, and of the same list. What a package uses is kept as the namings
+themselves — the `xsl:use-package` element and the package it brought in — rather than as a list of
+package identities, and every question about visibility is put to one naming at a time. Where the answer
+used to be *the first used package that offers this, as all the acceptances between the two packages
+settle it*, it is now *the first naming that keeps this, as that naming's own acceptances settle it*.
+
+A naming that hides the component is still an answer, and the one to give where every naming hides it: a
+component offered to a package and turned away is not the same as one never offered, and the callers that
+ask read the two differently. So a hidden answer is remembered and given at the end rather than returned
+at once, which is the whole of what the order of the namings decides.
+
+Two smaller things fell out. The merged reader is gone, one naming's accepts being all that is ever read
+now, and the list that had been holding namings for the check alone is the same list that holds them for
+the resolution — one structure for one fact. And a naming is recorded once: this is reached again for a
+package already loaded so that a second naming keeps its own acceptances, and recording the same element
+twice had been doubling every acceptance it carries.
+
+This is still not the diamond of `use-package-175` and `176`, which is a different shape: a package used by
+two others that each override it differently, where each route needs its own copy of the components rather
+than its own view of them. Those two stay where they were.
+
+Nothing moves here either, and for the same reason: the shape has no test but the two the suite broke. It
+is fourteen call sites into the most tangled part of the compiler, so what it is measured against is that
+nothing else moved — 7,907 of 7,924 on the 3.0 run, 5,600 of 5,623 on the 2.0 one and 8,468 of 8,526
+schema-aware, the two backends agreeing test for test, and the two XPath runs where they were at 18,268 and
+14,553. One more unit test, 2,784 in all.
 
 ### Which results the suite asks for and does not get
 

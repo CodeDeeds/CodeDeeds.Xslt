@@ -106,29 +106,31 @@ namespace CodeDeeds.Xslt.Compiler
         /// <summary>The package each module was read as part of, so that a body knows whose it is.</summary>
         private readonly Dictionary<XdmTree, int> m_packageOfModule = new();
 
-        /// <summary>Which packages each package uses, directly, in the order it named them.</summary>
-        private readonly Dictionary<int, List<int>> m_uses = new();
+        /// <summary>
+        /// How each package names the packages it uses, in the order it named them: the
+        /// <c>xsl:use-package</c> element and the package that element brought in.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A package is loaded once however often it is named, and that is right about what a package
+        /// <em>is</em>: it is a thing rather than a text to be spliced in. It is not right about what a
+        /// using package <em>holds</em>. An <c>xsl:use-package</c> is a relationship, and each one carries
+        /// its own <c>xsl:accept</c> children; what the using package ends up holding is what each
+        /// relationship brought in (§3.5.2, and the resolution of the working group's bug 30389). So the
+        /// namings are kept rather than the package identities, and every question about visibility is put
+        /// to one naming at a time.
+        /// </para>
+        /// <para>
+        /// One entry per element. The list is reached again for a package already loaded, so that a second
+        /// naming of it keeps its own acceptances; reaching it twice for one element is the same reading
+        /// taken twice, and counting that as two namings would find a conflict in every stylesheet that
+        /// uses a package at all.
+        /// </para>
+        /// </remarks>
+        private readonly Dictionary<int, List<(ModuleElement Use, int Used)>> m_uses = new();
 
         /// <summary>The package each <c>xsl:use-package</c> brought in, by the element that named it.</summary>
         private readonly Dictionary<ModuleElement, int> m_usePackageIds = new();
-
-        /// <summary>
-        /// Every <c>xsl:use-package</c> element: the package it names, and the package it is written in.
-        /// </summary>
-        /// <remarks>
-        /// A package is loaded once however often it is named, and that is right for what a package
-        /// <em>is</em>; it is not right for what a using package ends up holding. Two
-        /// <c>xsl:use-package</c> elements naming one package are two relationships with that package, each
-        /// with its own <c>xsl:accept</c> children, and a component both of them leave in view is in view
-        /// twice (§3.5.2, and the resolution of the working group's bug 30389). That count is what
-        /// <see cref="CheckUsedTwice"/> asks for, and it cannot be asked of a list of package identities.
-        /// <para>
-        /// Keyed by the element, because one is recorded more than once: a naming of a package already
-        /// loaded is recorded again so that its own acceptances are kept, and counting those as two
-        /// namings would find a conflict in every stylesheet that uses a package at all.
-        /// </para>
-        /// </remarks>
-        private readonly Dictionary<ModuleElement, (int Used, int Using)> m_packageUses = new();
 
         /// <summary>Every declaration spliced in from an <c>xsl:override</c>, and the <c>xsl:use-package</c> it stood in.</summary>
         private readonly Dictionary<ModuleElement, ModuleElement> m_overrideOf = new();
@@ -2753,15 +2755,25 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="used">The package it names.</param>
         private void RecordUse(int usePackage, int used)
         {
-            m_usePackageIds[new ModuleElement(m_tree, usePackage)] = used;
-            m_packageUses[new ModuleElement(m_tree, usePackage)] = (used, m_package);
+            ModuleElement naming = new ModuleElement(m_tree, usePackage);
+            m_usePackageIds[naming] = used;
 
-            if (!m_uses.TryGetValue(m_package, out List<int>? uses))
+            if (!m_uses.TryGetValue(m_package, out List<(ModuleElement Use, int Used)>? uses))
             {
-                m_uses[m_package] = uses = new List<int>();
+                m_uses[m_package] = uses = new List<(ModuleElement, int)>();
             }
 
-            uses.Add(used);
+            // Once per element. Reaching this again for the same one is the same reading taken twice, and
+            // recording it twice would double every acceptance it carries and count one naming as two.
+            foreach ((ModuleElement seen, int _) in uses)
+            {
+                if (seen == naming)
+                {
+                    return;
+                }
+            }
+
+            uses.Add((naming, used));
 
             for (int child = FirstIncludedChild(usePackage); child >= 0; child = NextIncludedSibling(child))
             {
@@ -6407,12 +6419,19 @@ namespace CodeDeeds.Xslt.Compiler
                 return null;
             }
 
-            if (depth > m_packageCount || !m_uses.TryGetValue(package, out List<int>? uses))
+            if (depth > m_packageCount
+                || !m_uses.TryGetValue(package, out List<(ModuleElement Use, int Used)>? uses))
             {
                 return null;
             }
 
-            foreach (int used in uses)
+            // Each naming is asked on its own, its own xsl:accept children and nobody else's. At most one
+            // of them can leave the component in view — two would be XTSE3050, which CheckUsedTwice
+            // refuses — so the first naming that keeps it is the answer, and the order they were written
+            // in decides nothing.
+            Visibility? withheld = null;
+
+            foreach ((ModuleElement use, int used) in uses)
             {
                 if (VisibleAs(component, used, depth + 1) is not Visibility offered
                     || offered is not (Visibility.Public or Visibility.Final or Visibility.Abstract))
@@ -6420,54 +6439,23 @@ namespace CodeDeeds.Xslt.Compiler
                     continue;
                 }
 
-                return AcceptedAs(component, used, package, offered);
-            }
+                Visibility taken = AcceptedThrough(component, use, offered);
 
-            return null;
-        }
-
-        /// <summary>What a package holds a component of a package it uses as.</summary>
-        /// <param name="component">The component.</param>
-        /// <param name="used">The package offering it.</param>
-        /// <param name="package">The package taking it.</param>
-        /// <param name="offered">The visibility it is offered with.</param>
-        private Visibility AcceptedAs(PackageComponent component, int used, int package, Visibility offered)
-        {
-            Visibility? said = null;
-            int best = -1;
-
-            foreach (Acceptance acceptance in m_acceptances)
-            {
-                if (acceptance.Package != used || acceptance.Using != package)
+                // A naming that hides it is still an answer, and the one to give where no naming keeps it:
+                // the component was offered to this package and turned away, which is not the same as
+                // never having been offered at all. Only where every naming turned it away does that
+                // answer stand.
+                if (taken is Visibility.Hidden or Visibility.Absent)
                 {
+                    withheld ??= taken;
                     continue;
                 }
 
-                Exposure accept = AcceptanceOf(acceptance);
-
-                // The later of two equal claims wins, as among the exposures: a package that uses another
-                // twice, hiding a component the first time and taking it the second, means the second.
-                if (BestMatch(accept, component, offeredToo: true) is int specificity
-                    && Rank(accept, specificity) >= best)
-                {
-                    best = Rank(accept, specificity);
-                    said = accept.Visibility;
-                }
+                return taken;
             }
 
-            // Said nothing: a public component is taken as private, so that using a package does not
-            // re-offer what it offers, and an abstract one is taken as absent, so that a library's
-            // abstract function is a problem only for whoever reaches it, and only then. Taking it as
-            // abstract has to be said in as many words, and then it is a problem for the package that
-            // said so.
-            return said ?? offered switch
-            {
-                Visibility.Public => Visibility.Private,
-                Visibility.Abstract => Visibility.Absent,
-                _ => offered,
-            };
+            return withheld;
         }
-
 
         /// <summary>
         /// Records what the principal package holds each named template of a used package as, which is
@@ -7169,13 +7157,13 @@ namespace CodeDeeds.Xslt.Compiler
                 // set declared in two pieces is one component, as it is in CheckHomonyms.
                 HashSet<(ModuleElement, string, ExpandedName, int)> counted = new();
 
-                foreach ((ModuleElement use, (int used, int inside)) in m_packageUses)
+                if (!m_uses.TryGetValue(package, out List<(ModuleElement Use, int Used)>? namings))
                 {
-                    if (inside != package)
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
+                foreach ((ModuleElement use, int used) in namings)
+                {
                     foreach (PackageComponent component in m_components)
                     {
                         // Only what this used package declares itself. A component it took from a package
@@ -7237,8 +7225,16 @@ namespace CodeDeeds.Xslt.Compiler
         /// What one <c>xsl:use-package</c> element's own <c>xsl:accept</c> children take a component as.
         /// </summary>
         /// <remarks>
-        /// <see cref="AcceptedAs"/> asked of one naming rather than of all of them together. The rules for
-        /// choosing among the accepts are the same, and so is what silence means.
+        /// Only this element's own <c>xsl:accept</c> children are read. Among them the more specific claim
+        /// wins and the later of two equal ones wins, which is how the exposures on the other side of the
+        /// boundary are chosen too.
+        /// <para>
+        /// Silence is not nothing. A public component accepted without a word becomes <em>private</em> in
+        /// the package that took it, so that using a package does not re-offer what it offers; an abstract
+        /// one becomes <em>absent</em>, so that a library's abstract function is a problem only for
+        /// whoever reaches it. Taking one as abstract has to be said in as many words, and then it is a
+        /// problem for the package that said so.
+        /// </para>
         /// </remarks>
         /// <param name="component">The component being taken.</param>
         /// <param name="use">The <c>xsl:use-package</c> element doing the taking.</param>
