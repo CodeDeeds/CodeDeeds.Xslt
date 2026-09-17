@@ -35,6 +35,11 @@ namespace CodeDeeds.Xslt.UnitTests
             + "</xs:sequence></xs:complexType>"
             + "<xs:unique name=\"oneCode\"><xs:selector xpath=\"t:item\"/><xs:field xpath=\"@code\"/></xs:unique>"
             + "</xs:element>"
+            + "<xs:element name=\"tag\" type=\"t:tagType\"/>"
+            + "<xs:complexType name=\"tagType\"><xs:simpleContent>"
+            + "<xs:extension base=\"xs:ID\"/></xs:simpleContent></xs:complexType>"
+            + "<xs:element name=\"tags\"><xs:complexType><xs:sequence>"
+            + "<xs:element ref=\"t:tag\" maxOccurs=\"unbounded\"/></xs:sequence></xs:complexType></xs:element>"
             + "<xs:element name=\"list\"><xs:complexType><xs:sequence>"
             + "<xs:element ref=\"t:count\" maxOccurs=\"unbounded\"/></xs:sequence></xs:complexType></xs:element>"
             + "</xs:schema>";
@@ -45,6 +50,9 @@ namespace CodeDeeds.Xslt.UnitTests
         private const string Counts =
             "<list xmlns=\"urn:t\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">"
             + "<count xsi:nil=\"true\"/><count>7</count></list>";
+
+        /// <summary>Two elements whose own content a schema types as an ID.</summary>
+        private const string Tags = "<tags xmlns=\"urn:t\"><tag>a1</tag><tag>a2</tag></tags>";
 
         private static XsltOptions Options(XsltBackend backend, bool validateInput = false)
         {
@@ -316,6 +324,25 @@ namespace CodeDeeds.Xslt.UnitTests
                         + "<xsl:value-of select=\"$one instance of document-node(element(t:count)), "
                         + "$two instance of document-node(element(t:count))\"/>"),
                     "<r/>"));
+        }
+        [TestMethod]
+        public void AnElementThatIsAnIdStaysOneWhenItsAnnotationIsStripped()
+        {
+            // §4.4: input-type-annotations="strip" replaces the annotations of the input, and keeps the
+            // is-id and is-idrefs properties of what it strips. An element whose own typed value is an
+            // xs:ID is one of the things id() finds, and finding it is otherwise a matter of reading the
+            // annotation -- which is why, once the annotation is gone, it has to have been remembered.
+            const string Asked =
+                "<xsl:value-of select=\"data(/t:tags/t:tag[1]) instance of xs:ID, exists(id('a2'))\"/>";
+
+            Assert.AreEqual(
+                "<out>false true</out>",
+                Run(Sheet(Asked, Import, "input-type-annotations=\"strip\""), Tags, validateInput: true));
+
+            // With the annotation kept, the type says it as well.
+            Assert.AreEqual(
+                "<out>true true</out>",
+                Run(Sheet(Asked), Tags, validateInput: true));
         }
     }
 }

@@ -571,7 +571,6 @@ namespace CodeDeeds.Xslt.Compiler
         public static Dictionary<string, int> BuildIndex(XdmTree tree)
         {
             Dictionary<string, int> ids = new(StringComparer.Ordinal);
-            bool typed = tree.HasTypeAnnotations;
 
             for (int node = 0; node < tree.NodeCount; node++)
             {
@@ -592,8 +591,11 @@ namespace CodeDeeds.Xslt.Compiler
                     }
                 }
 
-                // An element a schema typed as xs:ID identifies itself by its content.
-                if (typed && tree.IsIdTypedElement(node, reference: false))
+                // An element a schema typed as xs:ID identifies itself by its content. Asked of the
+                // tree whether it carries annotations or not: §4.4 keeps the is-id property of a document
+                // read with input-type-annotations="strip", where there is no annotation left to read it
+                // off and the tree remembers it instead.
+                if (tree.IsIdTypedElement(node, reference: false))
                 {
                     ids.TryAdd(tree.StringValueOf(node).Trim(), node);
                 }
@@ -674,7 +676,7 @@ namespace CodeDeeds.Xslt.Compiler
 
             if (wanted.Count != 0)
             {
-                if (tree.HasTypeAnnotations)
+                if (tree.HasTypeAnnotations || tree.RemembersIdElements(reference: true))
                 {
                     // A schema may have typed any attribute, or an element's content, as a reference, so
                     // the whole tree is looked at; the declaration's own list is among what is found.

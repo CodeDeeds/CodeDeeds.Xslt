@@ -6655,7 +6655,7 @@ Applied to a clone of the suite, both tests raise the `XTSE3050` they were writt
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
 validation settles about a constructed node*. With all five the 3.0 run reads **7,914 of 7,924** and the
-schema-aware run **8,505 of 8,526**. The patch is not applied here, and the figures in these notes do not
+schema-aware run **8,506 of 8,526**. The patch is not applied here, and the figures in these notes do not
 include it. A measurement is worth something because of what it is taken against, and a patch kept in the
 repository and offered upstream is worth more than five tests counted differently at home.
 
@@ -6944,6 +6944,35 @@ and `override-v-006`, whose union has *different* members, is still refused.
 The schema-aware run goes from 8,498 of 8,526 to **8,500**, and `decl/override` is empty. The 3.0, 2.0 and
 XPath runs are unmoved and their failure sets identical test for test: a union type needs a schema, and
 nothing else consults this comparison. One new unit test, 2,805 in all.
+
+### What an element that is an ID keeps when its type is taken away
+
+`strip-type-annotations-021` is named for what it measures: *Show that when `input-type-annotations="strip"`,
+is-id and is-idref properties of element and attribute nodes are preserved.* It validates a document whose
+schema types an element's own content as `xs:ID`, reads it with the annotations stripped, and then asks ten
+questions — five about types, which are all `false` now, and five about `id()` and `idref()`, which are all
+still answered. One of the ten came back empty: `id('id1')`, the one that looks for an element that is an
+ID of itself rather than for an attribute that is one.
+
+The engine already had the parts. §4.4 keeps `is-id` and `is-idrefs` through a strip, so a tree read that
+way remembers which elements a schema typed as an ID or a reference, and `IsIdTypedElement` answers from
+that remembered set when there are no annotations to read. What `id()` did was ask a question first:
+
+```csharp
+bool typed = tree.HasTypeAnnotations;
+...
+if (typed && tree.IsIdTypedElement(node, reference: false))
+```
+
+— a guard that skips the check on exactly the documents the remembered set exists for. It looked like a
+cheap way past an untyped document, and an untyped document is one the check already declines in two
+comparisons. The guard is gone, and `fn:idref` — which chooses between walking the whole tree and reading
+the document type declaration's own list of IDREF attributes — now walks where the tree remembers an
+element as a reference, which is the same case seen from the other end.
+
+The schema-aware run goes from 8,500 of 8,526 to **8,501** on both backends, and `attr/strip-type-annotations`
+is empty. Nothing else moves: `input-type-annotations` has nothing to strip without a schema, and the 3.0,
+2.0 and XPath runs keep their failure sets test for test. One new unit test, 2,806 in all.
 
 ### Which results the suite asks for and does not get
 

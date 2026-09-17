@@ -643,6 +643,22 @@ namespace CodeDeeds.Xslt.Model
         }
 
         /// <summary>
+        /// Whether the tree remembers any element as an ID, or as a reference to one, from a validation
+        /// whose annotations were stripped.
+        /// </summary>
+        /// <remarks>
+        /// A document with no annotations is usually one nothing validated, where no element can be an ID
+        /// of itself and there is nothing to look for. This tells that document apart from one read with
+        /// <c>input-type-annotations="strip"</c>, where the annotations are gone and the two properties
+        /// they would have been read off are kept.
+        /// </remarks>
+        /// <param name="reference">Whether to ask about IDREF rather than ID.</param>
+        internal bool RemembersIdElements(bool reference)
+        {
+            return (reference ? IdrefElements : IdElements) is not null;
+        }
+
+        /// <summary>
         /// Whether an element's typed value is an ID, or a reference to one: an element a schema gave a
         /// simple type of <c>xs:ID</c>, <c>xs:IDREF</c> or <c>xs:IDREFS</c>, or a type restricting one.
         /// </summary>
