@@ -40,6 +40,12 @@ namespace CodeDeeds.Xslt.UnitTests
             + "<xs:extension base=\"xs:ID\"/></xs:simpleContent></xs:complexType>"
             + "<xs:element name=\"tags\"><xs:complexType><xs:sequence>"
             + "<xs:element ref=\"t:tag\" maxOccurs=\"unbounded\"/></xs:sequence></xs:complexType></xs:element>"
+            + "<xs:element name=\"bit\" type=\"t:bitType\"/>"
+            + "<xs:complexType name=\"bitType\">"
+            + "<xs:attribute name=\"id\" type=\"xs:ID\"/>"
+            + "<xs:attribute name=\"refs\" type=\"xs:IDREFS\"/></xs:complexType>"
+            + "<xs:element name=\"bits\"><xs:complexType><xs:sequence>"
+            + "<xs:element ref=\"t:bit\" maxOccurs=\"unbounded\"/></xs:sequence></xs:complexType></xs:element>"
             + "<xs:element name=\"named\" type=\"t:namedType\"/>"
             + "<xs:complexType name=\"namedType\"><xs:attribute name=\"q\" type=\"xs:QName\"/></xs:complexType>"
             + "<xs:element name=\"list\"><xs:complexType><xs:sequence>"
@@ -55,6 +61,9 @@ namespace CodeDeeds.Xslt.UnitTests
 
         /// <summary>Two elements whose own content a schema types as an ID.</summary>
         private const string Tags = "<tags xmlns=\"urn:t\"><tag>a1</tag><tag>a2</tag></tags>";
+
+        /// <summary>Two elements that name one another, by attributes a schema types as ID and IDREFS.</summary>
+        private const string Bits = "<bits xmlns=\"urn:t\"><bit id=\"p1\" refs=\"q1\"/><bit id=\"q1\"/></bits>";
 
         private static XsltOptions Options(XsltBackend backend, bool validateInput = false)
         {
@@ -327,6 +336,7 @@ namespace CodeDeeds.Xslt.UnitTests
                         + "$two instance of document-node(element(t:count))\"/>"),
                     "<r/>"));
         }
+
         [TestMethod]
         public void AnElementThatIsAnIdStaysOneWhenItsAnnotationIsStripped()
         {
@@ -346,6 +356,7 @@ namespace CodeDeeds.Xslt.UnitTests
                 "<out>true true</out>",
                 Run(Sheet(Asked), Tags, validateInput: true));
         }
+
         // ---- What a copy may not leave behind --------------------------------------------------------------
 
         /// <summary>An element with a QName-valued attribute, built and validated.</summary>
@@ -395,6 +406,46 @@ namespace CodeDeeds.Xslt.UnitTests
                         Named
                         + "<t:named><xsl:copy-of select=\"$e/@q\" validation=\"strip\"/></t:named>"),
                     "<r/>"));
+        }
+
+        // ---- What a copy keeps of what makes a node findable -----------------------------------------------
+
+        [TestMethod]
+        public void ACopyThatStripsItsAnnotationsStillLeavesWhatIdFinds()
+        {
+            // §25.4.1, of validation="strip": "Any previous type annotation present on a contained element
+            // or attribute node ... is also replaced by xs:untyped or xs:untypedAtomic as appropriate ...
+            // The values of the is-id and is-idrefs properties are unchanged." So a stripped copy can no
+            // longer say what type an attribute was validated as, and id() and idref() answer as before.
+            // The suite's copy-5034 asks it of exactly that pair of functions.
+            Assert.AreEqual(
+                "<out>false p1 refs</out>",
+                Run(
+                    Sheet(
+                        "<xsl:variable name=\"v\"><Z><xsl:copy-of select=\"/\" validation=\"strip\"/></Z>"
+                        + "</xsl:variable>"
+                        + "<xsl:value-of select=\"($v//@id)[1] instance of attribute(*, xs:ID), "
+                        + "$v/id('p1')/@id, $v/idref('q1')/name()\"/>"),
+                    Bits,
+                    validateInput: true));
+        }
+
+        [TestMethod]
+        public void AnElementThatIsAnIdSurvivesACopyIntoAStrippedElement()
+        {
+            // A literal result element validates what is built inside it as default-validation says, which
+            // is strip unless the stylesheet says otherwise (§25.4.2) — so the annotations a preserved
+            // copy carries in are taken off again on the way past. What makes the element an ID is not.
+            Assert.AreEqual(
+                "<out>false tag</out>",
+                Run(
+                    Sheet(
+                        "<xsl:variable name=\"v\"><Z><xsl:copy-of select=\"/\" validation=\"preserve\"/></Z>"
+                        + "</xsl:variable>"
+                        + "<xsl:value-of select=\"($v//t:tag)[1] instance of element(*, t:tagType), "
+                        + "$v/id('a2')/local-name()\"/>"),
+                    Tags,
+                    validateInput: true));
         }
     }
 }

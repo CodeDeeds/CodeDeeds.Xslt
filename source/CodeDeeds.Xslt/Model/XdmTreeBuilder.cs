@@ -1869,6 +1869,27 @@ namespace CodeDeeds.Xslt.Model
             return type is System.Xml.Schema.XmlSchemaComplexType { ContentType: System.Xml.Schema.XmlSchemaContentType.ElementOnly };
         }
 
+        /// <summary>
+        /// Records that the element most recently started is an ID, or a reference to one, without
+        /// annotating it with the type that says so.
+        /// </summary>
+        /// <remarks>What a copy made under a validation of strip leaves behind; see
+        /// <see cref="MarkLastAttributeAsId"/>, which does the same for an attribute.</remarks>
+        /// <param name="reference">Whether it is a reference to an ID rather than an ID.</param>
+        internal void MarkOpenElementAsId(bool reference)
+        {
+            int element = RequireOpenElement();
+
+            if (reference)
+            {
+                (m_idrefElements ??= new HashSet<int>()).Add(element);
+            }
+            else
+            {
+                (m_idElements ??= new HashSet<int>()).Add(element);
+            }
+        }
+
         /// <summary>The elements a schema typed as an ID or a reference, kept where the annotations were not.</summary>
         private HashSet<int>? m_idElements;
         private HashSet<int>? m_idrefElements;

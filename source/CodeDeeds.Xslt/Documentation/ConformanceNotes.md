@@ -6655,7 +6655,7 @@ Applied to a clone of the suite, both tests raise the `XTSE3050` they were writt
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
 validation settles about a constructed node*. With all five the 3.0 run reads **7,914 of 7,924** and the
-schema-aware run **8,509 of 8,526**. The patch is not applied here, and the figures in these notes do not
+schema-aware run **8,510 of 8,526**. The patch is not applied here, and the figures in these notes do not
 include it. A measurement is worth something because of what it is taken against, and a patch kept in the
 repository and offered upstream is worth more than five tests counted differently at home.
 
@@ -7015,6 +7015,44 @@ The schema-aware run goes from 8,501 of 8,526 to **8,504** on both backends; `fn
 `misc/error` is down to two. Nothing else moves: the rule needs a type annotation
 to fire, and the 3.0, 2.0 and XPath runs keep their failure sets test for test. Two new unit tests, 2,808
 in all.
+
+### What a copy keeps of what makes a node findable
+
+`copy-5034` is the last of four templates that ask one question four ways. Each validates a document
+strictly, copies it into a variable with one of `strict`, `lax`, `preserve` and `strip`, and counts what
+`id()` and `idref()` then find. The first three answered one and one. The strip answered nothing.
+
+§25.4.1 sets out what a strip does, and the sentence that matters is the last but one. "The value `strip`
+indicates that the new node and each of the contained nodes will have the type annotation `xs:untyped` if
+it is an element, or `xs:untypedAtomic` if it is an attribute ... In the case of elements the `nilled`
+property is set to `false`. The values of the `is-id` and `is-idrefs` properties are unchanged."
+
+Everywhere else those two properties are read off the annotation: `IsIdAttribute` asks whether a type is
+`xs:ID` or restricts one, and `IsIdTypedElement` asks the same of the simple type an element holds its
+content in. A strip takes the annotation away and leaves the question nothing to read. The engine already
+had somewhere to put the answer instead — a tree keeps a list of the attributes that are IDs and a set of
+the elements that are, which is how a document read with `input-type-annotations="strip"` keeps its own
+(§4.4 says the same thing of that), and how an attribute built inside an element that strips keeps its.
+What was missing was the copier filling them in.
+
+So a copy now records what its annotation no longer says. The rule is not about strip alone: §25.4.1 says
+of `preserve` on `xsl:copy-of` that the `nilled`, `is-id` and `is-idrefs` properties are "also unchanged",
+and only `strict` and `lax` settle them afresh out of the PSVI. The condition is therefore not
+"is this a strip" but "does the type this copy carries still say it" — which also catches a node that was
+an ID by its document type declaration rather than by a schema, where there was never an annotation to
+carry.
+
+Two things were missing rather than one. A copy made under `preserve` inside a literal result element
+loses its annotations again on the way in, because an element validates what is built inside it as
+`default-validation` says and that is `strip` unless the stylesheet says otherwise. That road already left
+an attribute's ID behind; an element's it dropped. It does not now, which took the same unwrapping of a
+complex type with simple content that reading the property does. `IsIdTypedElement` also stopped asking
+whether the tree has any annotations at all before consulting what it remembers: a result tree can hold a
+stripped copy beside a validated one, and the two answers are per node.
+
+The schema-aware run goes from 8,504 of 8,526 to **8,505** on both backends, and `insn/copy` is empty.
+Nothing else moves: an unvalidated tree has no annotation to strip and no property to keep, and the 3.0,
+2.0 and XPath runs keep their failure sets test for test. Two new unit tests, 2,810 in all.
 
 ### Which results the suite asks for and does not get
 

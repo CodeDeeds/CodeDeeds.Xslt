@@ -3329,13 +3329,16 @@ namespace CodeDeeds.Xslt.Compiler
                     // its values are its element's.
                     int nameCode = tree.NameCodeOf(node);
                     int fingerprint = tree.FingerprintOf(node);
+                    ushort carried = TypeToCarry(tree, node, preserveTypes, types);
 
                     output.WriteAttribute(
                         names.GetPrefix(nameCode),
                         names.GetNamespaceUri(fingerprint),
                         names.GetLocalName(fingerprint),
                         tree.StringValueOf(node),
-                        TypeToCarry(tree, node, preserveTypes, types));
+                        carried);
+
+                    KeepIdentity(tree, node, output, carried, types);
                     return;
                 }
 
@@ -3352,6 +3355,83 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 output.NoteCopiedFrom(tree, node);
             }
+        }
+
+        /// <summary>
+        /// Keeps a copied node's is-id and is-idrefs properties where the annotation it carries no longer
+        /// says what they are.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// §25.4.1 says of <c>validation="strip"</c> that "the values of the <c>is-id</c> and
+        /// <c>is-idrefs</c> properties are unchanged", and of <c>validation="preserve"</c> on
+        /// <c>xsl:copy-of</c> that they are "also unchanged". Only <c>strict</c> and <c>lax</c> settle them
+        /// afresh, out of the PSVI, along with the type.
+        /// </para>
+        /// <para>
+        /// Everywhere else the two are read off the annotation, so a copy that keeps the annotation keeps
+        /// them for nothing. A stripped copy does not, and neither does a copy of a node that was an ID by
+        /// its document's type declaration rather than by a schema; those are the ones told separately.
+        /// </para>
+        /// </remarks>
+        /// <param name="tree">The tree the original is in.</param>
+        /// <param name="node">The original.</param>
+        /// <param name="output">The destination, where the copy has just been written.</param>
+        /// <param name="carried">The annotation the copy carries, which may be none.</param>
+        /// <param name="types">What validation settled, or null; see <see cref="CopyDeep"/>.</param>
+        private static void KeepIdentity(
+            XdmTree tree, int node, OutputTarget output, ushort carried, TypeOverlay? types)
+        {
+            // Under strict and lax, validation settled the two properties along with the type; and a tree
+            // that holds neither property has nothing for a copy of it to keep, which is every tree in a
+            // run with no schema and no document type declaration.
+            if (types is not null || !tree.HoldsIdProperties)
+            {
+                return;
+            }
+
+            bool attribute = XdmTree.IsAttribute(node);
+            bool reference;
+
+            if (attribute ? tree.IsIdAttribute(node) : tree.IsIdTypedElement(node, reference: false))
+            {
+                reference = false;
+            }
+            else if (attribute ? tree.IsIdrefAttribute(node) : tree.IsIdTypedElement(node, reference: true))
+            {
+                reference = true;
+            }
+            else
+            {
+                return;
+            }
+
+            if (Says(XdmSchemaType.ById(carried), reference))
+            {
+                return;
+            }
+
+            if (attribute)
+            {
+                output.MarkAttributeAsId(reference);
+            }
+            else
+            {
+                output.MarkElementAsId(reference);
+            }
+        }
+
+        /// <summary>Whether a type annotation is itself the reason a node is an ID, or a reference to one.</summary>
+        /// <param name="type">The annotation, or null where there is none.</param>
+        /// <param name="reference">Whether to ask about IDREF rather than ID.</param>
+        private static bool Says(XdmSchemaType? type, bool reference)
+        {
+            // An element's content may be held by a complex type, as XdmTree.IsIdTypedElement reads it.
+            XdmSchemaType? content = type is { Variety: XdmSchemaVariety.Complex }
+                ? type.Content == System.Xml.Schema.XmlSchemaContentType.TextOnly ? type.SimpleContent : null
+                : type;
+
+            return content is not null && (reference ? content.IsIdrefType : content.IsIdType);
         }
 
         /// <summary>The type a copy of a node carries: what validation settled, or the original's own, or none.</summary>
@@ -3405,6 +3485,8 @@ namespace CodeDeeds.Xslt.Compiler
                     output.AnnotateElement(own, nilled);
                 }
             }
+
+            KeepIdentity(tree, element, output, TypeToCarry(tree, element, preserveTypes, types), types);
 
             output.MarkOwnNamespaces(root);
 

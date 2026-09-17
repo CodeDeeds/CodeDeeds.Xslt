@@ -643,6 +643,28 @@ namespace CodeDeeds.Xslt.Model
         }
 
         /// <summary>
+        /// Whether anything in this tree could be an ID, or a reference to one, by a property a copy of it
+        /// would have to be told about.
+        /// </summary>
+        /// <remarks>
+        /// The three ways of holding the property that a copy does not carry over by itself: a schema's
+        /// annotation, a document type declaration's list, and what a strip left behind. An
+        /// <c>xml:id</c> is the fourth way and is not among them, being one wherever its name is written
+        /// and so one in the copy as well.
+        /// </remarks>
+        internal bool HoldsIdProperties
+        {
+            get
+            {
+                return HasTypeAnnotations
+                    || DeclaredIdAttributes.Length != 0
+                    || DeclaredIdrefAttributes.Length != 0
+                    || IdElements is not null
+                    || IdrefElements is not null;
+            }
+        }
+
+        /// <summary>
         /// Whether the tree remembers any element as an ID, or as a reference to one, from a validation
         /// whose annotations were stripped.
         /// </summary>
@@ -671,11 +693,19 @@ namespace CodeDeeds.Xslt.Model
                 return false;
             }
 
-            // A tree read with its annotations stripped keeps which elements were IDs and references.
+            // An element whose annotation was stripped keeps which of the two it was. Asked before the
+            // annotations, and of every tree rather than only of one with no annotations at all: a result
+            // tree can hold a stripped copy beside a validated one.
+            HashSet<int>? kept = reference ? IdrefElements : IdElements;
+
+            if (kept is not null && kept.Contains(nodeId))
+            {
+                return true;
+            }
+
             if (m_nodeType is null)
             {
-                HashSet<int>? kept = reference ? IdrefElements : IdElements;
-                return kept is not null && kept.Contains(nodeId);
+                return false;
             }
 
             XPath.XdmSchemaType? type = TypeAnnotationOf(nodeId);

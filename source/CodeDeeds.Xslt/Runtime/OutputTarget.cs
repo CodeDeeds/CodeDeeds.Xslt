@@ -136,30 +136,70 @@ namespace CodeDeeds.Xslt.Runtime
         }
 
         /// <summary>
-        /// Keeps what a stripped attribute's annotation would have said about its being an ID.
+        /// Records that the element most recently started is an ID, or a reference to one, where the copy
+        /// carries no annotation to say so.
+        /// </summary>
+        /// <param name="reference">Whether it is a reference to an ID rather than an ID.</param>
+        internal virtual void MarkElementAsId(bool reference)
+        {
+        }
+
+        /// <summary>
+        /// Records that the attribute most recently written is an ID, or a reference to one, where the copy
+        /// carries no annotation to say so.
+        /// </summary>
+        /// <param name="reference">Whether it is a reference to an ID rather than an ID.</param>
+        internal virtual void MarkAttributeAsId(bool reference)
+        {
+        }
+
+        /// <summary>
+        /// Keeps what a stripped node's annotation would have said about its being an ID.
         /// </summary>
         /// <remarks>
         /// §25.4.1 strips the type annotations inside an element and then says "The values of the
         /// <c>is-id</c> and <c>is-idrefs</c> properties are unchanged" — so an attribute built with
         /// <c>type="xs:ID"</c> inside a stripped element is no longer an <c>attribute(*, xs:ID)</c> and is
-        /// still what <c>id()</c> finds. The suite's import-schema-005 is about exactly that pair.
+        /// still what <c>id()</c> finds. The suite's import-schema-005 is about exactly that pair. An
+        /// element whose own content a schema types as an <c>xs:ID</c> is the same case, and reaches here
+        /// when a copy made under <c>preserve</c> is placed inside an element that strips.
         /// </remarks>
         /// <param name="builder">The tree being built.</param>
         /// <param name="typeId">The annotation that is being dropped.</param>
-        private protected static void MarkStrippedId(XdmTreeBuilder builder, ushort typeId)
+        /// <param name="element">Whether the node is the open element rather than the last attribute.</param>
+        private protected static void MarkStrippedId(XdmTreeBuilder builder, ushort typeId, bool element)
         {
-            if (XPath.XdmSchemaType.ById(typeId) is not XPath.XdmSchemaType type)
+            XPath.XdmSchemaType? type = XPath.XdmSchemaType.ById(typeId);
+
+            // An element holds its content in the simple type its complex type extends or restricts; an
+            // attribute's annotation is that simple type itself.
+            if (element && type is { Variety: XPath.XdmSchemaVariety.Complex })
+            {
+                type = type.Content == System.Xml.Schema.XmlSchemaContentType.TextOnly ? type.SimpleContent : null;
+            }
+
+            bool reference;
+
+            if (type is { IsIdType: true })
+            {
+                reference = false;
+            }
+            else if (type is { IsIdrefType: true })
+            {
+                reference = true;
+            }
+            else
             {
                 return;
             }
 
-            if (type.IsIdType)
+            if (element)
             {
-                builder.MarkLastAttributeAsId(reference: false);
+                builder.MarkOpenElementAsId(reference);
             }
-            else if (type.IsIdrefType)
+            else
             {
-                builder.MarkLastAttributeAsId(reference: true);
+                builder.MarkLastAttributeAsId(reference);
             }
         }
 
@@ -505,10 +545,18 @@ namespace CodeDeeds.Xslt.Runtime
         /// <inheritdoc/>
         internal override void AnnotateElement(ushort typeId, bool nilled)
         {
-            if (m_depth > 0 && m_stripDepth < 0)
+            if (m_depth == 0)
+            {
+                return;
+            }
+
+            if (m_stripDepth < 0)
             {
                 m_builder!.AnnotateElement(typeId, nilled);
+                return;
             }
+
+            MarkStrippedId(m_builder!, typeId, element: true);
         }
 
         /// <inheritdoc/>
@@ -525,7 +573,7 @@ namespace CodeDeeds.Xslt.Runtime
                 return;
             }
 
-            MarkStrippedId(m_builder!, typeId);
+            MarkStrippedId(m_builder!, typeId, element: false);
         }
 
         /// <inheritdoc/>
@@ -534,6 +582,24 @@ namespace CodeDeeds.Xslt.Runtime
             if (m_depth > 0 && m_stripDepth < 0)
             {
                 m_stripDepth = m_depth;
+            }
+        }
+
+        /// <inheritdoc/>
+        internal override void MarkElementAsId(bool reference)
+        {
+            if (m_depth > 0)
+            {
+                m_builder!.MarkOpenElementAsId(reference);
+            }
+        }
+
+        /// <inheritdoc/>
+        internal override void MarkAttributeAsId(bool reference)
+        {
+            if (m_depth > 0)
+            {
+                m_builder!.MarkLastAttributeAsId(reference);
             }
         }
 
@@ -970,10 +1036,18 @@ namespace CodeDeeds.Xslt.Runtime
         /// <inheritdoc/>
         internal override void AnnotateElement(ushort typeId, bool nilled)
         {
-            if (m_stripDepth < 0 && m_builder.OpenElementDepth > 0)
+            if (m_builder.OpenElementDepth == 0)
+            {
+                return;
+            }
+
+            if (m_stripDepth < 0)
             {
                 m_builder.AnnotateElement(typeId, nilled);
+                return;
             }
+
+            MarkStrippedId(m_builder, typeId, element: true);
         }
 
         /// <inheritdoc/>
@@ -985,7 +1059,7 @@ namespace CodeDeeds.Xslt.Runtime
                 return;
             }
 
-            MarkStrippedId(m_builder, typeId);
+            MarkStrippedId(m_builder, typeId, element: false);
         }
 
         /// <inheritdoc/>
@@ -995,6 +1069,21 @@ namespace CodeDeeds.Xslt.Runtime
             {
                 m_stripDepth = m_builder.OpenElementDepth;
             }
+        }
+
+        /// <inheritdoc/>
+        internal override void MarkElementAsId(bool reference)
+        {
+            if (m_builder.OpenElementDepth > 0)
+            {
+                m_builder.MarkOpenElementAsId(reference);
+            }
+        }
+
+        /// <inheritdoc/>
+        internal override void MarkAttributeAsId(bool reference)
+        {
+            m_builder.MarkLastAttributeAsId(reference);
         }
 
         /// <inheritdoc/>
