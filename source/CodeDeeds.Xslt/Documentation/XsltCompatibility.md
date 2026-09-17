@@ -23,7 +23,7 @@ Conformance as last measured, on 16 September 2026, against the W3C suites (see 
 | QT3 (XPath), 2.0 | 14,553 of 14,577, 99.8% |
 
 The 2,900 streaming tests are skipped by design. The 686 schema-aware tests are read only by the driver's
-opt-in `--schema` run, which stands at 8,508 of 8,526 (99.8%), the same on both backends; the figures
+opt-in `--schema` run, which stands at 8,509 of 8,526 (99.8%), the same on both backends; the figures
 above are the run without it.
 
 ## Not implemented, and not planned

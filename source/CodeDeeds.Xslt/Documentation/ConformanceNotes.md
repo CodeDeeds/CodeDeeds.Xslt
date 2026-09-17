@@ -6655,7 +6655,7 @@ Applied to a clone of the suite, both tests raise the `XTSE3050` they were writt
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
 validation settles about a constructed node*. With all five the 3.0 run reads **7,914 of 7,924** and the
-schema-aware run **8,513 of 8,526**. The patch is not applied here, and the figures in these notes do not
+schema-aware run **8,514 of 8,526**. The patch is not applied here, and the figures in these notes do not
 include it. A measurement is worth something because of what it is taken against, and a patch kept in the
 repository and offered upstream is worth more than five tests counted differently at home.
 
@@ -7133,6 +7133,38 @@ every function that takes a string still takes it.
 The schema-aware run goes from 8,507 of 8,526 to **8,508** on both backends, and `type/namespace` is
 empty. Nothing else moves, the two XPath runs included, which is where these functions are exercised most:
 18,268 and 14,553, failure set for failure set. One new unit test, 2,813 in all.
+
+### The characters a result has to spell out to keep
+
+`type-0113` is a test about casting: eight constructor calls, each measuring what a type's `whiteSpace`
+facet does to the string it is given. Seven agreed. The eighth is `xs:string(' a  b c &#xd; d  e f ')`,
+where the facet is `preserve` and the carriage return is meant to come through untouched, and the
+comparison stopped at it: the expected file has `&#xD;` where this engine had written the character
+itself.
+
+Writing it as itself is writing something else. A parser normalizes a literal carriage return to a line
+feed before anything sees it, so a result with one in it is a result that cannot be read back. The
+serialization specification says so where it sets out what the XML output method guarantees: "CR, NEL and
+LINE SEPARATOR characters in text nodes MUST be output respectively as `&#xD;`, `&#x85;`, and
+`&#x2028;`, or their equivalents; while CR, NL, TAB, NEL and LINE SEPARATOR characters in attribute nodes
+MUST be output respectively as `&#xD;`, `&#xA;`, `&#x9;`, `&#x85;`, and `&#x2028;`, or their
+equivalents."
+
+The engine had the attribute half of that and not the text half, which is the half that is easy to miss:
+in an attribute a tab and a newline are folded to spaces by attribute-value normalization and the need for
+a reference is obvious, while in a text node only the carriage return is touched, and only by a rule that
+runs before the parser reports anything. NEL and LINE SEPARATOR are the same case for XML 1.1 and are
+written out too. The HTML output method promises nothing of this kind and is left as it was.
+
+A CDATA section is not an exception, though it looks like one. It keeps text from being read as markup;
+it does not keep it from line ending normalization, which happens to every character of a document alike.
+So a section now stops for a carriage return, writes the reference, and starts again after it — the same
+treatment the section already gave `]]>` and a character the encoding cannot carry.
+
+The schema-aware run goes from 8,508 of 8,526 to **8,509** on both backends, and `type/type` is empty.
+Nothing else moves: the 3.0, 2.0 and both XPath runs keep their failure sets test for test, `call-template-1001`
+apart, which is the recursion-depth test that lands either side of the limit from one run to the next. Two
+new unit tests, 2,815 in all.
 
 ### Which results the suite asks for and does not get
 

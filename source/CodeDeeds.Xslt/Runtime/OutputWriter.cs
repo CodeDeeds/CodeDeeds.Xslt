@@ -1657,7 +1657,7 @@ namespace CodeDeeds.Xslt.Runtime
         /// </remarks>
         private void WriteCDataSection(string text)
         {
-            if (m_limit is null)
+            if (m_limit is null && !text.AsSpan().ContainsAny(s_foldedLineEndings))
             {
                 WriteCDataSectionCore(text);
                 return;
@@ -1667,7 +1667,7 @@ namespace CodeDeeds.Xslt.Runtime
 
             for (int i = 0; i < text.Length; i++)
             {
-                if (text[i] < (char)0x80 || OutsideTheEncoding(text, i, out int length) is not string reference)
+                if (BreaksTheSection(text, i, out int length) is not string reference)
                 {
                     continue;
                 }
@@ -1683,6 +1683,33 @@ namespace CodeDeeds.Xslt.Runtime
             }
 
             WriteCDataSectionCore(text.AsSpan(start));
+        }
+
+        /// <summary>The three line endings a parser folds into a line feed, whatever they are written in.</summary>
+        private static readonly System.Buffers.SearchValues<char> s_foldedLineEndings =
+            System.Buffers.SearchValues.Create("\r\u0085\u2028");
+
+        /// <summary>
+        /// The reference a character has to be written as even inside a CDATA section, or null where the
+        /// section may hold it.
+        /// </summary>
+        /// <param name="text">The text being written.</param>
+        /// <param name="at">Where in it the character stands.</param>
+        /// <param name="length">How many characters were consumed, which is two for a surrogate pair.</param>
+        private string? BreaksTheSection(string text, int at, out int length)
+        {
+            length = 1;
+
+            // A CDATA section protects text from being read as markup; it does not protect it from line
+            // ending normalization, which happens to every character of a document alike.
+            switch (text[at])
+            {
+                case '\r': return "&#xD;";
+                case '\u0085': return "&#x85;";
+                case '\u2028': return "&#x2028;";
+            }
+
+            return m_limit is null || text[at] < (char)0x80 ? null : OutsideTheEncoding(text, at, out length);
         }
 
         /// <summary>Writes one run of text as CDATA sections, splitting it around any terminator.</summary>
@@ -1777,9 +1804,15 @@ namespace CodeDeeds.Xslt.Runtime
         }
 
         /// <summary>Writes a stretch of characters, escaping each as the style says.</summary>
-        /// <summary>The characters that are markup in character data, and those that are in an attribute value.</summary>
+        /// <summary>
+        /// The characters that are markup in character data, and those that are in an attribute value.
+        /// </summary>
+        /// <remarks>
+        /// The carriage return among the first is not markup: it is the one character below #x7F that a
+        /// text node has to escape for a reason of its own, and it is here so that the scan finds it.
+        /// </remarks>
         private static readonly System.Buffers.SearchValues<char> s_textMarkup =
-            System.Buffers.SearchValues.Create("&<>");
+            System.Buffers.SearchValues.Create("&<>\r");
 
         private static readonly System.Buffers.SearchValues<char> s_attributeMarkup =
             System.Buffers.SearchValues.Create("&<>\"\n\r\t");
@@ -2442,8 +2475,15 @@ namespace CodeDeeds.Xslt.Runtime
                 // character that needs a reference here taking one.
                 case '"' when style == EscapeStyle.Attribute: return "&#34;";
                 case '\n' when style == EscapeStyle.Attribute: return "&#xA;";
-                case '\r' when style == EscapeStyle.Attribute: return "&#xD;";
                 case '\t' when style == EscapeStyle.Attribute: return "&#x9;";
+
+                // A carriage return is a reference in a text node as well, for the same reason one step
+                // further on: a parser normalizes a literal one to a line feed, so the text would come
+                // back changed. The XML output method promises it will not (§5), and the XHTML method is
+                // defined in terms of that one; the HTML method makes no such promise.
+                case '\r' when style == EscapeStyle.Attribute
+                    || (style == EscapeStyle.Text && Method is not OutputMethod.Html):
+                    return "&#xD;";
 
                 default:
                     // Everything below #x7F is written as it stands, which is nearly every character of
@@ -2477,6 +2517,14 @@ namespace CodeDeeds.Xslt.Runtime
             if (character <= (char)0x9F && Method is OutputMethod.Html or OutputMethod.Xhtml)
             {
                 return $"&#{(int)character};";
+            }
+
+            // The other two characters a parser reads back as a line feed: "CR, NEL and LINE SEPARATOR
+            // characters in text nodes MUST be output respectively as &#xD;, &#x85; and &#x2028;, or their
+            // equivalents". The rule above has already answered for NEL on the two HTML methods.
+            if (character is '\u0085' or '\u2028' && Method is not OutputMethod.Html)
+            {
+                return character == '\u0085' ? "&#x85;" : "&#x2028;";
             }
 
             return m_limit is null || character < (char)0x80

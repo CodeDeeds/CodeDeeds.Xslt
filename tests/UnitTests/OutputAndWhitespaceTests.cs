@@ -394,6 +394,47 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
+        public void ALineEndingIsWrittenAsAReferenceSoThatItSurvivesBeingParsedBack()
+        {
+            // Serialization §5: "CR, NEL and LINE SEPARATOR characters in text nodes MUST be output
+            // respectively as &#xD;, &#x85;, and &#x2028;, or their equivalents; while CR, NL, TAB, NEL and
+            // LINE SEPARATOR characters in attribute nodes MUST be output respectively as &#xD;, &#xA;,
+            // &#x9;, &#x85;, and &#x2028;, or their equivalents." A parser folds each of them into a line
+            // feed, so a literal one is a character the result would not come back with.
+            string result = Run(
+                Sheet(
+                    "<xsl:template match=\"/\"><out a=\"{/r}\"><xsl:value-of select=\"/r\"/></out>"
+                    + "</xsl:template>"),
+                "<r>a&#xD;b&#x85;c&#x2028;d</r>");
+
+            Assert.AreEqual(
+                "<out a=\"a&#xD;b&#x85;c&#x2028;d\">a&#xD;b&#x85;c&#x2028;d</out>", result);
+
+            // The round trip is what it is for.
+            Assert.AreEqual("a\rb\u0085c\u2028d", XDocument.Parse(result).Root!.Value);
+        }
+
+        [TestMethod]
+        public void ACdataSectionStopsForALineEndingItCannotProtect()
+        {
+            // A CDATA section keeps text from being read as markup; it does not keep it from line ending
+            // normalization, which happens to every character of a document alike. So the section stops for
+            // one and starts again after, as it does for the terminator and for a character the encoding
+            // cannot carry.
+            string result = Run(
+                Sheet(
+                    "<xsl:output cdata-section-elements=\"d\"/>"
+                    + "<xsl:template match=\"/\"><d><xsl:value-of select=\"/r\"/></d></xsl:template>"),
+                "<r>a&#xD;b</r>");
+
+            Assert.AreEqual("<d><![CDATA[a]]>&#xD;<![CDATA[b]]></d>", result);
+            // A whitespace-only text node is one XDocument drops unless told not to, and the carriage
+            // return between the two sections is exactly that.
+            Assert.AreEqual(
+                "a\rb", XDocument.Parse(result, LoadOptions.PreserveWhitespace).Root!.Value);
+        }
+
+        [TestMethod]
         public void CdataSectionElementsNamesAnElementSoTheDefaultNamespaceApplies()
         {
             // Unlike the QName of a template or a variable, where it deliberately does not. A stylesheet that
