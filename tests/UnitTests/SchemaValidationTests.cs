@@ -40,6 +40,8 @@ namespace CodeDeeds.Xslt.UnitTests
             + "<xs:extension base=\"xs:ID\"/></xs:simpleContent></xs:complexType>"
             + "<xs:element name=\"tags\"><xs:complexType><xs:sequence>"
             + "<xs:element ref=\"t:tag\" maxOccurs=\"unbounded\"/></xs:sequence></xs:complexType></xs:element>"
+            + "<xs:simpleType name=\"partNumber\"><xs:restriction base=\"xs:string\">"
+            + "<xs:pattern value=\"[0-9]{3}-[A-Z]{2}\"/></xs:restriction></xs:simpleType>"
             + "<xs:element name=\"plain\" type=\"xs:string\"/>"
             + "<xs:element name=\"line\" type=\"t:lineType\"/>"
             + "<xs:complexType name=\"lineType\"><xs:simpleContent>"
@@ -371,6 +373,55 @@ namespace CodeDeeds.Xslt.UnitTests
             Assert.AreEqual(
                 "<out>true true</out>",
                 Run(Sheet(Asked), Tags, validateInput: true));
+        }
+
+        // ---- Which names a stylesheet function may take ----------------------------------------------------
+
+        /// <summary>A one-argument function named after a simple type the schema declares.</summary>
+        private const string Clashing =
+            "<xsl:function name=\"t:partNumber\" as=\"xs:string\">"
+            + "<xsl:param name=\"in\" as=\"xs:string\"/>"
+            + "<xsl:sequence select=\"concat($in, '!')\"/></xsl:function>";
+
+        [TestMethod]
+        public void AStylesheetFunctionCannotTakeTheNameAndArityOfAConstructorFunction()
+        {
+            // §5.4.1 lists among the statically known function signatures "constructor functions for all
+            // the simple types in the in-scope schema definitions, including both built-in types and
+            // user-defined types" and, separately, "the stylesheet functions defined in the containing
+            // package". They are one mapping from a name and an arity to one signature, so a stylesheet
+            // function that takes the name and arity of a constructor function leaves a call with two
+            // functions to choose from and nothing to choose by. The suite asks for XTSE0770 of exactly
+            // this in type-functions-0503, and says in a comment that no code fits it better.
+            Assert.AreEqual(
+                "XTSE0770",
+                Refuses(
+                    Sheet("<xsl:value-of select=\"t:partNumber('123-XY')\"/>", Import + Clashing), "<r/>"));
+
+            // Static, so the function need never be called.
+            Assert.AreEqual("XTSE0770", Refuses(Sheet(string.Empty, Import + Clashing), "<r/>"));
+
+            // Another arity is another key and clashes with nothing.
+            Assert.AreEqual(
+                "<out>123-XY!</out>",
+                Run(
+                    Sheet(
+                        "<xsl:value-of select=\"t:partNumber('123-XY', '!')\"/>",
+                        Import
+                        + "<xsl:function name=\"t:partNumber\" as=\"xs:string\">"
+                        + "<xsl:param name=\"in\" as=\"xs:string\"/>"
+                        + "<xsl:param name=\"tail\" as=\"xs:string\"/>"
+                        + "<xsl:sequence select=\"concat($in, $tail)\"/></xsl:function>"),
+                    "<r/>"));
+
+            // And with nothing declared over it, the constructor function is there to be called.
+            Assert.AreEqual(
+                "<out>123-XY true</out>",
+                Run(
+                    Sheet(
+                        "<xsl:value-of select=\"t:partNumber('123-XY'), "
+                        + "t:partNumber('123-XY') instance of t:partNumber\"/>"),
+                    "<r/>"));
         }
 
         // ---- Which whitespace a declaration may strip ------------------------------------------------------

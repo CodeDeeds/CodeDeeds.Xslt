@@ -6655,7 +6655,7 @@ Applied to a clone of the suite, both tests raise the `XTSE3050` they were writt
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
 validation settles about a constructed node*. With all five the 3.0 run reads **7,914 of 7,924** and the
-schema-aware run **8,514 of 8,526**. The patch is not applied here, and the figures in these notes do not
+schema-aware run **8,515 of 8,526**. The patch is not applied here, and the figures in these notes do not
 include it. A measurement is worth something because of what it is taken against, and a patch kept in the
 repository and offered upstream is worth more than five tests counted differently at home.
 
@@ -7165,6 +7165,36 @@ The schema-aware run goes from 8,508 of 8,526 to **8,509** on both backends, and
 Nothing else moves: the 3.0, 2.0 and both XPath runs keep their failure sets test for test, `call-template-1001`
 apart, which is the recursion-depth test that lands either side of the limit from one run to the next. Two
 new unit tests, 2,815 in all.
+
+### Two functions of one name, and nothing to choose by
+
+`type-functions-0503` declares `<xsl:function name="my:partNumberType" as="xs:string">` with one parameter,
+in a stylesheet that has imported a schema declaring a simple type of that same name, and asks for
+`XTSE0770`. The engine ran it and produced a result.
+
+The test's own comment says what is awkward about the ask: *the error isn't explicit in the XSLT spec, but
+this is the closest it gets*. `XTSE0770` is written about "two or more `xsl:function` declarations with the
+same expanded QName, the same arity, and the same import precedence", and there is one declaration here.
+But the condition the code exists for is the condition that has arisen, and §5.3.1 gets close enough to
+explicit. The statically known function signatures are, among other things, "constructor functions for all
+the simple types in the in-scope schema definitions, including both built-in types and user-defined types"
+and "the stylesheet functions defined in the containing package". XPath defines that component of the
+static context as a mapping from an expanded QName and an arity to one signature. The two lists are
+therefore one list, a name and an arity name one function, and a stylesheet that declares
+`my:partNumberType#1` where a schema has already defined it has written two of them — leaving a call with
+nothing to choose by.
+
+So refusing is the answer, and which code to refuse with is the only open question. The suite's is the
+nearest one there is, and no other test asks anything else of this shape.
+
+Two things cannot reach the check. A built-in type is in a reserved namespace, and `XTSE0080` refuses a
+stylesheet function named in one well before this. And an arity other than one is a different key
+altogether: a constructor function takes exactly one argument, so `my:partNumberType#2` collides with
+nothing.
+
+The schema-aware run goes from 8,509 of 8,526 to **8,510** on both backends, and `expr/type-functions` is
+empty. Nothing else moves: without a schema there are no user-defined types for a name to collide with,
+and the 3.0, 2.0 and XPath runs keep their failure sets test for test. One new unit test, 2,816 in all.
 
 ### Which results the suite asks for and does not get
 

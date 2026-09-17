@@ -3135,6 +3135,24 @@ namespace CodeDeeds.Xslt.Compiler
                 }
             }
 
+            // The statically known function signatures are a mapping from a name and an arity to one
+            // signature, and §5.4.1 puts the constructor functions for "all the simple types in the
+            // in-scope schema definitions" into it beside "the stylesheet functions defined in the
+            // containing package". A one-argument function named after a simple type the stylesheet
+            // imported leaves that mapping with two answers under one key and a call with no way to say
+            // which it meant. A built-in type cannot be reached this way: its namespace is reserved, and
+            // XTSE0080 has already refused the name.
+            if (arity == 1
+                && m_schemas?.FindType(expanded.NamespaceUri, expanded.LocalName)
+                    is { Variety: not XdmSchemaVariety.Complex } clashing)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTSE0770,
+                    $"The function '{name}' takes one argument and is named after {clashing.Written}, a "
+                    + "simple type the stylesheet imported, which already has a constructor function of "
+                    + "that name and arity.");
+            }
+
             // A function obeys import precedence like everything else declared at the top level. Two of one
             // name and arity at one precedence is a stylesheet saying the same thing twice with nothing to
             // decide between them; two at different precedences is a module overriding a function it
