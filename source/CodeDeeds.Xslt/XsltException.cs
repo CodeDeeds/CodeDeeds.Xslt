@@ -708,7 +708,10 @@ namespace CodeDeeds.Xslt
         /// <summary>A <c>type</c> attribute that is not a QName, or names a type not among the schema components in scope.</summary>
         XTSE1520,
 
-        /// <summary>A <c>type</c> naming a complex type where what is validated is an attribute.</summary>
+        /// <summary>A <c>type</c> on an <c>xsl:attribute</c> naming a complex type.</summary>
+        XTSE1530,
+
+        /// <summary>A <c>type</c> naming a complex type where what is copied is an attribute.</summary>
         XTTE1535,
 
         /// <summary>Validation against the type a <c>type</c> attribute names found the element or attribute invalid.</summary>

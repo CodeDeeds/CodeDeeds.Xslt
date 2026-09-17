@@ -357,6 +357,52 @@ namespace CodeDeeds.Xslt.UnitTests
                 Run(Sheet(Asked), Tags, validateInput: true));
         }
 
+        // ---- Which types an attribute may be validated against ---------------------------------------------
+
+        [TestMethod]
+        public void AnAttributeCannotNameAComplexTypeAndACopiedOneCannotEither()
+        {
+            // §25.4.1: "It is a static error if the value of the type attribute of an xsl:attribute
+            // instruction refers to a complex type definition." An attribute holds a simple value, and
+            // there is nothing a complex type could say about it.
+            Assert.AreEqual(
+                "XTSE1530",
+                Refuses(Sheet("<xsl:attribute name=\"a\" type=\"t:zType\">7</xsl:attribute>"), "<r/>"));
+
+            // Static, so it is raised though the instruction is never reached.
+            Assert.AreEqual(
+                "XTSE1530",
+                Refuses(
+                    Sheet(
+                        "<xsl:if test=\"false()\">"
+                        + "<xsl:attribute name=\"a\" type=\"t:zType\">7</xsl:attribute></xsl:if>"),
+                    "<r/>"));
+
+            // The neighbouring rule is a type error rather than a static one, and the reason is the last
+            // clause of it: "It is a type error if the value of the type attribute of an xsl:copy or
+            // xsl:copy-of instruction refers to a complex type definition and one or more of the items
+            // being copied is an attribute node." What is copied is not known until the copy is made.
+            Assert.AreEqual(
+                "XTTE1535",
+                Refuses(
+                    Sheet(
+                        "<xsl:variable name=\"v\"><e a=\"7\"/></xsl:variable>"
+                        + "<xsl:copy-of select=\"$v//@a\" type=\"t:zType\"/>"),
+                    "<r/>"));
+
+            // The same type where an element is what is copied is what naming one is for, and the copy
+            // comes out annotated with it.
+            Assert.AreEqual(
+                "<out>true</out>",
+                Run(
+                    Sheet(
+                        "<xsl:variable name=\"v\"><t:z price=\"1.5\"/></xsl:variable>"
+                        + "<xsl:variable name=\"c\" as=\"element()\">"
+                        + "<xsl:copy-of select=\"$v/t:z\" type=\"t:zType\"/></xsl:variable>"
+                        + "<xsl:value-of select=\"$c instance of element(*, t:zType)\"/>"),
+                    "<r/>"));
+        }
+
         // ---- What a copy may not leave behind --------------------------------------------------------------
 
         /// <summary>An element with a QName-valued attribute, built and validated.</summary>

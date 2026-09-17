@@ -288,7 +288,8 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 throw XsltErrors.Error(
                     XsltErrorCode.XTTE1535,
-                    $"{type.Written} is a complex type, and an attribute is validated against a simple one.");
+                    $"{type.Written} is a complex type, and an attribute among what is copied is validated "
+                    + "against a simple one.");
             }
 
             if (type.Refuses(value, namespaces) is string problem)

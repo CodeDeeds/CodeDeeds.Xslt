@@ -13061,6 +13061,19 @@ namespace CodeDeeds.Xslt.Compiler
 
             (string mode, XdmSchemaType? type) = EffectiveValidation(element, literal);
 
+            // §25.4.1: "It is a static error if the value of the type attribute of an xsl:attribute
+            // instruction refers to a complex type definition." An attribute holds a simple value, so
+            // there is nothing a complex type could say about it. The same type named on an xsl:copy or
+            // xsl:copy-of is a type error instead, and only where an attribute is among what is copied,
+            // which is not known until the instruction runs (XTTE1535).
+            if (shape == ValidationShape.Attribute && type is { Variety: XdmSchemaVariety.Complex })
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTSE1530,
+                    $"The type attribute of xsl:attribute names {type.Written}, which is a complex type. "
+                    + "An attribute holds a simple value and is validated against a simple type.");
+            }
+
             // strip and preserve validate nothing; a freshly constructed element and its content are
             // untyped whichever is asked, so the instruction stands as it is.
             if (type is null && mode is not ("strict" or "lax"))

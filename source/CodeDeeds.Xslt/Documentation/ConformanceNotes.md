@@ -6655,7 +6655,7 @@ Applied to a clone of the suite, both tests raise the `XTSE3050` they were writt
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
 validation settles about a constructed node*. With all five the 3.0 run reads **7,914 of 7,924** and the
-schema-aware run **8,510 of 8,526**. The patch is not applied here, and the figures in these notes do not
+schema-aware run **8,511 of 8,526**. The patch is not applied here, and the figures in these notes do not
 include it. A measurement is worth something because of what it is taken against, and a patch kept in the
 repository and offered upstream is worth more than five tests counted differently at home.
 
@@ -7053,6 +7053,30 @@ stripped copy beside a validated one, and the two answers are per node.
 The schema-aware run goes from 8,504 of 8,526 to **8,505** on both backends, and `insn/copy` is empty.
 Nothing else moves: an unvalidated tree has no annotation to strip and no property to keep, and the 3.0,
 2.0 and XPath runs keep their failure sets test for test. Two new unit tests, 2,810 in all.
+
+### When naming a complex type is wrong on sight, and when it has to wait
+
+`error-1530a` writes `<xsl:attribute name="d" type="t"/>` where `t` is a complex type, and asks for
+`XTSE1530`. The engine raised `XTTE1535`. The two codes stand next to each other in the specification and
+are a few words apart. `XTSE1530` is "a static error if the value of the `type` attribute of an
+`xsl:attribute` instruction refers to a complex type definition". `XTTE1535` is "a type error if the value
+of the `type` attribute of an `xsl:copy` or `xsl:copy-of` instruction refers to a complex type definition
+and one or more of the items being copied is an attribute node".
+
+Both say the same thing about the same mistake: an attribute holds a simple value, and there is nothing a
+complex type could say about one. What they differ over is when it can be known. `xsl:attribute` builds an
+attribute and nothing else, so naming a complex type on it is wrong on sight — a static error, raised
+whether the instruction is ever reached or not. Whether an attribute is among what a copy copies is a
+question about the value of a `select` expression, so that half is a type error and waits for the copy to
+be made; `error-1535a`, which copies `$v//@code`, is the case that has to.
+
+The engine had only the second, in the one place that validates an attribute's value against a named type,
+which both instructions pass through. The static half now stands where the compiler settles what
+validation an instruction is subject to, and asks only of `xsl:attribute`.
+
+The schema-aware run goes from 8,505 of 8,526 to **8,506** on both backends, and `misc/error` is down to
+one. Nothing else moves: the check needs a `type` attribute naming a complex type in scope, and without a
+schema there are no types in scope to name — `XTSE1660` comes first. One new unit test, 2,811 in all.
 
 ### Which results the suite asks for and does not get
 
