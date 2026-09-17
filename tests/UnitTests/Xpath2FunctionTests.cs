@@ -504,6 +504,29 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
+        public void ThePartsOfAQNameThatAreNamesAreTypedAsNames()
+        {
+            // F&O declares fn:local-name-from-QName and fn:prefix-from-QName "as xs:NCName?", not as a
+            // string that happens to be one, and a stylesheet can see the difference. The suite's
+            // namespace-2619 asks in as many words. fn:namespace-uri-from-QName is "as xs:anyURI".
+            Assert.AreEqual(
+                "true true true",
+                Value(Writes(
+                    "string-join((local-name-from-QName(xs:QName('p:thing')) instance of xs:NCName, "
+                    + "prefix-from-QName(xs:QName('p:thing')) instance of xs:NCName, "
+                    + "namespace-uri-from-QName(xs:QName('p:thing')) instance of xs:anyURI), ' ')",
+                    stylesheetNamespaces: " xmlns:p=\"urn:x\"")));
+
+            // An NCName is a string as well, being derived from one, and everything a string does it does.
+            Assert.AreEqual(
+                "true thing",
+                Value(Writes(
+                    "concat(local-name-from-QName(xs:QName('p:thing')) instance of xs:string, ' ', "
+                    + "local-name-from-QName(xs:QName('p:thing')))",
+                    stylesheetNamespaces: " xmlns:p=\"urn:x\"")));
+        }
+
+        [TestMethod]
         public void AnUnboundPrefixInALiteralQNameIsRefused()
         {
             XsltException error = Assert.ThrowsExactly<XsltException>(

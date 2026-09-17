@@ -940,16 +940,21 @@ namespace CodeDeeds.Xslt.XPath
 
                     XdmQName name = argument.AsQName();
 
+                    // The local part and the prefix are each declared as xs:NCName, not as a string that
+                    // happens to be one: fn:local-name-from-QName is "as xs:NCName?" and so is
+                    // fn:prefix-from-QName. A stylesheet can see the difference, which is what the suite's
+                    // namespace-2619 asks in as many words.
                     return m_name switch
                     {
-                        "local-name-from-QName" => XPathValue.FromString(name.LocalName),
+                        "local-name-from-QName" =>
+                            XPathValue.FromString(name.LocalName).AsDerived(XdmType.DerivedType.NCName),
                         "namespace-uri-from-QName" => XPathValue.FromAnyUri(name.NamespaceUri),
 
                         // A name written without a prefix has none, and the empty sequence is how that is
                         // said — an empty string would be a prefix that happens to be empty.
                         _ => name.Prefix.Length == 0
                             ? XPathValue.FromSequence(XdmSequence.Empty)
-                            : XPathValue.FromString(name.Prefix),
+                            : XPathValue.FromString(name.Prefix).AsDerived(XdmType.DerivedType.NCName),
                     };
                 }
 

@@ -6655,7 +6655,7 @@ Applied to a clone of the suite, both tests raise the `XTSE3050` they were writt
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
 validation settles about a constructed node*. With all five the 3.0 run reads **7,914 of 7,924** and the
-schema-aware run **8,512 of 8,526**. The patch is not applied here, and the figures in these notes do not
+schema-aware run **8,513 of 8,526**. The patch is not applied here, and the figures in these notes do not
 include it. A measurement is worth something because of what it is taken against, and a patch kept in the
 repository and offered upstream is worth more than five tests counted differently at home.
 
@@ -7111,6 +7111,28 @@ is being added to and now asks its annotation first.
 The schema-aware run goes from 8,506 of 8,526 to **8,507** on both backends, and `decl/strip-space` is
 empty. Nothing else moves: an element with no annotation is not one this describes, and the 3.0, 2.0 and
 XPath runs keep their failure sets test for test. One new unit test, 2,812 in all.
+
+### A name that is a name, and not a string that looks like one
+
+`namespace-2619` is one line long and says what it measures in its title: *test that result of
+local-name-from-QName is an NCName*. It writes `local-name-from-QName(node-name($x/*)) instance of
+xs:NCName` and wants `true`. The engine said `false`.
+
+F&O declares the function `as xs:NCName?`, and `fn:prefix-from-QName` the same way; only
+`fn:namespace-uri-from-QName` returns something else, an `xs:anyURI`, which the engine already made. The
+other two were making an `xs:string`. Every string operation still worked on it and the text was right,
+but the one question this test asks came back wrong, because an `xs:string` is not an `xs:NCName` however
+it is spelled — the derivation goes the other way.
+
+The engine has the type: values carry a derived type beside the primitive one, which is how a validated
+node's typed value can be an `xs:ID` rather than a string, and `AsDerived` is what puts one on. The two
+functions now put one on. Nothing else about the value changes: an `xs:NCName` is derived from
+`xs:string` through `xs:token` and `xs:Name`, so it is still an `xs:string` to anything that asks, and
+every function that takes a string still takes it.
+
+The schema-aware run goes from 8,507 of 8,526 to **8,508** on both backends, and `type/namespace` is
+empty. Nothing else moves, the two XPath runs included, which is where these functions are exercised most:
+18,268 and 14,553, failure set for failure set. One new unit test, 2,813 in all.
 
 ### Which results the suite asks for and does not get
 
