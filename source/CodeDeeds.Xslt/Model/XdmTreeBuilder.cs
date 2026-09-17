@@ -247,11 +247,48 @@ namespace CodeDeeds.Xslt.Model
             }
 
             int element = m_openNodes[m_openDepth - 1];
+
+            if (HoldsSimpleContent(element))
+            {
+                return false;
+            }
+
             int fingerprint = NameTable.GetFingerprintOfNameCode(m_nameCode[element]);
 
             return Whitespace.ShouldStrip(
                 NameTable.GetNamespaceUri(fingerprint),
                 NameTable.GetLocalName(fingerprint));
+        }
+
+        /// <summary>
+        /// Whether an element's type annotation is one whose content is a value rather than elements.
+        /// </summary>
+        /// <remarks>
+        /// §4.4.2: "If an element in a source document has a type annotation that is a simple type or a
+        /// complex type with simple content, then any whitespace text nodes among its children are
+        /// preserved, regardless of any <c>xsl:strip-space</c> declarations. The reason for this is that
+        /// stripping a whitespace text node from an element with simple content could make the element
+        /// invalid: for example, it could cause the <c>minLength</c> facet to be violated." The annotation
+        /// is what is asked, not the declaration, which is why the same specification adds that "stripping
+        /// of type annotations happens before stripping of whitespace text nodes, so this situation will
+        /// not occur if <c>input-type-annotations="strip"</c> is specified" — a tree read that way has
+        /// no annotation here to find, and the declarations apply as they would to any other document.
+        /// </remarks>
+        /// <param name="element">The open element the text is being added to.</param>
+        private bool HoldsSimpleContent(int element)
+        {
+            if (m_nodeType is null)
+            {
+                return false;
+            }
+
+            XPath.XdmSchemaType? type = XPath.XdmSchemaType.ById(m_nodeType[element]);
+
+            // Mixed content is not simple content: an element that admits both text and elements is one
+            // whose whitespace the declarations are free to strip.
+            return type is not null
+                && (type.Variety != XPath.XdmSchemaVariety.Complex
+                    || type.Content == System.Xml.Schema.XmlSchemaContentType.TextOnly);
         }
 
         /// <summary>

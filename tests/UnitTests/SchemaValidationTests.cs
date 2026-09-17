@@ -40,6 +40,14 @@ namespace CodeDeeds.Xslt.UnitTests
             + "<xs:extension base=\"xs:ID\"/></xs:simpleContent></xs:complexType>"
             + "<xs:element name=\"tags\"><xs:complexType><xs:sequence>"
             + "<xs:element ref=\"t:tag\" maxOccurs=\"unbounded\"/></xs:sequence></xs:complexType></xs:element>"
+            + "<xs:element name=\"plain\" type=\"xs:string\"/>"
+            + "<xs:element name=\"line\" type=\"t:lineType\"/>"
+            + "<xs:complexType name=\"lineType\"><xs:simpleContent>"
+            + "<xs:extension base=\"xs:string\"><xs:attribute name=\"n\" type=\"xs:integer\"/>"
+            + "</xs:extension></xs:simpleContent></xs:complexType>"
+            + "<xs:element name=\"page\"><xs:complexType><xs:sequence>"
+            + "<xs:element ref=\"t:plain\"/><xs:element ref=\"t:line\"/><xs:element ref=\"t:note\"/>"
+            + "</xs:sequence></xs:complexType></xs:element>"
             + "<xs:element name=\"bit\" type=\"t:bitType\"/>"
             + "<xs:complexType name=\"bitType\">"
             + "<xs:attribute name=\"id\" type=\"xs:ID\"/>"
@@ -61,6 +69,14 @@ namespace CodeDeeds.Xslt.UnitTests
 
         /// <summary>Two elements whose own content a schema types as an ID.</summary>
         private const string Tags = "<tags xmlns=\"urn:t\"><tag>a1</tag><tag>a2</tag></tags>";
+
+        /// <summary>
+        /// Whitespace inside three elements: one of a simple type, one of a complex type whose content is
+        /// simple, and one whose content model is mixed.
+        /// </summary>
+        private const string Page =
+            "<page xmlns=\"urn:t\"><plain>   </plain><line n=\"1\">   </line>"
+            + "<note>   <em>x</em>   </note></page>";
 
         /// <summary>Two elements that name one another, by attributes a schema types as ID and IDREFS.</summary>
         private const string Bits = "<bits xmlns=\"urn:t\"><bit id=\"p1\" refs=\"q1\"/><bit id=\"q1\"/></bits>";
@@ -355,6 +371,40 @@ namespace CodeDeeds.Xslt.UnitTests
             Assert.AreEqual(
                 "<out>true true</out>",
                 Run(Sheet(Asked), Tags, validateInput: true));
+        }
+
+        // ---- Which whitespace a declaration may strip ------------------------------------------------------
+
+        [TestMethod]
+        public void WhitespaceIsKeptInsideAnElementWhoseContentIsAValue()
+        {
+            // §4.4.2: "If an element in a source document has a type annotation that is a simple type or a
+            // complex type with simple content, then any whitespace text nodes among its children are
+            // preserved, regardless of any xsl:strip-space declarations. The reason for this is that
+            // stripping a whitespace text node from an element with simple content could make the element
+            // invalid: for example, it could cause the minLength facet to be violated."
+            const string Counted =
+                "<xsl:value-of select=\"string-length(/t:page/t:plain), string-length(/t:page/t:line), "
+                + "count(/t:page/t:note/text())\"/>";
+
+            const string Stripping = Import + "<xsl:strip-space elements=\"*\"/>";
+
+            // Mixed content is not simple content, so the note's whitespace goes.
+            Assert.AreEqual(
+                "<out>3 3 0</out>", Run(Sheet(Counted, Stripping), Page, validateInput: true));
+
+            // With no declaration to strip by, all three keep what they were written with.
+            Assert.AreEqual("<out>3 3 2</out>", Run(Sheet(Counted, Import), Page, validateInput: true));
+
+            // It is the annotation the rule reads, not the declaration, which is why the same section adds
+            // that "stripping of type annotations happens before stripping of whitespace text nodes, so
+            // this situation will not occur if input-type-annotations='strip' is specified".
+            Assert.AreEqual(
+                "<out>0 0 0</out>",
+                Run(
+                    Sheet(Counted, Stripping, "input-type-annotations=\"strip\""),
+                    Page,
+                    validateInput: true));
         }
 
         // ---- Which types an attribute may be validated against ---------------------------------------------

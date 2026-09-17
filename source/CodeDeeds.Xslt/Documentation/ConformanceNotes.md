@@ -6655,7 +6655,7 @@ Applied to a clone of the suite, both tests raise the `XTSE3050` they were writt
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
 validation settles about a constructed node*. With all five the 3.0 run reads **7,914 of 7,924** and the
-schema-aware run **8,511 of 8,526**. The patch is not applied here, and the figures in these notes do not
+schema-aware run **8,512 of 8,526**. The patch is not applied here, and the figures in these notes do not
 include it. A measurement is worth something because of what it is taken against, and a patch kept in the
 repository and offered upstream is worth more than five tests counted differently at home.
 
@@ -7077,6 +7077,40 @@ validation an instruction is subject to, and asks only of `xsl:attribute`.
 The schema-aware run goes from 8,505 of 8,526 to **8,506** on both backends, and `misc/error` is down to
 one. Nothing else moves: the check needs a `type` attribute naming a complex type in scope, and without a
 schema there are no types in scope to name — `XTSE1660` comes first. One new unit test, 2,811 in all.
+
+### The whitespace a declaration is not allowed to strip
+
+`strip-space-008` says what it is for in its own comment: *Test that whitespace text nodes are not stripped
+from elements with simple content regardless of `xsl:preserve-space` or `xsl:strip-space`.* It declares
+`<xsl:strip-space elements="firstName familyName"/>` over a validated document in which `firstName` has a
+simple type and `familyName` a complex type with simple content, and then asks eight different ways
+whether the whitespace survived, one `xsl:when` per way, falling through to `<ok/>` only if all eight say
+it did. The engine stopped at the first.
+
+§4.4.2 gives the two ordinary reasons a whitespace text node is preserved — its parent's name is in
+the set the declarations build, or an ancestor carries `xml:space="preserve"` — and then adds a third that
+overrides both. "If an element in a source document has a type annotation that is a simple type or a
+complex type with simple content, then any whitespace text nodes among its children are preserved,
+regardless of any `xsl:strip-space` declarations. The reason for this is that stripping a whitespace text
+node from an element with simple content could make the element invalid: for example, it could cause the
+`minLength` facet to be violated."
+
+It is the type annotation that is asked, not the declaration the element was validated against, and the
+specification says so twice over: "stripping of type annotations happens before stripping of whitespace
+text nodes, so this situation will not occur if `input-type-annotations="strip"` is specified". A tree
+read that way has no annotation left here to find, and the declarations apply to it as they would to any
+other document.
+
+The engine already knew the neighbouring case, which is not this one: an element whose type admits
+elements and no text has no whitespace text nodes at all, because the data model leaves element content
+whitespace out (XDM §6.7.3), and that is decided when the tree is built whatever the stylesheet says.
+Mixed content is not simple content either, and there the declarations do apply. What was missing was the
+middle case, and it goes in the same place: the tree builder, which is asking about the element the text
+is being added to and now asks its annotation first.
+
+The schema-aware run goes from 8,506 of 8,526 to **8,507** on both backends, and `decl/strip-space` is
+empty. Nothing else moves: an element with no annotation is not one this describes, and the 3.0, 2.0 and
+XPath runs keep their failure sets test for test. One new unit test, 2,812 in all.
 
 ### Which results the suite asks for and does not get
 
