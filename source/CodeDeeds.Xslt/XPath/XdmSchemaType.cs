@@ -584,6 +584,75 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
+        /// Whether two types are identical in the sense XSLT's compatibility rules use.
+        /// </summary>
+        /// <remarks>
+        /// XSLT 3.0 §3.5.3.3: "Types S and T are considered identical for the purpose of these rules if
+        /// and only if <c>subtype(S, T)</c> and <c>subtype(T, S)</c> both hold", with a note drawing out
+        /// the consequence that matters: "two plain union types are considered identical if they have the
+        /// same set of member types, even if the union types have different names or the ordering of the
+        /// member types is different." A union is a set of types written in some order under some name,
+        /// and neither the order nor the name is part of what it accepts — so an override may declare its
+        /// own union of the same members and still present the interface the original did.
+        /// </remarks>
+        /// <param name="other">The type compared with.</param>
+        public bool IdenticalTo(XdmSchemaType other)
+        {
+            if (ReferenceEquals(this, other))
+            {
+                return true;
+            }
+
+            return IsPureUnion && other.IsPureUnion && Covers(this, other) && Covers(other, this);
+        }
+
+        /// <summary>Whether every member of one union is a member of the other.</summary>
+        private static bool Covers(XdmSchemaType one, XdmSchemaType other)
+        {
+            foreach (XdmSchemaType member in one.MemberTypes)
+            {
+                bool found = false;
+
+                foreach (XdmSchemaType candidate in other.MemberTypes)
+                {
+                    if (SameMember(member, candidate))
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>Whether two member types of a union are the same type.</summary>
+        /// <remarks>
+        /// Two schemas naming <c>xs:date</c> usually reach the same object, but need not, so a named type
+        /// is compared by its name; an anonymous one has no name to compare and is the object it is.
+        /// </remarks>
+        private static bool SameMember(XdmSchemaType one, XdmSchemaType other)
+        {
+            if (ReferenceEquals(one, other))
+            {
+                return true;
+            }
+
+            if (one.IsAnonymous || other.IsAnonymous)
+            {
+                return one.IdenticalTo(other);
+            }
+
+            return string.Equals(one.NamespaceUri, other.NamespaceUri, StringComparison.Ordinal)
+                && string.Equals(one.LocalName, other.LocalName, StringComparison.Ordinal);
+        }
+
+        /// <summary>
         /// Whether this type is another, or derives from it (XPath 3.1 §2.5.5): the other is on the base
         /// chain, or is a pure union type this one is a member of, at any remove.
         /// </summary>

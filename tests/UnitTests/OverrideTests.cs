@@ -407,5 +407,84 @@ namespace CodeDeeds.Xslt.UnitTests
                         + "</xsl:override>"),
                     library));
         }
+        // ---- when two types written differently are one type -------------------------------------------
+
+        /// <summary>A package declaring a union type of its own and a public variable of that type.</summary>
+        private static string Union(string name, string type, string members, string body = "")
+        {
+            return $"<xsl:package name=\"{name}\" package-version=\"1.0\" version=\"3.0\" xmlns:xsl=\"{Xsl}\" "
+                + "xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" exclude-result-prefixes=\"xs\">"
+                + "<xsl:import-schema><xs:schema>"
+                + $"<xs:simpleType name=\"{type}\"><xs:union memberTypes=\"{members}\"/></xs:simpleType>"
+                + "</xs:schema></xsl:import-schema>"
+                + body
+                + "</xsl:package>";
+        }
+
+        /// <summary>Compiles a package that uses another, with the schemas each imports in scope.</summary>
+        private static string RefusesTyped(string principal, Library library)
+        {
+            return Assert.ThrowsExactly<XsltException>(
+                () => new Xslt(
+                    principal,
+                    new XsltOptions
+                    {
+                        Version = XsltVersion.V30,
+                        OmitXmlDeclaration = true,
+                        SchemaAware = true,
+                        InitialTemplate = "main",
+                        PackageResolver = library,
+                        StylesheetResolver = library,
+                    }).Transform()).Code ?? string.Empty;
+        }
+
+        private static string RunTyped(string principal, Library library)
+        {
+            return new Xslt(
+                principal,
+                new XsltOptions
+                {
+                    Version = XsltVersion.V30,
+                    OmitXmlDeclaration = true,
+                    SchemaAware = true,
+                    InitialTemplate = "main",
+                    PackageResolver = library,
+                    StylesheetResolver = library,
+                }).Transform();
+        }
+
+        [TestMethod]
+        public void TwoUnionsOfTheSameMemberTypesAreTheSameType()
+        {
+            // §3.5.3.3: "Types S and T are considered identical for the purpose of these rules if and only if
+            // subtype(S, T) and subtype(T, S) both hold", with a note drawing out what that means here: "two
+            // plain union types are considered identical if they have the same set of member types, even if
+            // the union types have different names or the ordering of the member types is different." An
+            // override may declare its own union of the same members and still present the same interface.
+            Library library = new Library().Add(
+                "urn:lib",
+                Union(
+                    "urn:lib",
+                    "u1",
+                    "xs:date xs:time xs:dateTime",
+                    "<xsl:variable name=\"v\" as=\"u1\" select=\"current-dateTime()\" visibility=\"public\"/>"));
+
+            string overriding =
+                "<xsl:use-package name=\"urn:lib\"><xsl:override>"
+                + "<xsl:variable name=\"v\" as=\"u2\" select=\"current-date()\" visibility=\"public\"/>"
+                + "</xsl:override></xsl:use-package>"
+                + "<xsl:template name=\"main\" visibility=\"public\">"
+                + "<out><xsl:value-of select=\"$v instance of xs:date\"/></out></xsl:template>";
+
+            Assert.AreEqual(
+                "<out>true</out>",
+                RunTyped(Union("urn:main", "u2", "xs:time xs:dateTime xs:date", overriding), library));
+
+            // A union of other members is another type, and the override no longer presents what the
+            // original did.
+            Assert.AreEqual(
+                "XTSE3070",
+                RefusesTyped(Union("urn:main", "u2", "xs:dateTime xs:date", overriding), library));
+        }
     }
 }

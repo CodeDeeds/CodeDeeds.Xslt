@@ -135,7 +135,7 @@ namespace CodeDeeds.Xslt.XPath
                 || m_anyAtomic != other.m_anyAtomic
                 || m_anyNumeric != other.m_anyNumeric
                 || m_derivedType != other.m_derivedType
-                || !ReferenceEquals(SchemaType, other.SchemaType)
+                || !SameSchemaType(SchemaType, other.SchemaType)
                 || (m_memberType is null) != (other.m_memberType is null)
                 || (m_keyType is null) != (other.m_keyType is null)
                 || (m_kindTest is null) != (other.m_kindTest is null))
@@ -184,6 +184,25 @@ namespace CodeDeeds.Xslt.XPath
             // erring towards refusing an override whose element(p:x) was spelled element(q:x).
             return m_kindTest is null
                 || string.Equals(m_written.Trim(), other.m_written.Trim(), StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// Whether two sequence types name the same schema type, or neither names one.
+        /// </summary>
+        /// <remarks>
+        /// Usually the same object, two references to one type in one set of schema components being the
+        /// same component. Two <em>unions</em> of the same member types are not the same component and are
+        /// the same type all the same — see <see cref="XdmSchemaType.IdenticalTo"/>, which is where XSLT's
+        /// compatibility rules put the difference between a type and the name it was written under.
+        /// </remarks>
+        private static bool SameSchemaType(XdmSchemaType? one, XdmSchemaType? other)
+        {
+            if (ReferenceEquals(one, other))
+            {
+                return true;
+            }
+
+            return one is not null && other is not null && one.IdenticalTo(other);
         }
 
         /// <summary>The same item type with another occurrence, which is what parentheses around it allow.</summary>

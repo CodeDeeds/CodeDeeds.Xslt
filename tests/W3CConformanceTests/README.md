@@ -246,7 +246,7 @@ the expected code left behind.
 
 The corrections are kept here as [`suite-corrections.patch`](suite-corrections.patch), which `git apply`
 takes from the root of a clone of the suite. With it all five tests raise the code they were written for
-and the 3.0 run goes from 7,911 to **7,914**, the schema-aware run from 8,498 to **8,503**. It is checked
+and the 3.0 run goes from 7,911 to **7,914**, the schema-aware run from 8,500 to **8,505**. It is checked
 in rather than applied: every figure in this document is measured against the suite as published, and the
 patch is there to be offered upstream rather than kept as a local advantage.
 

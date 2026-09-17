@@ -6655,7 +6655,7 @@ Applied to a clone of the suite, both tests raise the `XTSE3050` they were writt
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
 validation settles about a constructed node*. With all five the 3.0 run reads **7,914 of 7,924** and the
-schema-aware run **8,503 of 8,526**. The patch is not applied here, and the figures in these notes do not
+schema-aware run **8,505 of 8,526**. The patch is not applied here, and the figures in these notes do not
 include it. A measurement is worth something because of what it is taken against, and a patch kept in the
 repository and offered upstream is worth more than five tests counted differently at home.
 
@@ -6916,6 +6916,34 @@ failures to one. The other runs do not move: 7,911 of 7,924 at 3.0 on both backe
 needs a schema in scope except the document node test, which nothing outside this set was asking wrongly.
 One unit test moved, having written down what an enclosing element used to leave alone, and five are new,
 for 2,804.
+
+### When two types written differently are one type
+
+`decl/override` had two failures left, `override-f-031` and `override-v-005`, and one rule between them.
+Each declares a union type in the used package and another in the overriding one — the same member types,
+written in a different order under a different name — and this engine refused the override for not keeping
+the signature, `XTSE3070`.
+
+§3.5.3.3 settles it in a sentence that is easy to read past: "Types S and T are considered **identical**
+for the purpose of these rules if and only if `subtype(S, T)` and `subtype(T, S)` both hold". Identity is
+mutual subtyping, not the same name and not the same schema component, and the note that follows draws out
+the consequence: "two plain union types are considered identical if they have the same set of member types,
+even if the union types have different names or the ordering of the member types is different." The
+specification then works the example through, because the rule is not as innocent as it looks: a call that
+passes an untyped `"93.7"` to `union(xs:double, xs:decimal)` gets an `xs:double` and to
+`union(xs:decimal, xs:double)` an `xs:decimal`. Order changes what the function conversion rules do with a
+value and does not change what the type accepts, and it is what the type accepts that an override has to
+keep.
+
+So two sequence types naming schema types are the same type where the schema types are identical, and two
+pure unions are identical where each one's members are all members of the other. A member is compared by
+name where it has one — two schemas naming `xs:date` usually reach the same component but need not — and
+an anonymous member by what it is. The comparison is reached from nowhere else: it exists for `XTSE3070`,
+and `override-v-006`, whose union has *different* members, is still refused.
+
+The schema-aware run goes from 8,498 of 8,526 to **8,500**, and `decl/override` is empty. The 3.0, 2.0 and
+XPath runs are unmoved and their failure sets identical test for test: a union type needs a schema, and
+nothing else consults this comparison. One new unit test, 2,805 in all.
 
 ### Which results the suite asks for and does not get
 
