@@ -178,6 +178,97 @@ namespace CodeDeeds.Xslt.Compiler
     internal static class Instructions
     {
         /// <summary>
+        /// Refuses a copy that would leave namespace-sensitive content without the namespaces it needs.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// §11.9.2: "It is a type error to use the <c>xsl:copy</c> or <c>xsl:copy-of</c> instruction to copy
+        /// a node that has namespace-sensitive content if the <c>copy-namespaces</c> attribute has the value
+        /// <c>no</c> and its explicit or implicit <c>validation</c> attribute has the value
+        /// <c>preserve</c>. It is also a type error if either of these instructions (with
+        /// <c>validation="preserve"</c>) is used to copy an attribute having namespace-sensitive content,
+        /// unless the parent element is also copied. A node has namespace-sensitive content if its typed
+        /// value contains an item of type <c>xs:QName</c> or <c>xs:NOTATION</c> or a type derived
+        /// therefrom."
+        /// </para>
+        /// <para>
+        /// A QName held as a value is a prefix and the namespace that prefix is bound to, and the binding
+        /// is the element's, not the value's. Copy the element without its namespace nodes, or take the
+        /// attribute away from the element altogether, and what is left is a name that no longer means
+        /// anything — which is why the data model does not let a parentless attribute hold one at all.
+        /// Both halves of the rule are about keeping a value and the thing that gives it meaning together.
+        /// </para>
+        /// </remarks>
+        /// <param name="tree">The tree the node is in.</param>
+        /// <param name="node">The node being copied.</param>
+        /// <param name="copyNamespaces">Whether an element's namespace nodes come with it.</param>
+        /// <param name="preserveTypes">Whether the copy keeps the annotations, which is <c>preserve</c>.</param>
+        /// <exception cref="XsltException"><c>XTTE0950</c> where the copy would strand a QName.</exception>
+        internal static void RefuseStrandedQNames(
+            XdmTree tree, int node, bool copyNamespaces, bool preserveTypes)
+        {
+            if (!preserveTypes || !tree.HasTypeAnnotations)
+            {
+                return;
+            }
+
+            if (XdmTree.IsAttribute(node))
+            {
+                if (IsNamespaceSensitive(tree, node))
+                {
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XTTE0950,
+                        "An attribute whose value is a QName cannot be copied on its own with "
+                        + "validation=\"preserve\": the prefix in it is bound by the element the attribute "
+                        + "is on, and a parentless attribute has no element to be bound by. Copy the element "
+                        + "it belongs to, or validate the copy rather than preserving its type.");
+                }
+
+                return;
+            }
+
+            if (copyNamespaces || tree.KindOf(node) is not (NodeKind.Element or NodeKind.Root))
+            {
+                return;
+            }
+
+            // The whole subtree, because copy-namespaces="no" applies to "both elements selected directly
+            // by the select expression, and elements that are descendants of nodes selected" (§11.9.2).
+            for (int held = node; held <= tree.SubtreeEndOf(node); held++)
+            {
+                if (tree.KindOf(held) != NodeKind.Element)
+                {
+                    continue;
+                }
+
+                int count = tree.AttributeCountOf(held);
+
+                for (int i = 0; i <= count; i++)
+                {
+                    int asked = i == count ? held : tree.AttributeAt(held, i);
+
+                    if (IsNamespaceSensitive(tree, asked))
+                    {
+                        throw XsltErrors.Error(
+                            XsltErrorCode.XTTE0950,
+                            "A node whose typed value is a QName cannot be copied with "
+                            + "copy-namespaces=\"no\" and validation=\"preserve\": the prefix in the value is "
+                            + "bound by a namespace node the copy would leave behind. Keep the namespaces, or "
+                            + "validate the copy rather than preserving its type.");
+                    }
+                }
+            }
+        }
+
+        /// <summary>Whether a node's typed value holds a QName or a NOTATION, at any remove.</summary>
+        /// <param name="tree">The tree.</param>
+        /// <param name="node">The element or attribute.</param>
+        private static bool IsNamespaceSensitive(XdmTree tree, int node)
+        {
+            return tree.TypeAnnotationOf(node) is { UsesQNames: true };
+        }
+
+        /// <summary>
         /// The annotation an element constructed under <c>validation="preserve"</c> carries.
         /// </summary>
         /// <remarks>
@@ -2101,6 +2192,9 @@ namespace CodeDeeds.Xslt.Compiler
                 NodeSet nodes = value.AsNodeSet();
                 for (int i = 0; i < nodes.Count; i++)
                 {
+                    Instructions.RefuseStrandedQNames(
+                        nodes.TreeAt(i), nodes[i], m_copyNamespaces, m_preserveTypes);
+
                     NodeCopier.CopyDeep(
                         nodes.TreeAt(i), nodes[i], runtime.Output, m_copyNamespaces, m_copyAccumulators, runtime,
                         m_preserveTypes);
@@ -2123,6 +2217,9 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 if (items[i].Kind == XPathValueKind.Node)
                 {
+                    Instructions.RefuseStrandedQNames(
+                        items[i].NodeTree, items[i].NodeId, m_copyNamespaces, m_preserveTypes);
+
                     NodeCopier.CopyDeep(
                         items[i].NodeTree,
                         items[i].NodeId,
@@ -2452,6 +2549,9 @@ namespace CodeDeeds.Xslt.Compiler
                 }
 
                 default:
+                    // An attribute copied on its own reaches here; so does a text node, a comment and a
+                    // processing instruction, none of which a schema can type as a name.
+                    Instructions.RefuseStrandedQNames(tree, node, m_copyNamespaces, m_preserveTypes);
                     NodeCopier.CopyShallow(tree, node, runtime.Output, m_copyAccumulators, m_preserveTypes);
                     return;
             }

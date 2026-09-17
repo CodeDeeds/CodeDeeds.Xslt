@@ -40,6 +40,8 @@ namespace CodeDeeds.Xslt.UnitTests
             + "<xs:extension base=\"xs:ID\"/></xs:simpleContent></xs:complexType>"
             + "<xs:element name=\"tags\"><xs:complexType><xs:sequence>"
             + "<xs:element ref=\"t:tag\" maxOccurs=\"unbounded\"/></xs:sequence></xs:complexType></xs:element>"
+            + "<xs:element name=\"named\" type=\"t:namedType\"/>"
+            + "<xs:complexType name=\"namedType\"><xs:attribute name=\"q\" type=\"xs:QName\"/></xs:complexType>"
             + "<xs:element name=\"list\"><xs:complexType><xs:sequence>"
             + "<xs:element ref=\"t:count\" maxOccurs=\"unbounded\"/></xs:sequence></xs:complexType></xs:element>"
             + "</xs:schema>";
@@ -343,6 +345,56 @@ namespace CodeDeeds.Xslt.UnitTests
             Assert.AreEqual(
                 "<out>true true</out>",
                 Run(Sheet(Asked), Tags, validateInput: true));
+        }
+        // ---- What a copy may not leave behind --------------------------------------------------------------
+
+        /// <summary>An element with a QName-valued attribute, built and validated.</summary>
+        private const string Named =
+            "<xsl:variable name=\"e\" as=\"element()\">"
+            + "<t:named q=\"t:value\" xsl:validation=\"strict\"/></xsl:variable>";
+
+        [TestMethod]
+        public void AQNameCannotBeCopiedAwayFromWhatGivesItMeaning()
+        {
+            // §11.9.2: "It is a type error to use the xsl:copy or xsl:copy-of instruction to copy a node that
+            // has namespace-sensitive content if the copy-namespaces attribute has the value no and its
+            // explicit or implicit validation attribute has the value preserve. It is also a type error if
+            // either of these instructions (with validation="preserve") is used to copy an attribute having
+            // namespace-sensitive content, unless the parent element is also copied."
+            Assert.AreEqual(
+                "XTTE0950",
+                Refuses(
+                    Sheet(Named + "<xsl:copy-of select=\"$e\" copy-namespaces=\"no\" validation=\"preserve\"/>"),
+                    "<r/>"));
+
+            Assert.AreEqual(
+                "XTTE0950",
+                Refuses(Sheet(Named + "<xsl:copy-of select=\"$e/@q\" validation=\"preserve\"/>"), "<r/>"));
+
+            // §18.3 defines fn:copy-of as an xsl:copy-of with validation="preserve", so it is subject to the
+            // same rule.
+            Assert.AreEqual(
+                "XTTE0950",
+                Refuses(Sheet(Named + "<xsl:sequence select=\"copy-of($e/@q)\"/>"), "<r/>"));
+        }
+
+        [TestMethod]
+        public void AQNameIsCopiedWhereTheNamespacesComeToo()
+        {
+            // The element with its namespace nodes is the case the rule exists to allow: the prefix in the
+            // value still resolves in the copy.
+            Assert.AreEqual(
+                "<out><t:named xmlns:t=\"urn:t\" q=\"t:value\"/></out>",
+                Run(Sheet(Named + "<xsl:copy-of select=\"$e\" validation=\"preserve\"/>"), "<r/>"));
+
+            // And an attribute copied where the annotation is not preserved is an ordinary string.
+            Assert.AreEqual(
+                "<out><t:named xmlns:t=\"urn:t\" q=\"t:value\"/></out>",
+                Run(
+                    Sheet(
+                        Named
+                        + "<t:named><xsl:copy-of select=\"$e/@q\" validation=\"strip\"/></t:named>"),
+                    "<r/>"));
         }
     }
 }

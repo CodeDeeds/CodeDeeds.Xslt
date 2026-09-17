@@ -2043,6 +2043,13 @@ namespace CodeDeeds.Xslt.Compiler
                     continue;
                 }
 
+                // §18.3 defines the function as an xsl:copy-of with copy-namespaces="yes",
+                // copy-accumulators="yes" and validation="preserve", so it is subject to what that
+                // instruction is subject to — here, that an attribute holding a QName cannot be copied
+                // away from the element whose namespace nodes give the prefix in it a meaning.
+                Instructions.RefuseStrandedQNames(
+                    item.NodeTree, item.NodeId, copyNamespaces: true, preserveTypes: true);
+
                 // The copy answers for its accumulators as the original does, which is what tells fn:copy-of
                 // apart from a copy made by xsl:copy-of without copy-accumulators="yes".
                 SequenceCaptureTarget capture = new SequenceCaptureTarget();

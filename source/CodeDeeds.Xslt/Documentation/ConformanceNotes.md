@@ -6655,7 +6655,7 @@ Applied to a clone of the suite, both tests raise the `XTSE3050` they were writt
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
 validation settles about a constructed node*. With all five the 3.0 run reads **7,914 of 7,924** and the
-schema-aware run **8,506 of 8,526**. The patch is not applied here, and the figures in these notes do not
+schema-aware run **8,509 of 8,526**. The patch is not applied here, and the figures in these notes do not
 include it. A measurement is worth something because of what it is taken against, and a patch kept in the
 repository and offered upstream is worth more than five tests counted differently at home.
 
@@ -6973,6 +6973,48 @@ element as a reference, which is the same case seen from the other end.
 The schema-aware run goes from 8,500 of 8,526 to **8,501** on both backends, and `attr/strip-type-annotations`
 is empty. Nothing else moves: `input-type-annotations` has nothing to strip without a schema, and the 3.0,
 2.0 and XPath runs keep their failure sets test for test. One new unit test, 2,806 in all.
+
+### What a copy may not leave behind
+
+Three tests asked for `XTTE0950` and got a result: `error-0950a`, `error-0950b` and `copy-of-009`. The
+code had never been raised, or indeed defined.
+
+§11.9.2 states it in two halves. "It is a type error to use the `xsl:copy` or `xsl:copy-of` instruction
+to copy a node that has namespace-sensitive content if the `copy-namespaces` attribute has the value `no`
+and its explicit or implicit `validation` attribute has the value `preserve`. It is also a type error if
+either of these instructions (with `validation="preserve"`) is used to copy an attribute having
+namespace-sensitive content, unless the parent element is also copied. A node has namespace-sensitive
+content if its typed value contains an item of type `xs:QName` or `xs:NOTATION` or a type derived
+therefrom."
+
+Both halves are one thing said twice. A QName held as a value is a prefix and the namespace that prefix
+is bound to, and the binding belongs to the element, not to the value. Copy the element without its
+namespace nodes and the prefix in `q="my:value"` is bound to nothing; take the attribute away from the
+element altogether and there is nowhere for the binding to have been — which is why the data model does
+not allow a parentless attribute to hold a QName at all, as §5.7.3 says in as many words. The engine had
+the question already, in `XdmSchemaType.UsesQNames`, which `XTTE1545` asks of a type before an attribute is
+validated against it; what was missing was asking it of a node about to be copied.
+
+`error-0950a` is the first half, `error-0950b` the second, and `copy-of-009` the second reached by another
+road: it calls `fn:copy-of` on the element's attributes. §18.3 defines that function as
+
+```xml
+<xsl:copy-of select="$input" copy-namespaces="yes" copy-accumulators="yes" validation="preserve"/>
+```
+
+so it is subject to whatever the instruction is subject to, and copying a QName-valued attribute out of
+its element is exactly what it cannot do. The check is made where each node is about to be copied, in the
+instruction and in the function alike, and costs nothing on a tree that carries no annotations — which
+is every tree outside a schema-aware run.
+
+For an element the whole subtree is asked, because `copy-namespaces="no"` applies to "both elements
+selected directly by the `select` expression, and elements that are descendants of nodes selected": in
+`error-0950a` the element itself has no simple content and the attribute under it is the QName.
+
+The schema-aware run goes from 8,501 of 8,526 to **8,504** on both backends; `fn/copy-of` is empty and
+`misc/error` is down to two. Nothing else moves: the rule needs a type annotation
+to fire, and the 3.0, 2.0 and XPath runs keep their failure sets test for test. Two new unit tests, 2,808
+in all.
 
 ### Which results the suite asks for and does not get
 

@@ -761,6 +761,9 @@ namespace CodeDeeds.Xslt
         /// <summary><c>xsl:copy</c> copying the context item, where there is none or it is not a node.</summary>
         XTTE0945,
 
+        /// <summary>A copy that would leave a QName without the namespaces its prefix is bound by.</summary>
+        XTTE0950,
+
         /// <summary><c>xsl:number</c> numbering the context item, where that is not a node.</summary>
         XTTE0990,
 
