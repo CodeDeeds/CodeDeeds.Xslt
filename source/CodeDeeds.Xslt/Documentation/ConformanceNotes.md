@@ -6659,8 +6659,8 @@ across `decl/accept` and `decl/expose` on 5 March 2023 while these two files wer
 Applied to a clone of the suite, both tests raise the `XTSE3050` they were written for. A third
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
-validation settles about a constructed node*. With all seventeen the 3.0 run reads **8,046 of 8,053**,
-the 2.0 run **5,662 of 5,673** and the schema-aware run **8,655 of 8,709**. The patch is not applied here,
+validation settles about a constructed node*. With all seventeen the 3.0 run reads **8,064 of 8,071**,
+the 2.0 run **5,680 of 5,691** and the schema-aware run **8,673 of 8,727**. The patch is not applied here,
 and the figures in these notes do not include it. A measurement is worth something because of what it is
 taken against, and a patch kept in the repository and offered upstream is worth more than seventeen tests
 counted differently at home.
@@ -7691,6 +7691,72 @@ The 3.0 run goes from 7,961 of 7,971 to **8,043 of 8,053** and the 2.0 run from 
 schema-aware run goes from 8,560 of 8,573 to **8,650 of 8,709**: 136 more read, 90 more passing, and 46
 failing on one validator. Both XPath runs are unmoved at 18,268 of 18,285 and 14,553 of 14,577. Twenty-one
 unit tests, and one corrected that had recorded `xsl:assert` as raising `XTMM9000`; 2,859 in all.
+
+### A stylesheet that is not a document
+
+§3.12: a stylesheet module need not be an XML document. Its outermost element —
+`xsl:stylesheet`, `xsl:transform`, `xsl:package`, or a literal result element carrying `xsl:version`
+— may be a child of some element in a host document, and the usual reason is that the host document is
+the one to transform. `misc/embedded-stylesheet` is eighteen tests of it, and was the largest block of the
+suite still skipped for a feature that is not streaming, schema-awareness, XML 1.1 or a Unicode version.
+
+Most of it was already built and nothing had ever reached it. `FindStylesheetElement` takes an element to
+start at as well as a document to look in, `ResolveModule` splits a bare-name fragment off an `href` and
+resolves it through the ID index, and `LoadModule` carries the element down — all of which is what
+`xsl:include href="doc.xml#name"` needs, and all of which was written and never measured, the suite
+having no test that names a module that way. What was missing was the other half of the same idea: a
+module that is *itself* embedded, with nothing referring to it.
+
+Three things had to be added, and only one of them is large.
+
+**A boundary for the standard attributes.** §3.4: "In an embedded stylesheet module, standard
+attributes appearing on ancestors of the outermost element of the stylesheet module have no effect." Eight
+of them are read by walking up from the element that asks — `version`, `default-collation`,
+`default-mode`, `default-validation`, `exclude-result-prefixes`, `extension-element-prefixes`,
+`expand-text` and `xpath-default-namespace` — and each of those walks now stops at the module's
+outermost element. For a module that is a document of its own the boundary changes nothing, there being
+nothing above a document element to carry an attribute, so it costs a count of zero on every ordinary
+stylesheet. The walk deliberately left alone is `xml:base`: that is an XML property and not a standard
+attribute, and an ancestor's does apply. Namespace declarations are likewise untouched, being XML's rather
+than XSLT's: `embedded-stylesheet-001` expects the `xmlns:xsl` its host declared to come out on a copied
+element.
+
+`use-when` is in the list of eight in the specification and needed nothing here, because it is answered by
+walking *down* from the module's outermost element rather than up from anything. An ancestor's was never
+reachable to begin with.
+
+**A way in.** `Xslt.Embedded(document, id, options)` compiles the module that is the element carrying an
+identifier, and with no identifier reads the document's own `<?xml-stylesheet?>` instruction to find one.
+The tree is read and not altered, so the same tree is what to hand to `Transform(XdmTree)` afterwards,
+which is the point: a stylesheet embedded in the document it transforms is what the feature is for, and
+parsing that document twice to get the two halves would be absurd.
+
+**The instruction itself.** `<?xml-stylesheet type="application/xslt+xml" href="#style1"?>`, whose data is
+pseudo-attributes rather than attributes and has to be read by hand. It is not part of XSLT: §3.12
+says support for it "is not required for conformance with this Recommendation", which is why it is a
+method to call and not something the constructors do. The two media types read are the one XSLT registered,
+`application/xslt+xml`, and `text/xsl`, which browsers established before there was one to register; an
+instruction marked `alternate="yes"` is passed over, as is one for any other medium, so a document naming a
+CSS stylesheet beside its XSLT one is read correctly. An `href` that is not a bare fragment names a
+stylesheet somewhere else, which is not this method's business and is said so rather than guessed at.
+
+The identifier has to be one: XSLT's own `id` attribute on `xsl:stylesheet` is not an ID by being called
+that, and the suite's documents say so with an internal DTD subset declaring `<!ATTLIST xsl:stylesheet id
+ID #REQUIRED>`. That is read here already, `id()` having answered for DTD-declared IDs for as long as it
+has existed, so the fragment finds the element. `xml:id` works too and needs no declaration.
+
+All eighteen pass on the first measurement, and three of them never needed the feature: two are a standard
+stylesheet importing and including a *simplified* one, and one is a static error for text between
+declarations. They were skipped because the dependency is declared once for the test set.
+
+The 3.0 run goes from 8,043 of 8,053 to **8,061 of 8,071**, the 2.0 run from 5,660 of 5,683 to
+**5,678 of 5,701**, and the schema-aware run from 8,650 of 8,709 to **8,668 of 8,727** — eighteen more
+in each, since the tests are marked `XSLT20+` and every run reads them. Both XPath runs are unmoved at
+18,268 of 18,285 and 14,553 of 14,577, and every failure set is identical test for test on both backends.
+Seven unit tests, 2,866 in all.
+
+What is left skipped for a feature is streaming, schema-awareness off the `--schema` run, XML 1.1, XSD 1.1,
+and the two Unicode versions. None of those is a list entry that has outlived its omission.
 
 ### Which results the suite asks for and does not get
 

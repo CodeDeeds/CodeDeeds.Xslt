@@ -90,6 +90,18 @@ namespace CodeDeeds.Xslt.Conformance
         /// <summary>A stylesheet the environment supplies, where the test case names none itself.</summary>
         public string? StylesheetFile { get; private init; }
 
+        /// <summary>
+        /// Whether the source document names the stylesheet itself, with an <c>xml-stylesheet</c>
+        /// processing instruction pointing at a module embedded in it.
+        /// </summary>
+        /// <remarks>
+        /// The catalog writes it on the context source, and a test that declares it names no stylesheet of
+        /// its own: the document is both. Fifteen tests are written this way and each of them is about the
+        /// boundary — what the host document writes around the module, and what the module writes
+        /// itself.
+        /// </remarks>
+        public bool DefinesStylesheet { get; private init; }
+
         /// <summary>The stylesheet parameters the environment declares, as written.</summary>
         public List<XElement> Parameters { get; } = new();
 
@@ -221,6 +233,7 @@ namespace CodeDeeds.Xslt.Conformance
             string? sourceFile = null;
             string? sourceContent = null;
             string? sourceSelect = null;
+            bool definesStylesheet = false;
             bool validates = false;
             List<string> validatedFiles = new();
 
@@ -252,6 +265,7 @@ namespace CodeDeeds.Xslt.Conformance
                 // the fifteen left are ordinary tests — accumulator-034 even sets its own
                 // streamable="no" — that happened to mark the source they read.
 
+                definesStylesheet = (string?)source.Attribute("defines-stylesheet") == "true";
                 sourceFile = (string?)source.Attribute("file");
                 sourceContent = (string?)source.Element(ns + "content");
                 sourceSelect = (string?)source.Attribute("select");
@@ -261,6 +275,7 @@ namespace CodeDeeds.Xslt.Conformance
             {
                 Name = (string?)element.Attribute("name"),
                 SourceFile = sourceFile,
+                DefinesStylesheet = definesStylesheet,
                 SourceContent = sourceContent,
                 SourceBaseUri = sourceContent is null || element.BaseUri.Length == 0 ? null : element.BaseUri,
                 SourceSelect = sourceSelect,

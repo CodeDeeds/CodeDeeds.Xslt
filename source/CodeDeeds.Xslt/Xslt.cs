@@ -92,6 +92,173 @@ namespace CodeDeeds.Xslt
             }
         }
 
+        /// <summary>
+        /// Compiles a stylesheet that is embedded in a document rather than being one.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// XSLT 3.0 §3.12: a stylesheet module need not be a document of its own. Its outermost
+        /// element — <c>xsl:stylesheet</c>, <c>xsl:transform</c>, <c>xsl:package</c>, or a literal
+        /// result element carrying <c>xsl:version</c> — may be a child of some element in a host
+        /// document, and the usual reason is that the host document is the one to transform. What is around
+        /// it belongs to the host: standard attributes written on its ancestors have no effect on the
+        /// stylesheet (§3.4), so a document may say <c>xsl:version</c> or
+        /// <c>xsl:xpath-default-namespace</c> about its own content without either reaching in. Namespace
+        /// declarations are not standard attributes and are inherited as XML says.
+        /// </para>
+        /// <para>
+        /// Which element is the module may be said two ways. Naming an <paramref name="id"/> says it
+        /// outright: the module is the element carrying that identifier, which is an <c>xml:id</c> or an
+        /// attribute a DTD or schema typed <c>ID</c>. Leaving it out asks the document, which says so with
+        /// an <c>xml-stylesheet</c> processing instruction (<c>[XML Stylesheet]</c>) whose <c>href</c> is a
+        /// bare fragment: <c>&lt;?xml-stylesheet type="application/xslt+xml" href="#style1"?&gt;</c>.
+        /// That instruction is not part of XSLT and reading it is not required for conformance, which is
+        /// why it is a method to call rather than something the ordinary constructors do.
+        /// </para>
+        /// <para>
+        /// The tree is read and not altered, so the same one may be handed to <see cref="Transform(XdmTree)"/>
+        /// afterwards — which is the point, a stylesheet embedded in the document it transforms being
+        /// what the feature is for. Set <see cref="XsltOptions.BaseUri"/>, or build the tree with a base
+        /// URI, for an <c>xsl:import</c> inside the module to have something to resolve against.
+        /// </para>
+        /// </remarks>
+        /// <param name="document">The host document.</param>
+        /// <param name="id">
+        /// The identifier of the module's outermost element, or <see langword="null"/> to read the
+        /// document's own <c>xml-stylesheet</c> instruction.
+        /// </param>
+        /// <param name="options">Configuration for this stylesheet, or <see langword="null"/> for the defaults.</param>
+        /// <returns>The compiled stylesheet.</returns>
+        /// <exception cref="XsltException">
+        /// The document names no stylesheet, names one that is not in it, or names an element that is not a
+        /// stylesheet module.
+        /// </exception>
+        public static Xslt Embedded(XdmTree document, string? id = null, XsltOptions? options = null)
+        {
+            ArgumentNullException.ThrowIfNull(document);
+
+            options ??= XsltOptions.Default;
+            CheckOptions(options);
+
+            string named = id ?? StylesheetNamedBy(document);
+
+            if (!Compiler.IdExpr.BuildIndex(document).TryGetValue(named, out int outermost))
+            {
+                throw new XsltException(
+                    $"The stylesheet named is the element whose identifier is '{named}', and nothing in the "
+                    + "document carries that identifier. An identifier is an xml:id, or an attribute a DTD "
+                    + "or a schema typed as ID.");
+            }
+
+            return new Xslt(StylesheetCompiler.Compile(document, options, outermost), options);
+        }
+
+        /// <summary>
+        /// The identifier a document's <c>xml-stylesheet</c> instruction names.
+        /// </summary>
+        /// <remarks>
+        /// The instruction's data is pseudo-attributes: <c>type</c>, <c>href</c>, and optionally
+        /// <c>alternate</c>, <c>title</c>, <c>media</c> and <c>charset</c>. Only the first instruction
+        /// naming an XSLT media type and not marked <c>alternate="yes"</c> is taken, which is what a
+        /// document with a CSS stylesheet beside its XSLT one means. The two media types are the one XSLT
+        /// registered, <c>application/xslt+xml</c>, and <c>text/xsl</c>, which browsers established before
+        /// there was one to register.
+        /// </remarks>
+        /// <param name="document">The document to ask.</param>
+        private static string StylesheetNamedBy(XdmTree document)
+        {
+            for (int child = document.FirstChildOf(XdmTree.RootNode);
+                 child >= 0;
+                 child = document.NextSiblingOf(child))
+            {
+                if (document.KindOf(child) != NodeKind.ProcessingInstruction
+                    || document.NameTable.GetLocalName(document.FingerprintOf(child)) != "xml-stylesheet")
+                {
+                    continue;
+                }
+
+                Dictionary<string, string> said = PseudoAttributes(document.StringValueOf(child));
+
+                if (!said.TryGetValue("type", out string? type)
+                    || type is not ("application/xslt+xml" or "text/xsl")
+                    || (said.TryGetValue("alternate", out string? alternate) && alternate == "yes"))
+                {
+                    continue;
+                }
+
+                if (!said.TryGetValue("href", out string? href) || !href.StartsWith('#'))
+                {
+                    throw new XsltException(
+                        $"The document's xml-stylesheet instruction names '{href ?? string.Empty}', which is "
+                        + "not a stylesheet embedded in this document. Only a bare fragment is, which names "
+                        + "the element carrying that identifier; read anything else yourself and compile it "
+                        + "with a constructor.");
+                }
+
+                return href[1..];
+            }
+
+            throw new XsltException(
+                "The document carries no xml-stylesheet instruction naming an XSLT stylesheet, so there is "
+                + "nothing to say which element the embedded module is. Name it by its identifier instead.");
+        }
+
+        /// <summary>Reads the pseudo-attributes of an <c>xml-stylesheet</c> instruction.</summary>
+        /// <remarks>
+        /// Each is a name, an equals sign and a quoted value, separated by whitespace. Anything that is not
+        /// that shape ends the reading: the instruction is the document's and this engine is not the one to
+        /// decide what a malformed one meant.
+        /// </remarks>
+        /// <param name="data">The instruction's data.</param>
+        private static Dictionary<string, string> PseudoAttributes(string data)
+        {
+            Dictionary<string, string> said = new(StringComparer.Ordinal);
+            int at = 0;
+
+            while (at < data.Length)
+            {
+                while (at < data.Length && char.IsWhiteSpace(data[at]))
+                {
+                    at++;
+                }
+
+                int name = at;
+
+                while (at < data.Length && data[at] != '=' && !char.IsWhiteSpace(data[at]))
+                {
+                    at++;
+                }
+
+                if (at >= data.Length || data[at] != '=' || at == name)
+                {
+                    break;
+                }
+
+                char quote = ++at < data.Length ? data[at] : '\0';
+
+                if (quote is not ('"' or '\''))
+                {
+                    break;
+                }
+
+                int value = ++at;
+
+                while (at < data.Length && data[at] != quote)
+                {
+                    at++;
+                }
+
+                if (at >= data.Length)
+                {
+                    break;
+                }
+
+                said[data[name..(value - 2)]] = data[value..at++];
+            }
+
+            return said;
+        }
+
         private Xslt(CompiledStylesheet stylesheet, XsltOptions options)
         {
             m_stylesheet = stylesheet;

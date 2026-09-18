@@ -152,7 +152,6 @@ namespace CodeDeeds.Xslt.Conformance
             "streaming",
             "streaming-fallback",
             "XML_1.1",
-            "xsl-stylesheet-processing-instruction",
         };
 
         public TestResult Run(XElement testCase, XElement testSet, string directory)
@@ -196,12 +195,16 @@ namespace CodeDeeds.Xslt.Conformance
             List<XElement> stylesheets = test.Elements(Xslt30Catalog.Ns + "stylesheet")
                 .Where(sheet => (string?)sheet.Attribute("role") != "secondary")
                 .ToList();
+            // A test whose source names its own stylesheet names no other: the document is the stylesheet's
+            // host as well as the input, so the file to compile is the file to transform.
             string? stylesheetFile = principals.Count == 1
                 ? (string?)principals[0].Attribute("file")
                 : stylesheets.Count switch
                 {
                     1 => (string?)stylesheets[0].Attribute("file"),
-                    0 => environment?.StylesheetFile,
+                    0 => environment is { DefinesStylesheet: true, SourceFile: string host }
+                        ? host
+                        : environment?.StylesheetFile,
                     _ => null,
                 };
 
@@ -495,13 +498,24 @@ namespace CodeDeeds.Xslt.Conformance
                         : environment?.SourceBaseUri,
                 };
 
-                // The bytes, so that a stylesheet declaring itself ISO-8859-1 is read as one.
-                stylesheet = new Xslt(File.OpenRead(stylesheetPath), options);
+                // A document that names its own stylesheet is parsed once and used as both: the tree the
+                // embedded module was compiled from is the tree it transforms, which is what the feature is
+                // for. Everything else reads the stylesheet as bytes, so that one declaring itself
+                // ISO-8859-1 is read as one.
+                XdmTree? host = environment is { DefinesStylesheet: true } ? ReadHost(stylesheetPath, options) : null;
+
+                stylesheet = host is null
+                    ? new Xslt(File.OpenRead(stylesheetPath), options)
+                    : Xslt.Embedded(host, options: options);
 
                 if (compileOnly)
                 {
                     // Compiling is the whole of the question. Running would need a source document or an
                     // entry point, and the test supplied neither.
+                }
+                else if (host is not null)
+                {
+                    stylesheet.Transform(host, output);
                 }
                 else if (source is null)
                 {
@@ -1283,6 +1297,28 @@ namespace CodeDeeds.Xslt.Conformance
                 ?? (environment.Schemas.Count > 0 && !m_schemaAware ? "environment declares a schema" : null);
 
             return environment;
+        }
+
+        /// <summary>
+        /// Reads a document that carries a stylesheet inside it, as bytes and with its identifiers typed.
+        /// </summary>
+        /// <remarks>
+        /// From the bytes, because the document says what encoding it is in and only the bytes carry that.
+        /// With its internal subset read, because that is what types the <c>id</c> attribute these
+        /// documents use — the <c>xml-stylesheet</c> instruction names the module by a fragment, and a
+        /// fragment names an element only where something has said which attribute is the identifier.
+        /// </remarks>
+        /// <param name="path">The document.</param>
+        /// <param name="options">The options the transformation will run with, for the entity resolver.</param>
+        private static XdmTree ReadHost(string path, XsltOptions options)
+        {
+            using FileStream bytes = File.OpenRead(path);
+
+            return XdmTreeBuilder.FromXml(
+                bytes,
+                locations: true,
+                entityResolver: options.EntityResolver,
+                baseUri: new Uri(path).AbsoluteUri);
         }
 
         /// <summary>

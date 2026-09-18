@@ -332,6 +332,11 @@ namespace CodeDeeds.Xslt.Compiler
         /// </summary>
         private readonly SchemaComponents? m_schemas;
 
+        /// <summary>
+        /// Where the principal module starts, for one embedded in a host document; -1 otherwise.
+        /// </summary>
+        private int m_outermost = -1;
+
         private StylesheetCompiler(XdmTree tree, XsltOptions options)
         {
             m_tree = tree;
@@ -399,11 +404,19 @@ namespace CodeDeeds.Xslt.Compiler
         /// <summary>Compiles a stylesheet.</summary>
         /// <param name="tree">The stylesheet, already parsed into a tree.</param>
         /// <param name="options">Configuration, including how expressions execute and how references resolve.</param>
+        /// <param name="outermost">
+        /// The element the principal module starts at, for a stylesheet embedded in a host document, or -1
+        /// for the ordinary case where the document element is the module.
+        /// </param>
         /// <returns>The compiled stylesheet.</returns>
         /// <exception cref="XsltException">The stylesheet is not valid.</exception>
-        public static CompiledStylesheet Compile(XdmTree tree, XsltOptions? options = null)
+        public static CompiledStylesheet Compile(XdmTree tree, XsltOptions? options = null, int outermost = -1)
         {
-            StylesheetCompiler compiler = new StylesheetCompiler(tree, options ?? XsltOptions.Default);
+            StylesheetCompiler compiler = new StylesheetCompiler(tree, options ?? XsltOptions.Default)
+            {
+                m_outermost = outermost,
+            };
+
             return compiler.Run();
         }
 
@@ -480,7 +493,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="element">The element the expression is written at.</param>
         private string ChosenCollation(int element)
         {
-            for (int current = element; current >= 0; current = m_tree.ParentOf(current))
+            for (int current = element; current >= 0; current = Above(current))
             {
                 if (m_tree.KindOf(current) != NodeKind.Element)
                 {
@@ -624,10 +637,10 @@ namespace CodeDeeds.Xslt.Compiler
             // shadow attribute that follows the import.
             if (Implements30)
             {
-                SettleStaticsOf(m_tree, m_options.BaseUri, loading, null);
+                SettleStaticsOf(m_tree, m_options.BaseUri, loading, null, m_outermost);
             }
 
-            LoadModule(m_tree, m_options.BaseUri, loading);
+            LoadModule(m_tree, m_options.BaseUri, loading, m_outermost);
 
             // After every module, because a decimal format is the union of every declaration of it and a
             // disagreement between two is settled by a third of higher precedence.
@@ -683,7 +696,7 @@ namespace CodeDeeds.Xslt.Compiler
             // index that nothing has a rule in. The principal module's outermost element is the one that
             // settles it: an imported module's default is its own business.
             m_tree = principal;
-            m_scopeElement = FindStylesheetElement();
+            m_scopeElement = FindStylesheetElement(m_outermost, out _);
             int initialMode = DefaultModeIn(m_scopeElement);
             HashSet<int> eligibleModes = EligibleInitialModes(principal);
 
@@ -1773,7 +1786,6 @@ namespace CodeDeeds.Xslt.Compiler
             throw new XsltException("The stylesheet is empty.");
         }
 
-        private int FindStylesheetElement() => FindStylesheetElement(out _);
 
         /// <summary>
         /// Reads one stylesheet module and everything it references.
@@ -1978,6 +1990,14 @@ namespace CodeDeeds.Xslt.Compiler
             m_hasShadowAttributes |= HasShadowAttributes(tree);
 
             int stylesheetElement = FindStylesheetElement(from, out bool simplified);
+
+            // A module whose outermost element has an element above it is embedded in a host document, and
+            // the standard attributes of what is above it do not reach in. Recorded per tree, and only for
+            // the embedded ones, so that the boundary costs a count of zero everywhere else.
+            if (m_tree.KindOf(m_tree.ParentOf(stylesheetElement)) == NodeKind.Element)
+            {
+                m_embedded.Add((tree, stylesheetElement));
+            }
 
             if (m_stylesheetBaseUri is null)
             {
@@ -9109,7 +9129,7 @@ namespace CodeDeeds.Xslt.Compiler
 
             foreach (string attributeName in new[] { "exclude-result-prefixes", "extension-element-prefixes" })
             {
-                for (int current = element; current >= 0; current = m_tree.ParentOf(current))
+                for (int current = element; current >= 0; current = Above(current))
                 {
                     if (m_tree.KindOf(current) != NodeKind.Element)
                     {
@@ -9158,7 +9178,7 @@ namespace CodeDeeds.Xslt.Compiler
         {
             HashSet<string> prefixes = new(StringComparer.Ordinal);
 
-            for (int current = element; current >= 0; current = m_tree.ParentOf(current))
+            for (int current = element; current >= 0; current = Above(current))
             {
                 if (m_tree.KindOf(current) != NodeKind.Element)
                 {
@@ -9394,7 +9414,7 @@ namespace CodeDeeds.Xslt.Compiler
         {
             // The nearest declaration wins, and an empty value puts unprefixed names back in no
             // namespace — which is how a stylesheet turns the attribute off for one subtree.
-            for (int current = element; current >= 0; current = m_tree.ParentOf(current))
+            for (int current = element; current >= 0; current = Above(current))
             {
                 if (m_tree.KindOf(current) != NodeKind.Element)
                 {
@@ -9424,6 +9444,38 @@ namespace CodeDeeds.Xslt.Compiler
         /// part of the result, not a message to the processor. On an XSLT element it is the other way round.
         /// A stylesheet that names no version at all is read as XSLT 1.0.
         /// </remarks>
+        /// <summary>
+        /// The outermost element of each module embedded in a host document. Empty for every stylesheet
+        /// that is a document of its own, which is nearly all of them.
+        /// </summary>
+        /// <remarks>
+        /// By the element and not by the tree, because one document may hold more than one module: two
+        /// xsl:include declarations naming two fragments of it read one tree twice, and each of the two
+        /// stops its own walks where it begins.
+        /// </remarks>
+        private readonly HashSet<(XdmTree Tree, int Element)> m_embedded = new();
+
+        /// <summary>
+        /// The element whose standard attributes apply above this one, or -1 where this one is as far up as
+        /// they reach.
+        /// </summary>
+        /// <remarks>
+        /// XSLT 3.0 §3.4: "In an embedded stylesheet module, standard attributes appearing on
+        /// ancestors of the outermost element of the stylesheet module have no effect." For a module that is
+        /// a document of its own this changes nothing — there is nothing above the document element to
+        /// carry one — so the boundary is felt only by a module embedded in a host document, where what
+        /// the host writes on itself is none of the stylesheet's business: a document wrapping a stylesheet
+        /// may say <c>xsl:version="1.0"</c> or <c>xsl:use-when="false()"</c> about its own content without
+        /// either reaching in.
+        /// </remarks>
+        /// <param name="element">The element being walked up from.</param>
+        private int Above(int element)
+        {
+            return m_embedded.Count > 0 && m_embedded.Contains((m_tree, element))
+                ? -1
+                : m_tree.ParentOf(element);
+        }
+
         private XsltVersion VersionOf(int element)
         {
             // A shadow attribute exists only at 3.0, so while the one computing the version is being read
@@ -9434,7 +9486,7 @@ namespace CodeDeeds.Xslt.Compiler
                 return m_options.Version;
             }
 
-            for (int current = element; current >= 0; current = m_tree.ParentOf(current))
+            for (int current = element; current >= 0; current = Above(current))
             {
                 if (m_tree.KindOf(current) != NodeKind.Element)
                 {
@@ -9482,7 +9534,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// </remarks>
         private bool ExpandsText(int element)
         {
-            for (int current = element; current >= 0; current = m_tree.ParentOf(current))
+            for (int current = element; current >= 0; current = Above(current))
             {
                 if (m_tree.KindOf(current) != NodeKind.Element)
                 {
@@ -9534,7 +9586,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// </remarks>
         private int DefaultModeIn(int element)
         {
-            for (int current = element; current >= 0; current = m_tree.ParentOf(current))
+            for (int current = element; current >= 0; current = Above(current))
             {
                 if (m_tree.KindOf(current) != NodeKind.Element)
                 {
@@ -13125,7 +13177,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// </remarks>
         private string DefaultValidationInScope(int element)
         {
-            for (int current = element; current >= 0; current = m_tree.ParentOf(current))
+            for (int current = element; current >= 0; current = Above(current))
             {
                 if (m_tree.KindOf(current) != NodeKind.Element)
                 {

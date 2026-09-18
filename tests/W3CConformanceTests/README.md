@@ -283,8 +283,8 @@ two are marked for 2.0 and nothing later, and are genuinely 2.0 tests, so the st
 corrected. None of this is visible to a harness that only ever runs as 3.0.
 
 The corrections are kept here as [`suite-corrections.patch`](suite-corrections.patch), which `git apply`
-takes from the root of a clone of the suite. With it the 3.0 run goes from 8,043 to **8,046**, the 2.0
-run from 5,660 of 5,683 to **5,662 of 5,673**, and the schema-aware run from 8,650 to **8,655**. It is
+takes from the root of a clone of the suite. With it the 3.0 run goes from 8,061 to **8,064**, the 2.0
+run from 5,678 of 5,701 to **5,680 of 5,691**, and the schema-aware run from 8,668 to **8,673**. It is
 checked in rather than applied: every figure in this document is measured against the suite as
 published, and the patch is there to be offered upstream rather than kept as a local advantage.
 
@@ -737,7 +737,7 @@ The largest skip left is not a failure either: **6,518 are XSLT 3.0 tests**, rea
 
 ## What the 3.0 run says
 
-That opt-in run measures the XSLT 3.0 half at **8,043 of 8,053, 99.9%**, from 4,994 of 6,427 when it was first
+That opt-in run measures the XSLT 3.0 half at **8,061 of 8,071, 99.9%**, from 4,994 of 6,427 when it was first
 taken. It reads more tests than it did as well as passing more of them, which is the part worth reading twice:
 opening a feature the suite writes *around* stops whole files being skipped, so the denominator moves too — and
 the percentage can fall while the work goes forward, which is why the two numbers are always given together.
