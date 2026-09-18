@@ -13,7 +13,7 @@ implemented. The reasoning behind each decision, and the history of the conforma
 | Conformance level | Basic: not schema-aware, not streaming. |
 | Backends | Interpreted (default) and compiled to IL (`XsltOptions.Backend`), which produce the same results. |
 
-Conformance as last measured, on 16 September 2026, against the W3C suites (see `tests/W3CConformanceTests`):
+Conformance as last measured, on 18 September 2026, against the W3C suites (see `tests/W3CConformanceTests`):
 
 | Suite | Result |
 | --- | --- |
