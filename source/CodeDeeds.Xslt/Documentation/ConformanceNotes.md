@@ -7508,8 +7508,7 @@ and the 2.0 run from 5,616 of 5,639 to **5,621 of 5,644**, five of the thirty-th
 subset holds as well. Both XPath runs are unmoved, which is what a change nothing outside `xsl:mode` and
 the way a result is handed back should do to them. The failure sets are identical test for test on both
 backends and in every run: not one of the thirty-three failed, and nothing that was passing stopped.
-Twelve unit tests, five for the sequence methods and seven for the warnings; 2,835 in all, the
-last round having reported 2,821 from a run that had reused a stale build of the test project.
+Twelve unit tests, five for the sequence methods and seven for the warnings; 2,835 in all.
 
 The driver's list of assertions it cannot present is now empty. What is left in the catalog is
 `assert-posture-and-sweep`, which appears 919 times and only on tests that carry a `streaming` dependency,
