@@ -7514,6 +7514,53 @@ The driver's list of assertions it cannot present is now empty. What is left in 
 `assert-posture-and-sweep`, which appears 919 times and only on tests that carry a `streaming` dependency,
 and so is never reached.
 
+### What a typed JSON result says about escaping
+
+F&O 3.1 §17.5.3 describes the result of `fn:json-to-xml` twice, once for each kind there is. "If the
+result is typed, every element named string will have an attribute named escaped whose value is either true
+or false, and every element having an attribute named key will also have an attribute named escaped-key
+whose value is either true or false. If the result is untyped, the attributes escaped and escaped-key will
+either be present with the value true, or will be absent. They will never be present with the value false."
+`validate: true()` asks for the typed one, and this engine returned the untyped one with annotations on it:
+the two attributes only where they said `true`. The schema declares both with a default of `false`, so
+validation had supplied them — into the overlay, while the tree the function hands back takes the
+overlay's annotations and nothing else. That is the gap *What validating a copy adds to it* closed for
+`xsl:copy-of`.
+
+It is closed differently here. That fix copies the validated node through the overlay, and a copy of a JSON
+result would be the whole document built a second time, on a name table of its own, where this function
+builds on the source tree's so that the stylesheet's names already mean something in it. The rule is also
+the function's rather than the schema's: it says what a typed result holds, whatever supplied it. So the
+builder, told the result is to be typed, writes `escaped="false"` and `escaped-key="false"` where it would
+otherwise write nothing, and validation finds them present and annotates them `xs:boolean` with the rest.
+
+That could not be done against the schema the engine had built in. It was XSLT 3.0's, from B.1, which gives
+a keyed `map` inside a map a `key` attribute and nothing else, where every other keyed element takes the
+group that adds `escaped-key`. Writing `escaped-key="false"` on every nested map would have made every
+nested map invalid. And the case §17.5.3 requires outright was already refused: with `escape`, an element
+whose key holds a backslash "must have the attribute escaped-key="true"", and on a nested map that attribute
+is not declared, so the function raised `FOJS0004` for a result it was obliged to produce. F&O 3.1 publishes
+a schema of its own in C.2 and names that one in the `validate` option. It gives each keyed element a named
+type and all six the group, makes `key` required, types `boolean` as a `booleanType` derived from
+`xs:boolean`, and lets every element carry attributes in other namespaces. C.2 is the one built in now.
+What the two suites ask of a typed result holds against it: XSLT's `element(j:boolean, xs:boolean)` by
+derivation, and QT3's `element(fn:boolean, fn:booleanType)`, which B.1 has no type to answer. The one thing
+it refuses that B.1 accepted is a member of a map with no `key`, which `xml-to-json` refuses anyway.
+
+Two rules beside these are not kept yet, and are written down where they were found. The `duplicates`
+option defaults to `reject` "if validate is true", and `retain` with `validate` is `FOJS0005`; this engine
+defaults to `retain` either way and reports both cases as the invalid result they produce, `FOJS0004`. And
+XSLT 3.0 says of `validate` that "it is not necessary that the containing stylesheet should import the
+relevant schema", where this engine refuses unless it does.
+
+No test in any run asks any of this. QT3's validating tests need `schemaImport`, which the XPath driver does
+not claim, and the XSLT suite's `json-to-xml-typed` asks only for types, which it still gets: the 173 tests
+of `fn/json-to-xml` and `fn/xml-to-json` all pass on the schema-aware run. So nothing moves. The
+schema-aware run stands at 8,560 of 8,573 and the 3.0 run at 7,961 of 7,971, both on both backends; the
+2.0 run at 5,621 of 5,644; the XPath runs at 18,268 and 14,553. Every failure set is identical test for
+test with and without the change, `call-template-1001` failing on one interpreted schema-aware run in both,
+as the recursion-depth test that lands either side of the limit does. Three new unit tests, 2,838 in all.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error

@@ -141,6 +141,22 @@ namespace CodeDeeds.Xslt.Model
             /// and <c>reject</c> refuses the document. Null is <c>retain</c>, which is the default.
             /// </summary>
             public string? Duplicates { get; init; }
+
+            /// <summary>
+            /// Whether the tree is to be typed, which is what <c>validate</c> asks: every <c>string</c> then
+            /// says whether it is <c>escaped</c>, and every element with a <c>key</c> whether the key is,
+            /// <c>false</c> as well as <c>true</c>.
+            /// </summary>
+            /// <remarks>
+            /// F&amp;O 3.1 §17.5.3: "If the result is typed, every element named string will have an
+            /// attribute named escaped whose value is either true or false, and every element having an
+            /// attribute named key will also have an attribute named escaped-key whose value is either true
+            /// or false." An untyped result carries the two only where they say <c>true</c>. The schema
+            /// declares both with a default of <c>false</c>, so these are the attributes validation would
+            /// create; writing them as the tree is built keeps the result the tree that was built, on the
+            /// name table it was built on, rather than a copy of it made to add them.
+            /// </remarks>
+            public bool Typed { get; init; }
         }
 
         /// <summary>
@@ -408,9 +424,9 @@ namespace CodeDeeds.Xslt.Model
                     string text = Represent(JsonText.Read(ref reader), settings.Escape, settings.Fallback, out bool escaped);
                     StartElement(builder, "string", key, settings);
 
-                    if (escaped)
+                    if (escaped || settings.Typed)
                     {
-                        builder.AddAttribute(string.Empty, string.Empty, "escaped", "true");
+                        builder.AddAttribute(string.Empty, string.Empty, "escaped", escaped ? "true" : "false");
                     }
 
                     builder.AddText(text);
@@ -455,9 +471,9 @@ namespace CodeDeeds.Xslt.Model
 
             string written = Represent(key, settings.Escape, settings.Fallback, out bool escaped);
 
-            if (escaped)
+            if (escaped || settings.Typed)
             {
-                builder.AddAttribute(string.Empty, string.Empty, "escaped-key", "true");
+                builder.AddAttribute(string.Empty, string.Empty, "escaped-key", escaped ? "true" : "false");
             }
 
             builder.AddAttribute(string.Empty, string.Empty, "key", written);

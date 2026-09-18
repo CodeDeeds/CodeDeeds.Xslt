@@ -653,5 +653,86 @@ namespace CodeDeeds.Xslt.UnitTests
                     Tags,
                     validateInput: true));
         }
+
+        // ---- What a typed json-to-xml result carries -------------------------------------------------------
+
+        /// <summary>The schema for the functions namespace, which is built in and named by nothing else.</summary>
+        private const string JsonImport = "<xsl:import-schema namespace=\"http://www.w3.org/2005/xpath-functions\"/>";
+
+        /// <summary>
+        /// The value of an expression over <c>$v</c>, the result of <c>fn:json-to-xml</c> on some JSON with
+        /// some options. The JSON's quotation marks are entities, and each backslash the parser is to see is
+        /// two in the XPath string and four here.
+        /// </summary>
+        private static string AskOfJson(string json, string options, string expression)
+        {
+            return Run(
+                Sheet(
+                    $"<xsl:variable name=\"v\" select=\"json-to-xml('{json}', {options})\"/>"
+                    + "<xsl:value-of xmlns:j=\"http://www.w3.org/2005/xpath-functions\""
+                    + $" select=\"{expression}\"/>",
+                    JsonImport),
+                "<r/>");
+        }
+
+        [TestMethod]
+        public void ATypedJsonResultSaysWhetherEveryStringAndEveryKeyIsEscaped()
+        {
+            // F&O 3.1 §17.5.3: "If the result is typed, every element named string will have an attribute
+            // named escaped whose value is either true or false, and every element having an attribute named
+            // key will also have an attribute named escaped-key whose value is either true or false."
+            const string Json = "{&quot;x&quot;: &quot;\\\\&quot;, &quot;y&quot;: [&quot;a&quot;, true]}";
+            const string Counted =
+                "count($v//j:string), count($v//j:string/@escaped), count($v//*[@key]), count($v//@escaped-key), "
+                + "every $a in $v//(@escaped | @escaped-key) satisfies $a instance of attribute(*, xs:boolean)";
+
+            Assert.AreEqual("<out>2 2 2 2 true</out>", AskOfJson(Json, "map{'validate': true()}", Counted));
+
+            // With escape, the one string that kept its backslash says so and the others say they did not.
+            Assert.AreEqual(
+                "<out>true false</out>",
+                AskOfJson(
+                    Json,
+                    "map{'validate': true(), 'escape': true()}",
+                    "data($v//j:string[@key = 'x']/@escaped), data($v//j:string[not(@key)]/@escaped)"));
+
+            // "If the result is untyped, the attributes escaped and escaped-key will either be present with the
+            // value true, or will be absent. They will never be present with the value false."
+            Assert.AreEqual(
+                "<out>0</out>",
+                AskOfJson(Json, "map{'validate': false()}", "count($v//(@escaped | @escaped-key))"));
+        }
+
+        [TestMethod]
+        public void AMapInsideAMapCanSayItsKeyIsEscaped()
+        {
+            // The same section requires escaped-key="true" on "any element that contains a key attribute whose
+            // string value contains a backslash character". XSLT 3.0's schema, in B.1, gives a map inside a map
+            // a key and no escaped-key, so that result could not be valid against it; F&O 3.1's, in C.2,
+            // gives every keyed element both.
+            Assert.AreEqual(
+                "<out>a\\\\b true false</out>",
+                AskOfJson(
+                    "{&quot;a\\\\b&quot;: {&quot;c&quot;: 1}}",
+                    "map{'validate': true(), 'escape': true()}",
+                    "string($v/j:map/j:map/@key), data($v/j:map/j:map/@escaped-key), "
+                    + "data($v/j:map/j:map/j:number/@escaped-key)"));
+        }
+
+        [TestMethod]
+        public void ATypedJsonResultAnswersToTheTypesBothSuitesName()
+        {
+            // The XSLT suite asks a boolean for xs:boolean and QT3 for fn:booleanType; C.2 derives the second
+            // from the first, and each keyed type from the type of the same element unkeyed.
+            Assert.AreEqual(
+                "<out>true true true true</out>",
+                AskOfJson(
+                    "{&quot;s&quot;: &quot;x&quot;, &quot;b&quot;: true}",
+                    "map{'validate': true()}",
+                    "$v/j:map/j:boolean instance of element(j:boolean, xs:boolean), "
+                    + "$v/j:map/j:boolean instance of element(j:boolean, j:booleanType), "
+                    + "$v/j:map/j:boolean instance of element(j:boolean, j:booleanWithinMapType), "
+                    + "$v/j:map/j:string instance of element(j:string, j:stringType)"));
+        }
     }
 }

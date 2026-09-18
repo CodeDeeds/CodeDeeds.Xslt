@@ -182,6 +182,7 @@ namespace CodeDeeds.Xslt.XPath
                     Escape = Flag(options, "escape", false),
                     Fallback = Fallback(options, ref context),
                     Duplicates = Duplicates(options, "retain", "reject", "use-first", "retain"),
+                    Typed = validate,
                 };
 
                 XdmTree tree = JsonTreeBuilder.FromJson(

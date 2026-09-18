@@ -632,41 +632,68 @@ namespace CodeDeeds.Xslt.Compiler
 
         /// <summary>
         /// The schema for the XML representation of JSON that <c>fn:json-to-xml()</c> validates against,
-        /// as the W3C publishes it.
+        /// as F&amp;O 3.1 publishes it in C.2.
         /// </summary>
+        /// <remarks>
+        /// XSLT 3.0 publishes another, in B.1, and the two are not the same. The one that matters is that
+        /// B.1 gives a keyed <c>map</c> inside a map a <c>key</c> and nothing else, where every other keyed
+        /// element takes the group that adds <c>escaped-key</c>: so the result of an <c>escape</c> call whose
+        /// nested map has a backslash in its key, which §17.5.3 requires to say <c>escaped-key="true"</c>, is
+        /// invalid against it, and the typed result the same section describes — every keyed element saying
+        /// whether its key is escaped — cannot be had. C.2 names a type for each keyed element and gives all
+        /// six the group, with <c>key</c> required. It also types <c>boolean</c> as a <c>booleanType</c>
+        /// derived from <c>xs:boolean</c>, makes <c>numberType</c> a complex type over
+        /// <c>finiteNumberType</c>, and lets every element carry attributes in other namespaces. What the
+        /// two suites ask of a typed result holds against it: XSLT's <c>element(j:boolean, xs:boolean)</c>
+        /// by derivation, and QT3's <c>element(fn:boolean, fn:booleanType)</c>, which B.1 has no type to
+        /// answer.
+        /// </remarks>
         private const string JsonSchema =
             "<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" elementFormDefault=\"qualified\""
             + " targetNamespace=\"http://www.w3.org/2005/xpath-functions\" xmlns:j=\"http://www.w3.org/2005/xpath-functions\">"
             + "<xs:element name=\"map\" type=\"j:mapType\"><xs:unique name=\"unique-key\">"
-            + "<xs:selector xpath=\"*\"/><xs:field xpath=\"@key\"/></xs:unique></xs:element>"
+            + "<xs:selector xpath=\"*\"/><xs:field xpath=\"@key\"/><xs:field xpath=\"@escaped-key\"/></xs:unique></xs:element>"
             + "<xs:element name=\"array\" type=\"j:arrayType\"/>"
             + "<xs:element name=\"string\" type=\"j:stringType\"/>"
             + "<xs:element name=\"number\" type=\"j:numberType\"/>"
-            + "<xs:element name=\"boolean\" type=\"xs:boolean\"/>"
+            + "<xs:element name=\"boolean\" type=\"j:booleanType\"/>"
             + "<xs:element name=\"null\" type=\"j:nullType\"/>"
-            + "<xs:complexType name=\"nullType\"><xs:sequence/></xs:complexType>"
+            + "<xs:complexType name=\"nullType\"><xs:sequence/>"
+            + "<xs:anyAttribute processContents=\"skip\" namespace=\"##other\"/></xs:complexType>"
+            + "<xs:complexType name=\"booleanType\"><xs:simpleContent><xs:extension base=\"xs:boolean\">"
+            + "<xs:anyAttribute processContents=\"skip\" namespace=\"##other\"/></xs:extension></xs:simpleContent></xs:complexType>"
             + "<xs:complexType name=\"stringType\"><xs:simpleContent><xs:extension base=\"xs:string\">"
-            + "<xs:attribute name=\"escaped\" type=\"xs:boolean\" use=\"optional\" default=\"false\"/></xs:extension></xs:simpleContent></xs:complexType>"
-            + "<xs:simpleType name=\"numberType\"><xs:restriction base=\"xs:double\">"
+            + "<xs:attribute name=\"escaped\" type=\"xs:boolean\" use=\"optional\" default=\"false\"/>"
+            + "<xs:anyAttribute processContents=\"skip\" namespace=\"##other\"/></xs:extension></xs:simpleContent></xs:complexType>"
+            + "<xs:simpleType name=\"finiteNumberType\"><xs:restriction base=\"xs:double\">"
             + "<xs:minExclusive value=\"-INF\"/><xs:maxExclusive value=\"INF\"/></xs:restriction></xs:simpleType>"
+            + "<xs:complexType name=\"numberType\"><xs:simpleContent><xs:extension base=\"j:finiteNumberType\">"
+            + "<xs:anyAttribute processContents=\"skip\" namespace=\"##other\"/></xs:extension></xs:simpleContent></xs:complexType>"
             + "<xs:complexType name=\"arrayType\"><xs:choice minOccurs=\"0\" maxOccurs=\"unbounded\">"
             + "<xs:element ref=\"j:map\"/><xs:element ref=\"j:array\"/><xs:element ref=\"j:string\"/>"
-            + "<xs:element ref=\"j:number\"/><xs:element ref=\"j:boolean\"/><xs:element ref=\"j:null\"/></xs:choice></xs:complexType>"
+            + "<xs:element ref=\"j:number\"/><xs:element ref=\"j:boolean\"/><xs:element ref=\"j:null\"/></xs:choice>"
+            + "<xs:anyAttribute processContents=\"skip\" namespace=\"##other\"/></xs:complexType>"
+            + "<xs:complexType name=\"mapWithinMapType\"><xs:complexContent><xs:extension base=\"j:mapType\">"
+            + "<xs:attributeGroup ref=\"j:key-group\"/></xs:extension></xs:complexContent></xs:complexType>"
+            + "<xs:complexType name=\"arrayWithinMapType\"><xs:complexContent><xs:extension base=\"j:arrayType\">"
+            + "<xs:attributeGroup ref=\"j:key-group\"/></xs:extension></xs:complexContent></xs:complexType>"
+            + "<xs:complexType name=\"stringWithinMapType\"><xs:simpleContent><xs:extension base=\"j:stringType\">"
+            + "<xs:attributeGroup ref=\"j:key-group\"/></xs:extension></xs:simpleContent></xs:complexType>"
+            + "<xs:complexType name=\"numberWithinMapType\"><xs:simpleContent><xs:extension base=\"j:numberType\">"
+            + "<xs:attributeGroup ref=\"j:key-group\"/></xs:extension></xs:simpleContent></xs:complexType>"
+            + "<xs:complexType name=\"booleanWithinMapType\"><xs:simpleContent><xs:extension base=\"j:booleanType\">"
+            + "<xs:attributeGroup ref=\"j:key-group\"/></xs:extension></xs:simpleContent></xs:complexType>"
+            + "<xs:complexType name=\"nullWithinMapType\"><xs:attributeGroup ref=\"j:key-group\"/></xs:complexType>"
             + "<xs:complexType name=\"mapType\"><xs:choice minOccurs=\"0\" maxOccurs=\"unbounded\">"
-            + "<xs:element name=\"map\"><xs:complexType><xs:complexContent><xs:extension base=\"j:mapType\">"
-            + "<xs:attribute name=\"key\" type=\"xs:string\"/></xs:extension></xs:complexContent></xs:complexType>"
-            + "<xs:unique name=\"unique-key-2\"><xs:selector xpath=\"*\"/><xs:field xpath=\"@key\"/></xs:unique></xs:element>"
-            + "<xs:element name=\"array\"><xs:complexType><xs:complexContent><xs:extension base=\"j:arrayType\">"
-            + "<xs:attributeGroup ref=\"j:key-group\"/></xs:extension></xs:complexContent></xs:complexType></xs:element>"
-            + "<xs:element name=\"string\"><xs:complexType><xs:simpleContent><xs:extension base=\"j:stringType\">"
-            + "<xs:attributeGroup ref=\"j:key-group\"/></xs:extension></xs:simpleContent></xs:complexType></xs:element>"
-            + "<xs:element name=\"number\"><xs:complexType><xs:simpleContent><xs:extension base=\"j:numberType\">"
-            + "<xs:attributeGroup ref=\"j:key-group\"/></xs:extension></xs:simpleContent></xs:complexType></xs:element>"
-            + "<xs:element name=\"boolean\"><xs:complexType><xs:simpleContent><xs:extension base=\"xs:boolean\">"
-            + "<xs:attributeGroup ref=\"j:key-group\"/></xs:extension></xs:simpleContent></xs:complexType></xs:element>"
-            + "<xs:element name=\"null\"><xs:complexType><xs:attributeGroup ref=\"j:key-group\"/></xs:complexType></xs:element>"
-            + "</xs:choice></xs:complexType>"
-            + "<xs:attributeGroup name=\"key-group\"><xs:attribute name=\"key\" type=\"xs:string\"/>"
+            + "<xs:element name=\"map\" type=\"j:mapWithinMapType\"><xs:unique name=\"unique-key-2\">"
+            + "<xs:selector xpath=\"*\"/><xs:field xpath=\"@key\"/></xs:unique></xs:element>"
+            + "<xs:element name=\"array\" type=\"j:arrayWithinMapType\"/>"
+            + "<xs:element name=\"string\" type=\"j:stringWithinMapType\"/>"
+            + "<xs:element name=\"number\" type=\"j:numberWithinMapType\"/>"
+            + "<xs:element name=\"boolean\" type=\"j:booleanWithinMapType\"/>"
+            + "<xs:element name=\"null\" type=\"j:nullWithinMapType\"/></xs:choice>"
+            + "<xs:anyAttribute processContents=\"skip\" namespace=\"##other\"/></xs:complexType>"
+            + "<xs:attributeGroup name=\"key-group\"><xs:attribute name=\"key\" type=\"xs:string\" use=\"required\"/>"
             + "<xs:attribute name=\"escaped-key\" type=\"xs:boolean\" use=\"optional\" default=\"false\"/></xs:attributeGroup>"
             + "</xs:schema>";
 
