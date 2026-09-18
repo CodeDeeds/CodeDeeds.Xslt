@@ -255,7 +255,7 @@ corrected. None of this is visible to a harness that only ever runs as 3.0.
 
 The corrections are kept here as [`suite-corrections.patch`](suite-corrections.patch), which `git apply`
 takes from the root of a clone of the suite. With it the 3.0 run goes from 7,928 to **7,931**, the 2.0
-run from 5,616 of 5,639 to **5,617 of 5,629**, and the schema-aware run from 8,526 to **8,531**. It is
+run from 5,616 of 5,639 to **5,618 of 5,629**, and the schema-aware run from 8,526 to **8,531**. It is
 checked in rather than applied: every figure in this document is measured against the suite as
 published, and the patch is there to be offered upstream rather than kept as a local advantage.
 

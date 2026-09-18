@@ -57,6 +57,76 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         /// <summary>
+        /// Runs an expression through a 2.0 stylesheet on a processor asked to be 2.0, and says what it
+        /// answered or what code refused it.
+        /// </summary>
+        private static string AtTwoPointZero(string expression)
+        {
+            string stylesheet =
+                "<xsl:stylesheet version=\"2.0\" " + XslOnly + " " + Namespaces
+                + " xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+                + " xmlns:math=\"http://www.w3.org/2005/xpath-functions/math\""
+                + " exclude-result-prefixes=\"map array xs math\">"
+                + $"<xsl:template match=\"/\"><xsl:value-of select=\"{expression}\"/>"
+                + "</xsl:template></xsl:stylesheet>";
+
+            try
+            {
+                return new Xslt(
+                    stylesheet,
+                    new XsltOptions { OmitXmlDeclaration = true, Version = XsltVersion.V20 })
+                    .TransformXml("<r/>");
+            }
+            catch (XsltException error)
+            {
+                return error.Code ?? string.Empty;
+            }
+        }
+
+        [TestMethod]
+        public void TheLibrariesThreePointZeroBroughtAreNotThereBeforeIt()
+        {
+            // What function-available() answers and what a written call compiles to are read from the same
+            // tables, so they cannot come apart — and they were wrong together: a 2.0 processor was
+            // offering the math functions, fn:function-lookup, and the constructors XPath 3.0 added, at the
+            // call site and in the answer alike. The suite's function-1902 exists to catch exactly that, and
+            // lists nineteen of them.
+            foreach (string call in new[]
+            {
+                "math:pi()",
+                "function-lookup(xs:QName('xs:integer'), 1)('2')",
+                "xs:NMTOKENS('a b')",
+                "xs:IDREFS('a b')",
+                "xs:ENTITIES('a b')",
+                "xs:error('x')",
+                "xs:numeric('1')",
+            })
+            {
+                Assert.AreEqual("XPST0017", AtTwoPointZero(call), call);
+            }
+
+            foreach (string name in new[]
+            {
+                "'math:pi', 0",
+                "'function-lookup', 2",
+                "'xs:NMTOKENS', 1",
+                "'xs:error', 1",
+                "'map:size', 1",
+                "'array:size', 1",
+            })
+            {
+                Assert.AreEqual("false", AtTwoPointZero($"function-available({name})"), name);
+            }
+
+            // The constructors that are as old as the language are untouched, and so is the one-argument
+            // form of the question.
+            Assert.AreEqual("2", AtTwoPointZero("xs:integer('2')"));
+            Assert.AreEqual("true", AtTwoPointZero("function-available('xs:integer', 1)"));
+            Assert.AreEqual("true", AtTwoPointZero("function-available('concat')"));
+            Assert.AreEqual("false", AtTwoPointZero("function-available('math:pi')"));
+        }
+
+        /// <summary>
         /// Evaluates through a 2.0 stylesheet on a processor asked to be 2.0, where none of this syntax exists.
         /// </summary>
         private static string RefusedByTwoPointZero(string expression)

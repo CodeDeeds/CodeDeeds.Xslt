@@ -389,6 +389,19 @@ namespace CodeDeeds.Xslt.XPath
             return localName is not ("NOTATION" or "anyAtomicType" or "anySimpleType" or "untyped");
         }
 
+        /// <summary>Whether a type's constructor function is one that XPath 3.0 added.</summary>
+        /// <remarks>
+        /// XPath 2.0 gives a constructor to every built-in atomic type it defines, so nearly all of them
+        /// are as old as the language. The three list types got theirs in 3.0, and <c>xs:error</c> and
+        /// <c>xs:numeric</c> are 3.0's types outright. Below 3.0 there is no function of any of those
+        /// names at all, which is <c>XPST0017</c> and not a cast that fails.
+        /// </remarks>
+        /// <param name="localName">The type's local name.</param>
+        public static bool ConstructorAddedInThree(string localName)
+        {
+            return localName is "NMTOKENS" or "IDREFS" or "ENTITIES" or "error" or "numeric";
+        }
+
         /// <summary>Looks up a built-in type by its local name.</summary>
         /// <param name="localName">The name written after <c>xs:</c>.</param>
         /// <param name="type">On success, the type.</param>

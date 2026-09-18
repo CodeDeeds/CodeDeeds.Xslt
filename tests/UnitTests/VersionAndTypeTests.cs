@@ -960,8 +960,17 @@ namespace CodeDeeds.Xslt.UnitTests
             Assert.AreEqual("XPST0051", CodeOf("xs:anyType('a')"));
 
             // And the three list types do have constructors, a cast to one being defined: the function is
-            // that cast under its other spelling.
-            Assert.AreEqual("a b", Text("string-join(xs:NMTOKENS('a b'), ' ')"));
+            // that cast under its other spelling. XPath 3.0 added them, though, so below 3.0 there is no
+            // function of the name at all — this had read them as available at every version, which is
+            // what the suite's function-1902 is written to catch.
+            Assert.AreEqual(
+                "a b",
+                Evaluate("<r/>", "string-join(xs:NMTOKENS('a b'), ' ')", XsltVersion.V30)
+                    .ToCanonicalString());
+            Assert.AreEqual("XPST0017", CodeOf("xs:NMTOKENS('a b')"));
+
+            // xs:error and xs:numeric are 3.0's types outright, and the same follows.
+            Assert.AreEqual("XPST0017", CodeOf("xs:numeric('1')"));
         }
 
         [TestMethod]

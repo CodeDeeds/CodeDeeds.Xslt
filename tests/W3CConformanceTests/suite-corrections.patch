@@ -91,7 +91,7 @@ Apply from the root of a clone of https://github.com/w3c/xslt30-test:
     git apply suite-corrections.patch
 
 With this applied the xslt30-test 3.0 run here goes from 7,928 of 7,938 to
-7,931, the 2.0 run from 5,616 of 5,639 to 5,617 of 5,629 - ten test cases
+7,931, the 2.0 run from 5,616 of 5,639 to 5,618 of 5,629 - ten test cases
 leaving a run they cannot be run in - and the schema-aware run from 8,526 of
 8,540 to 8,531.
 

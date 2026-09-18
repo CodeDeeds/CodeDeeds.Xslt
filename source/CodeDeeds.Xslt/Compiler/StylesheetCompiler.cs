@@ -1110,7 +1110,10 @@ namespace CodeDeeds.Xslt.Compiler
                     name, arguments.Length == 0 ? null : arguments[0], Implements30);
             }
 
-            if (name == Availability.FunctionLookup)
+            // fn:function-lookup is XPath 3.0's, so below 3.0 there is no function of the name and the
+            // caller says XPST0017. Built here rather than by a library, so gated here as well.
+            if (name == Availability.FunctionLookup
+                && (Implements30 || Version.CompareTo(XsltVersion.V30) >= 0))
             {
                 if (arguments.Length != 2)
                 {

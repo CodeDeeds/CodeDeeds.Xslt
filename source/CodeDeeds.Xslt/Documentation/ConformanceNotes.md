@@ -6659,8 +6659,8 @@ across `decl/accept` and `decl/expose` on 5 March 2023 while these two files wer
 Applied to a clone of the suite, both tests raise the `XTSE3050` they were written for. A third
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
-validation settles about a constructed node*. With all seventeen the 3.0 run reads **7,931 of 7,938**, the 2.0 run **5,617 of 5,629** and the
-schema-aware run **8,531 of 8,540**. The patch is not applied here, and the figures in these notes do not
+validation settles about a constructed node*. With all seventeen the 3.0 run reads **7,931 of 7,938**,
+the 2.0 run **5,618 of 5,629** and the schema-aware run **8,531 of 8,540**. The patch is not applied here, and the figures in these notes do not
 include it. A measurement is worth something because of what it is taken against, and a patch kept in the
 repository and offered upstream is worth more than seventeen tests counted differently at home.
 
@@ -7361,11 +7361,46 @@ branches for the map, array and math namespaces, for `function-lookup`, or for t
 `xs:error` constructors. The other twelve corrections are unaffected by it; it is written down here
 because the correction is what uncovered it.
 
-With the patch applied the 2.0 run goes from 5,616 of 5,639 to **5,617 of 5,629** — ten test cases
-leaving a run they cannot be run in, one that now passes, and one that now fails for a reason worth
-having. The 3.0 and schema-aware runs are unmoved by these twelve; the patch's other five take them to
-7,931 of 7,938 and 8,531 of 8,540 as before. The patch is still not applied here, and the figures in
+With the patch applied the 2.0 run goes from 5,616 of 5,639 to **5,618 of 5,629** — ten test cases
+leaving a run they cannot be run in, and two that now pass, the second of them once the gap the
+correction uncovered was closed as well; see *The libraries a later language brought*. The 3.0 and
+schema-aware runs are unmoved by these twelve; the patch's other five take them to 7,931 of 7,938 and
+8,531 of 8,540 as before. The patch is still not applied here, and the figures in
 these notes are still the suite as published.
+
+### The libraries a later language brought, offered by an earlier one
+
+Correcting `function-1902` is what turned this up. The test exists to check that a 2.0 processor does not
+offer the XPath 3.0 function library, and the moment it could be run at all it named nineteen functions
+this engine was offering one: the fourteen `math:` functions, `fn:function-lookup`, and the constructor
+functions `xs:NMTOKENS`, `xs:ENTITIES`, `xs:IDREFS` and `xs:error`.
+
+The first guess was that `function-available()` was answering too generously, and that was wrong. A 2.0
+stylesheet on a 2.0 processor compiled and ran `math:pi()` as readily as it reported it available.
+`FunctionLibrary.TryCreate` and `Availability.IsFunctionAvailable` are written so that the answer and the
+call cannot come apart, each reading the same tables, and they had not come apart: both worked out whether
+either the processor or the stylesheet claims 3.0, and both then consulted that only for the `fn:`
+namespace. The map, array and math namespaces were reached without asking, and so were
+`fn:function-lookup`, which the compiler builds by hand rather than from a library, and the constructors
+XPath 3.0 added. Both sides ask now, in the same four places.
+
+Which constructors those are is the part worth writing down. XPath 2.0 gives a constructor to every
+built-in atomic type it defines, so nearly all of them are as old as the language. The three list types
+got theirs in 3.0 — a cast to a list type is what that constructor is, and 2.0 has the cast without
+the function — and `xs:error` and `xs:numeric` are 3.0's types outright. Below 3.0 there is no
+function of any of those five names, which is `XPST0017` and not a cast that fails.
+
+"Either version is 3.0" is the test, not "the processor is". A `version="3.0"` stylesheet on a 2.0
+processor is read forwards-compatibly and its calls are built, so it keeps the 3.0 library; a
+`version="2.0"` stylesheet on a 3.0 processor keeps it too, the library being the processor's. What loses
+it is the case the suite tests, 2.0 claimed by both.
+
+Nothing moves on the runs as published, because the test that measures it cannot be run until the suite is
+corrected: uncorrected, `function-1902` stops at the `expand-text` on its own `xsl:message`. With the
+correction patch applied the 2.0 run reads 5,618 of 5,629 rather than 5,617. The 3.0 run stands at 7,928
+of 7,938, the schema-aware run at 8,527 of 8,540, and every failure set is identical test for test —
+no test in any run calls a 3.0 library under a 2.0 claim. One new unit test and one amended, which had
+recorded the list-type constructors as available at every version; 2,821 in all.
 
 ### Which results the suite asks for and does not get
 

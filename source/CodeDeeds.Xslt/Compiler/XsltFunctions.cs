@@ -998,7 +998,8 @@ namespace CodeDeeds.Xslt.Compiler
         {
             return XPathValue.FromBoolean(
                 !Barred(namespaceUri, localName)
-                && Availability.IsFunctionAvailable(namespaceUri, localName));
+                && Availability.IsFunctionAvailable(
+                    namespaceUri, localName, m_version, m_syntaxVersion));
         }
 
         /// <summary>
@@ -1332,24 +1333,29 @@ namespace CodeDeeds.Xslt.Compiler
         /// </summary>
         /// <param name="namespaceUri">The function name's namespace URI.</param>
         /// <param name="localName">The function name's local part.</param>
-        public static bool IsFunctionAvailable(string namespaceUri, string localName)
+        public static bool IsFunctionAvailable(
+            string namespaceUri, string localName, XsltVersion version, XsltVersion syntaxVersion)
         {
+            bool thirty = version.CompareTo(XsltVersion.V30) >= 0
+                || syntaxVersion.CompareTo(XsltVersion.V30) >= 0;
+
             // Most built-in schema types are constructible by calling the name, so they are functions too.
             if (namespaceUri == XdmType.SchemaNamespace)
             {
                 return (XdmType.TryGet(localName, out _) || XdmType.TryGetList(localName, out _))
-                    && XdmType.HasConstructor(localName);
+                    && XdmType.HasConstructor(localName)
+                    && (thirty || !XdmType.ConstructorAddedInThree(localName));
             }
 
             if (namespaceUri == MapArrayFunctionExpr.MapNamespace
                 || namespaceUri == MapArrayFunctionExpr.ArrayNamespace)
             {
-                return MapArrayFunctionExpr.TakesArity(namespaceUri, localName, -1);
+                return thirty && MapArrayFunctionExpr.TakesArity(namespaceUri, localName, -1);
             }
 
             if (namespaceUri == Xpath30FunctionExpr.MathNamespace)
             {
-                return Xpath30FunctionExpr.TakesArityInMath(localName, -1);
+                return thirty && Xpath30FunctionExpr.TakesArityInMath(localName, -1);
             }
 
             if (namespaceUri == ExsltFunctionExpr.CommonNamespace)
@@ -1417,21 +1423,23 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 // The three list types have constructors too, and they are held apart from the atomic
                 // ones because nothing may be an instance of a list type. A cast is what a constructor is,
-                // and the cast to one is defined here, so the function is there to be called.
+                // and the cast to one is defined here, so the function is there to be called. Those three,
+                // and xs:error and xs:numeric, are 3.0's and are not there before it.
                 return arity == 1
                     && (XdmType.TryGet(localName, out _) || XdmType.TryGetList(localName, out _))
-                    && XdmType.HasConstructor(localName);
+                    && XdmType.HasConstructor(localName)
+                    && (thirty || !XdmType.ConstructorAddedInThree(localName));
             }
 
             if (namespaceUri == MapArrayFunctionExpr.MapNamespace
                 || namespaceUri == MapArrayFunctionExpr.ArrayNamespace)
             {
-                return MapArrayFunctionExpr.TakesArity(namespaceUri, localName, arity);
+                return thirty && MapArrayFunctionExpr.TakesArity(namespaceUri, localName, arity);
             }
 
             if (namespaceUri == Xpath30FunctionExpr.MathNamespace)
             {
-                return Xpath30FunctionExpr.TakesArityInMath(localName, arity);
+                return thirty && Xpath30FunctionExpr.TakesArityInMath(localName, arity);
             }
 
             if (namespaceUri == ExsltFunctionExpr.CommonNamespace)
@@ -1460,7 +1468,7 @@ namespace CodeDeeds.Xslt.Compiler
             // building this one from inside that loop would ask it to build itself.
             if (localName == FunctionLookup)
             {
-                return arity == 2;
+                return thirty && arity == 2;
             }
 
             return FunctionCallExpr.TakesArity(localName, arity, version)

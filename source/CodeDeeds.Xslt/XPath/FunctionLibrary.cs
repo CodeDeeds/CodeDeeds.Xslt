@@ -57,21 +57,28 @@ namespace CodeDeeds.Xslt.XPath
             IReadOnlyDictionary<string, string>? namespaces = null,
             string defaultElementNamespace = "")
         {
+            // The libraries a later language brought are reachable when either version is 3.0: the
+            // processor's, because that is what the engine reads, or the stylesheet's own claim, because a
+            // 3.0 stylesheet on a 2.0 processor is processed forwards-compatibly and its calls are built.
+            // Below that there is no function of the name, and null is how this says so.
+            bool thirty = version.CompareTo(XsltVersion.V30) >= 0
+                || syntaxVersion.CompareTo(XsltVersion.V30) >= 0;
+
             if (namespaceUri == MapArrayFunctionExpr.MapNamespace
                 || namespaceUri == MapArrayFunctionExpr.ArrayNamespace)
             {
-                return MapArrayFunctionExpr.Create(namespaceUri, localName, arguments);
+                return thirty ? MapArrayFunctionExpr.Create(namespaceUri, localName, arguments) : null;
             }
 
             if (namespaceUri == Xpath30FunctionExpr.MathNamespace)
             {
-                return Xpath30FunctionExpr.CreateMath(localName, arguments, version);
+                return thirty ? Xpath30FunctionExpr.CreateMath(localName, arguments, version) : null;
             }
 
             if (namespaceUri == XdmType.SchemaNamespace)
             {
                 return TypeConstructor(
-                    localName, arguments, namespaces, syntaxVersion, defaultElementNamespace);
+                    localName, arguments, namespaces, syntaxVersion, defaultElementNamespace, thirty);
             }
 
             return namespaceUri.Length == 0 || namespaceUri == XdmType.FunctionNamespace
@@ -167,8 +174,19 @@ namespace CodeDeeds.Xslt.XPath
             Expr[] arguments,
             IReadOnlyDictionary<string, string>? namespaces,
             XsltVersion syntaxVersion,
-            string defaultElementNamespace)
+            string defaultElementNamespace,
+            bool thirty)
         {
+            // A constructor the language did not have yet is a name nothing answers to, the same as a type
+            // with no constructor at all.
+            if (!thirty && XdmType.ConstructorAddedInThree(localName))
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XPST0017,
+                    $"There is no constructor function 'xs:{localName}()' below XSLT 3.0. XPath 3.0 added "
+                    + "it, and the version in force here is earlier.");
+            }
+
             // A few schema types have no constructor function, and the specification names them: the abstract
             // xs:NOTATION, and the three at the top of the hierarchy that stand for 'any of these' rather than
             // for a set of values. There is no function of that name, which is what XPST0017 says — a
