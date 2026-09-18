@@ -1078,6 +1078,29 @@ namespace CodeDeeds.Xslt
         /// <summary>A node with no serialized form of its own, such as a free-standing attribute.</summary>
         SENR0001,
 
+        /// <summary>
+        /// A doctype-system, or a standalone other than omit, over a result that is not one element.
+        /// </summary>
+        SEPM0004,
+
+        /// <summary>An omitted XML declaration where what it would have said cannot be said elsewhere.</summary>
+        SEPM0009,
+
+        /// <summary>Undeclaring prefixes in XML 1.0, which has no way to undeclare one.</summary>
+        SEPM0010,
+
+        /// <summary>An output encoding this serializer does not have.</summary>
+        SESU0007,
+
+        /// <summary>A normalization form this serializer does not apply.</summary>
+        SESU0011,
+
+        /// <summary>A version of XML or HTML this serializer does not write.</summary>
+        SESU0013,
+
+        /// <summary>A processing instruction holding <c>&gt;</c>, which the HTML method ends one with.</summary>
+        SERE0015,
+
         /// <summary>A serialization parameter document this processor cannot use.</summary>
         SEPM0017,
 

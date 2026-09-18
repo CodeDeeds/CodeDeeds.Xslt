@@ -4847,6 +4847,12 @@ namespace CodeDeeds.Xslt.Compiler
             if (OutputAttribute(element, "version") is string version)
             {
                 settings.Version = version;
+                settings.VersionSpecified = true;
+            }
+
+            if (OutputAttribute(element, "undeclare-prefixes") is not null)
+            {
+                settings.UndeclarePrefixes = ReadDeclarationFlag(element, "undeclare-prefixes");
             }
 
             if (OutputAttribute(element, "standalone") is string standalone)
@@ -5312,6 +5318,12 @@ namespace CodeDeeds.Xslt.Compiler
             if (GetAttribute(element, "version") is string version)
             {
                 settings.Version = version;
+                settings.VersionSpecified = true;
+            }
+
+            if (GetAttribute(element, "undeclare-prefixes") is not null)
+            {
+                settings.UndeclarePrefixes = ReadDeclarationFlag(element, "undeclare-prefixes");
             }
 
             if (GetAttribute(element, "standalone") is string standalone)
@@ -13280,7 +13292,13 @@ namespace CodeDeeds.Xslt.Compiler
                 "NFD" => System.Text.NormalizationForm.FormD,
                 "NFKC" => System.Text.NormalizationForm.FormKC,
                 "NFKD" => System.Text.NormalizationForm.FormKD,
-                string other => throw new XsltException(
+                // SESU0011 is the serializer's own code for a form it does not apply, and the specification
+                // requires it to be signalled: "A serialization error results if the value of the
+                // normalization-form parameter specifies a normalization form that is not supported by the
+                // serializer." fully-normalized is among those: it is a check on the result rather than a
+                // transformation of it, and this engine does not make it.
+                string other => throw XsltErrors.Error(
+                    XsltErrorCode.SESU0011,
                     $"'{other}' is not a normalization form this engine applies. It has NFC, NFD, NFKC, NFKD "
                     + "and none."),
             };

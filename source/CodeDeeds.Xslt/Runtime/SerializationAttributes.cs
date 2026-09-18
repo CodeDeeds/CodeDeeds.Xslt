@@ -80,6 +80,7 @@ namespace CodeDeeds.Xslt.Runtime
                 case "version":
                 case "output-version":
                     settings.Version = trimmed;
+                    settings.VersionSpecified = true;
                     break;
 
                 case "standalone":
@@ -153,9 +154,9 @@ namespace CodeDeeds.Xslt.Runtime
                     break;
 
                 case "undeclare-prefixes":
-                    // Read for its form and nothing more: this serializer writes XML 1.0, which undeclares
-                    // nothing.
-                    Flag(name, value);
+                    // Kept for its form and for one error: this serializer writes XML 1.0, which has no way to
+                    // undeclare a prefix, and asking for it there is SEPM0010.
+                    settings.UndeclarePrefixes = Flag(name, value);
                     break;
 
                 case "cdata-section-elements":

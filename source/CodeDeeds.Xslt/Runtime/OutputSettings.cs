@@ -148,6 +148,32 @@ namespace CodeDeeds.Xslt.Runtime
         /// </remarks>
         public decimal? HtmlVersion { get; set; }
 
+        /// <summary>Gets or sets whether a version was named, as against being left at 1.0.</summary>
+        /// <remarks>
+        /// Which matters to the <c>html</c> and <c>xhtml</c> methods, where §7.4.1 makes the version
+        /// parameter the requested HTML version whenever <c>html-version</c> is absent: a result that named
+        /// no version at all has not thereby asked for HTML 1.0.
+        /// </remarks>
+        public bool VersionSpecified { get; set; }
+
+        /// <summary>Gets or sets whether the result undeclares a namespace prefix where it may.</summary>
+        /// <remarks>
+        /// Only XML 1.1 has a syntax for undeclaring one, and this serializer writes 1.0, so nothing acts
+        /// on it. It is kept because asking for it in 1.0 is an error the serializer is required to signal
+        /// (§5.1.8, <c>SEPM0010</c>), and that question cannot be asked without the answer.
+        /// </remarks>
+        public bool UndeclarePrefixes { get; set; }
+
+        /// <summary>Gets or sets whether the caller, rather than the stylesheet, omitted the declaration.</summary>
+        /// <remarks>
+        /// <c>XsltOptions.OmitXmlDeclaration</c> overrides whatever the stylesheet asked for, and a host
+        /// application that asks for no declaration is not asking for two incompatible things: it is
+        /// overruling one of them. So the conflict §5.1.6 names — omitting the declaration while
+        /// asking for a standalone that only the declaration can carry — is the stylesheet's to make,
+        /// and this says when it was not made here.
+        /// </remarks>
+        public bool OmitXmlDeclarationOverridden { get; set; }
+
         /// <summary>Gets or sets the elements whose content is never indented, however indent is set.</summary>
         public List<(string NamespaceUri, string LocalName)> SuppressIndentation { get; } = new();
 
@@ -254,6 +280,7 @@ namespace CodeDeeds.Xslt.Runtime
                 Method = Method,
                 MethodSpecified = MethodSpecified,
                 OmitXmlDeclaration = omit,
+                OmitXmlDeclarationOverridden = true,
                 Indent = Indent,
                 IndentSpecified = IndentSpecified,
                 Encoding = Encoding,
@@ -269,6 +296,8 @@ namespace CodeDeeds.Xslt.Runtime
                 EscapeUriAttributes = EscapeUriAttributes,
                 MayInferXhtml = MayInferXhtml,
                 HtmlVersion = HtmlVersion,
+                VersionSpecified = VersionSpecified,
+                UndeclarePrefixes = UndeclarePrefixes,
                 ItemSeparator = ItemSeparator,
                 BuildTree = BuildTree,
                 AllowDuplicateNames = AllowDuplicateNames,
@@ -306,6 +335,9 @@ namespace CodeDeeds.Xslt.Runtime
                 EscapeUriAttributes = EscapeUriAttributes,
                 MayInferXhtml = MayInferXhtml,
                 HtmlVersion = HtmlVersion,
+                VersionSpecified = VersionSpecified,
+                UndeclarePrefixes = UndeclarePrefixes,
+                OmitXmlDeclarationOverridden = OmitXmlDeclarationOverridden,
                 ItemSeparator = ItemSeparator,
                 BuildTree = BuildTree,
                 AllowDuplicateNames = AllowDuplicateNames,

@@ -328,6 +328,154 @@ namespace CodeDeeds.Xslt.Runtime
         private void ApplyIndentDefault()
         {
             m_indent = m_settings.IndentSpecified ? m_settings.Indent : m_method == OutputMethod.Html;
+            RefuseImpossibleSettings();
+        }
+
+        /// <summary>
+        /// Refuses the serialization parameters that cannot be honoured together, or at all.
+        /// </summary>
+        /// <remarks>
+        /// Asked where the method is settled, since every one of them turns on it, and asked once. The
+        /// specification says of each that the serializer MUST signal the error, so none is recoverable and
+        /// none waits to see whether the offending parameter ever matters.
+        /// </remarks>
+        private void RefuseImpossibleSettings()
+        {
+            bool xml = Method is OutputMethod.Xml or OutputMethod.Xhtml;
+
+            // §5.1.8: "If the output method is XML or XHTML, the value of the undeclare-prefixes
+            // parameter is yes, and the value of the version parameter is 1.0, a serialization error
+            // results." XML 1.0 has no syntax for undeclaring a prefix, so the two cannot both be had.
+            if (xml && m_settings.UndeclarePrefixes && m_settings.Version == "1.0")
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.SEPM0010,
+                    "undeclare-prefixes=\"yes\" asks for what XML 1.0 cannot write: a prefix can be "
+                    + "undeclared only from XML 1.1 onwards. Ask for version=\"1.1\", or drop it.");
+            }
+
+            // §5.1.6: the XML declaration is the one place a standalone document declaration can be
+            // written, so omitting the declaration and asking for one are two instructions that cannot both
+            // be followed. The version is the same story where a document type declaration makes it matter.
+            if (xml && m_settings.OmitXmlDeclaration && !m_settings.OmitXmlDeclarationOverridden)
+            {
+                if (m_settings.Standalone is not null)
+                {
+                    throw XsltErrors.Error(
+                        XsltErrorCode.SEPM0009,
+                        "omit-xml-declaration=\"yes\" leaves nowhere to say the standalone the parameters "
+                        + "ask for: a standalone document declaration is part of the XML declaration.");
+                }
+
+                if (m_settings.Version != "1.0" && m_settings.DoctypeSystem is not null)
+                {
+                    throw XsltErrors.Error(
+                        XsltErrorCode.SEPM0009,
+                        "omit-xml-declaration=\"yes\" leaves the version unsaid, and with a doctype-system "
+                        + $"and version=\"{m_settings.Version}\" it is a version a reader would need.");
+                }
+            }
+
+            RefuseUnwritableVersion();
+
+            // §5.1.3: the encoding's name is written into the XML declaration whether or not the
+            // destination takes bytes, so one this process does not have is an error at either end. The
+            // text method has no declaration to write it into and is not excused: §8.1.3 gives it the
+            // same parameter, and a result asked for in an encoding nothing can produce is the same error.
+            SerializationEncoding.Resolve(m_settings);
+
+            // A processing instruction written before the method was known, now going into HTML.
+            if (Method == OutputMethod.Html && m_deferredGreaterThan)
+            {
+                throw GreaterThanInProcessingInstruction();
+            }
+        }
+
+        /// <summary>
+        /// Refuses a version of XML, or of HTML, this serializer does not write.
+        /// </summary>
+        /// <remarks>
+        /// §7.4.1 defines the <em>requested HTML version</em> as the <c>html-version</c> parameter where
+        /// that is given and the <c>version</c> parameter otherwise, which is why a result that named no
+        /// version at all is not thereby asking for HTML 1.0. For the XML and XHTML methods
+        /// <c>version</c> is the version of XML, and this one writes 1.0 and 1.1.
+        /// </remarks>
+        private void RefuseUnwritableVersion()
+        {
+            if (Method == OutputMethod.Html)
+            {
+                decimal? asked = m_settings.HtmlVersion
+                    ?? (m_settings.VersionSpecified && decimal.TryParse(
+                            m_settings.Version.Trim(),
+                            System.Globalization.NumberStyles.AllowDecimalPoint,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out decimal written)
+                        ? written
+                        : null);
+
+                // A requested version that is not a decimal at all is left alone: the specification makes
+                // what a serializer does with one implementation-defined.
+                if (asked is decimal html && html < 5.0m && html != 4.0m && html != 4.01m)
+                {
+                    throw XsltErrors.Error(
+                        XsltErrorCode.SESU0013,
+                        $"HTML {html.ToString(System.Globalization.CultureInfo.InvariantCulture)} is not a "
+                        + "version this serializer writes. It writes HTML 4.0, 4.01 and 5.");
+                }
+
+                return;
+            }
+
+            if (Method is OutputMethod.Xml or OutputMethod.Xhtml
+                && m_settings.VersionSpecified
+                && m_settings.Version.Trim() is not ("1.0" or "1.1"))
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.SESU0013,
+                    $"XML {m_settings.Version} is not a version this serializer writes. It writes 1.0 "
+                    + "and 1.1.");
+            }
+        }
+
+        /// <summary>The error a <c>&gt;</c> inside a processing instruction is under the HTML method.</summary>
+        private static XsltException GreaterThanInProcessingInstruction()
+        {
+            return XsltErrors.Error(
+                XsltErrorCode.SERE0015,
+                "The HTML output method ends a processing instruction with '>' rather than '?>', so a '>' "
+                + "inside one would end it early. §7.2 makes that an error rather than something to "
+                + "escape, there being no escaping inside a processing instruction.");
+        }
+
+        /// <summary>Whether a deferred processing instruction held a <c>&gt;</c>, checked once the method is known.</summary>
+        private bool m_deferredGreaterThan;
+
+        /// <summary>How many elements have been written at the top of the result, for SEPM0004.</summary>
+        private int m_topLevelElements;
+
+        /// <summary>
+        /// Refuses a result the parameters describe as one element when it is not.
+        /// </summary>
+        /// <remarks>
+        /// §5.1.6: "It is a serialization error to specify the doctype-system parameter, or to specify
+        /// the standalone parameter with a value other than omit, if the instance of the data model contains
+        /// text nodes or multiple element nodes as children of the root node." Both say something about a
+        /// document, and what is being written is not one.
+        /// </remarks>
+        /// <param name="what">What was written at the top, for the message.</param>
+        private void RefuseUndocumentedTop(string what)
+        {
+            if (Method is not (OutputMethod.Xml or OutputMethod.Xhtml)
+                || (m_settings.DoctypeSystem is null && m_settings.Standalone is null))
+            {
+                return;
+            }
+
+            throw XsltErrors.Error(
+                XsltErrorCode.SEPM0004,
+                $"The result has {what} at the top, and "
+                + (m_settings.Standalone is not null ? "a standalone other than omit" : "a doctype-system")
+                + " describes a document with one element and nothing else beside it.");
         }
 
         /// <summary>Gets the depth of currently open elements.</summary>
@@ -353,6 +501,11 @@ namespace CodeDeeds.Xslt.Runtime
             if (!m_methodDecided)
             {
                 DecideMethod(namespaceUri, localName);
+            }
+
+            if (m_elementNames.Count == 0 && ++m_topLevelElements > 1)
+            {
+                RefuseUndocumentedTop("more than one element");
             }
 
             if (m_contentTypeWritten >= 0 && m_heldDepth < 0 && IsHtmlMeta(namespaceUri, localName))
@@ -1552,6 +1705,13 @@ namespace CodeDeeds.Xslt.Runtime
                 ApplyIndentDefault();
             }
 
+            // Text here is a text node at the top of the result, which is the other half of what
+            // §5.1.6 says a doctype-system or a standalone cannot be written over.
+            if (text.Length != 0)
+            {
+                RefuseUndocumentedTop("text");
+            }
+
             WriteXmlDeclaration();
             return false;
         }
@@ -1959,7 +2119,13 @@ namespace CodeDeeds.Xslt.Runtime
                 }
 
                 deferred.Append("?>");
+                m_deferredGreaterThan |= data.Contains('>');
                 return;
+            }
+
+            if (Method == OutputMethod.Html && data.Contains('>'))
+            {
+                throw GreaterThanInProcessingInstruction();
             }
 
             if (m_elementNames.Count == 0)

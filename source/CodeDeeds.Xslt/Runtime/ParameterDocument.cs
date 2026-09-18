@@ -238,10 +238,13 @@ namespace CodeDeeds.Xslt.Runtime
                 case "include-content-type": settings.IncludeContentType = Flag(); break;
                 case "allow-duplicate-names": settings.AllowDuplicateNames = Flag(); break;
                 case "build-tree": settings.BuildTree = Flag(); break;
-                case "undeclare-prefixes": break;
+                case "undeclare-prefixes": settings.UndeclarePrefixes = Flag(); break;
                 case "standalone": settings.Standalone = value.Trim() == "omit" ? null : Flag(); break;
                 case "encoding": settings.Encoding = value.Trim(); break;
-                case "version": settings.Version = value.Trim(); break;
+                case "version":
+                    settings.Version = value.Trim();
+                    settings.VersionSpecified = true;
+                    break;
                 case "media-type": settings.MediaType = value.Trim(); break;
                 case "doctype-public": settings.DoctypePublic = value; break;
                 case "doctype-system": settings.DoctypeSystem = value; break;
@@ -287,7 +290,13 @@ namespace CodeDeeds.Xslt.Runtime
                 "NFD" => System.Text.NormalizationForm.FormD,
                 "NFKC" => System.Text.NormalizationForm.FormKC,
                 "NFKD" => System.Text.NormalizationForm.FormKD,
-                string other => throw new XsltException(
+                // SESU0011 is the serializer's own code for a form it does not apply, and the specification
+                // requires it to be signalled: "A serialization error results if the value of the
+                // normalization-form parameter specifies a normalization form that is not supported by the
+                // serializer." fully-normalized is among those: it is a check on the result rather than a
+                // transformation of it, and this engine does not make it.
+                string other => throw XsltErrors.Error(
+                    XsltErrorCode.SESU0011,
                     $"'{other}' is not a normalization form this engine applies. It has NFC, NFD, NFKC, NFKD "
                     + "and none."),
             };

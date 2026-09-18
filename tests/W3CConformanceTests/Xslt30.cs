@@ -156,7 +156,7 @@ namespace CodeDeeds.Xslt.Conformance
             Console.WriteLine($"    failed            {failed:N0}");
             Console.WriteLine();
 
-            Program.Report("Why tests were skipped", skipReasons, 16);
+            Program.Report("Why tests were skipped", skipReasons, 40);
             Program.Report("What the failures are", failureReasons, 20);
 
             Console.WriteLine("Pass rate by area (areas with at least 20 tests run):");

@@ -118,7 +118,8 @@ namespace CodeDeeds.Xslt.Runtime
             }
             catch (Exception error) when (error is ArgumentException or NotSupportedException)
             {
-                throw new XsltException(
+                throw XsltErrors.Error(
+                    XsltErrorCode.SESU0007,
                     $"This stylesheet asks for output in '{name}', which is not an encoding this process "
                     + "has. UTF-8, UTF-16, UTF-32 and ISO-8859-1 are always available; the legacy code pages "
                     + "need System.Text.Encoding.CodePages, registered by the application with "

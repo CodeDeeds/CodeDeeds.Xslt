@@ -6659,8 +6659,8 @@ across `decl/accept` and `decl/expose` on 5 March 2023 while these two files wer
 Applied to a clone of the suite, both tests raise the `XTSE3050` they were written for. A third
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
-validation settles about a constructed node*. With all five the 3.0 run reads **7,917 of 7,924** and the
-schema-aware run **8,518 of 8,526**. The patch is not applied here, and the figures in these notes do not
+validation settles about a constructed node*. With all five the 3.0 run reads **7,931 of 7,938** and the
+schema-aware run **8,531 of 8,540**. The patch is not applied here, and the figures in these notes do not
 include it. A measurement is worth something because of what it is taken against, and a patch kept in the
 repository and offered upstream is worth more than five tests counted differently at home.
 
@@ -7273,6 +7273,64 @@ The 3.0 run goes from 7,913 of 7,924 to **7,914** and the schema-aware run from 
 **8,513**, both on both backends, and `insn/result-document` is empty. The 2.0 run does not move —
 `parameter-document` is 3.0's — and neither do the XPath runs. One new unit test, 2,818 in all.
 
+### The assertion the driver would not present, and the six errors behind it
+
+A driver's list of assertions it cannot present is a list of tests nobody is measuring, which makes it
+worth re-reading whenever anything lands. `assert-serialization-error` had been on this one's since it
+was written, for the reason `assert-eq` and `assert-type` are on it: the driver holds a serialized result
+and not a typed sequence, so an assertion about the result as a value is one it cannot answer.
+
+That reasoning does not fit this assertion. It names a code rather than a value; every code it names is
+the serializer's own, `SEPM`, `SERE` or `SESU`, which nothing else raises; and the driver serializes every
+result it is given, so an error raised in the course of that reaches it exactly as any other error does.
+Answering it is the check `error` already makes. Presenting it brought 14 test cases into the runs, and
+not one of them passed. Nine reached the serializer and got a result; five raised an error with no code,
+which the driver reports as a skip of its own rather than count a right answer it cannot check. Every one
+of the fourteen was the serializer's.
+
+**§5.1.8, `SEPM0010`.** `undeclare-prefixes="yes"` with `version="1.0"` on the XML or XHTML method.
+XML 1.0 has no syntax for undeclaring a prefix, so the two cannot both be had. The parameter had been read
+for its form and then dropped, this serializer writing 1.0 and undeclaring nothing; it is kept now, for
+this one error.
+
+**§5.1.6, `SEPM0009`.** `omit-xml-declaration="yes"` with a `standalone` other than `omit`. A
+standalone document declaration is part of the XML declaration, so omitting the declaration leaves nowhere
+to say it. With one exception, which is the only place this rule needed a judgement:
+`XsltOptions.OmitXmlDeclaration` overrides whatever the stylesheet asked for, and a host application
+that omits the declaration is overruling the stylesheet rather than contradicting it. The conflict is
+the stylesheet's to make, so the settings now record whether it was made there.
+
+**§5.1.6 again, `SEPM0004`.** A `doctype-system`, or a `standalone` other than `omit`, over a result
+that holds text or more than one element at the top. Both describe a document with one element and nothing
+beside it, and what is being written is not one. Counted as the result is written, which is the only place
+the shape is known.
+
+**§5.1.3, `SESU0007`.** An encoding this process does not have. The engine had the check and reached
+it only when writing bytes; the name goes into the XML declaration as well, and §8.1.3 gives the text
+method the same parameter, so it is asked of every result now.
+
+**§5.1.1 and §7.4.1, `SESU0013`.** A version of XML, or of HTML, this serializer does not
+write: 1.0 and 1.1 of XML, 4.0, 4.01 and 5 of HTML. The HTML half needed one more thing recorded.
+§7.4.1 defines the *requested HTML version* as `html-version` where that is given and `version`
+otherwise, and `version` defaults to `1.0` — so a result that named no version at all would look like
+a request for HTML 1.0. The settings now say whether a version was named.
+
+**§7.2, `SERE0015`.** A `>` inside a processing instruction under the HTML method, which ends one
+with `>` rather than `?>`. There is no escaping inside a processing instruction, so it is an error rather
+than something to write around.
+
+The five that raised an error with no code were all `normalization-form`: four naming a form that is not
+one, and `output-0193` naming `fully-normalized`, which is a check on the result rather than a
+transformation of it and one this engine does not make. The refusal was already there and already right;
+it carried no code. It carries `SESU0011` now.
+
+The 3.0 run goes from 7,914 of 7,924 to **7,928 of 7,938** and the schema-aware run from 8,513 of 8,526 to
+**8,526 of 8,540**, the denominators growing by the fourteen tests that were not being run. The 2.0 run
+goes from 5,602 of 5,623 to **5,616 of 5,639**: two of the sixteen it gains are `doe-0176f` and `doe-0408`,
+which pass on the 3.0 run and are the `sort-078` question again — a bad value for an attribute the
+element does have, in a `version="3.0"` stylesheet a 2.0 processor reads forwards-compatibly. Both XPath
+runs keep their failure sets test for test. Two new unit tests, 2,820 in all.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error
@@ -7503,7 +7561,9 @@ table; 672 tests ask for it and are skipped.
   `stable="YES"` in a `version="3.0"` stylesheet, which a 2.0 processor reads forwards-compatibly: §3.11
   names three things forwards compatibility changes and the value of an attribute the element does have is
   not among them, but refusing it would be refusing a stylesheet for being newer in exactly the way 3.0
-  widening yes/no to the six boolean spellings already showed can happen.
+  widening yes/no to the six boolean spellings already showed can happen. `doe-0176f` and `doe-0408`
+  are the same reading and the same cost: each writes `disable-output-escaping` with a value that is
+  not one, in a `version="3.0"` stylesheet, and each passes on the 3.0 run.
 
 **`XsltVersion.Implemented` said `V20` when this was written**, so a caller who named no version got a 2.0
 processor: it answered `2` to `system-property('xsl:version')` and read a `version="3.0"` stylesheet

@@ -24,6 +24,11 @@ namespace CodeDeeds.Xslt.Conformance
     /// here writes a document rather than handing back a value, so the sequence those ask about is gone by
     /// the time the driver can see anything.
     /// </para>
+    /// <para>
+    /// <c>assert-serialization-error</c> reads like one of those and is not. It names a code rather than a
+    /// value, the codes it names are the serializer's alone, and this driver serializes every result it is
+    /// given: an error raised there reaches it the way any other error does.
+    /// </para>
     /// </remarks>
     internal static class Xslt30Assertions
     {
@@ -90,6 +95,13 @@ namespace CodeDeeds.Xslt.Conformance
                 }
 
                 case "error":
+                    return CheckError(assertion, outcome);
+
+                // The same question with the answer's origin named. Every code the catalog writes here is
+                // the serializer's own — SEPM, SERE and SESU, and nothing else raises those — and this
+                // driver serializes every result it is given, so an error raised in the course of that
+                // arrives exactly as any other does. Asking for the code is asking the whole question.
+                case "assert-serialization-error":
                     return CheckError(assertion, outcome);
 
                 case "assert-result-document":

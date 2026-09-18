@@ -393,6 +393,98 @@ namespace CodeDeeds.Xslt.UnitTests
             Assert.AreEqual("a]]>b", XDocument.Parse(result).Root!.Value);
         }
 
+        /// <summary>
+        /// Serializes a result with nothing overridden from outside, and gives back the code it was
+        /// refused with.
+        /// </summary>
+        /// <remarks>
+        /// Not through <see cref="Run"/>, which omits the XML declaration on the caller's behalf: a host
+        /// application that does that is overruling the stylesheet rather than contradicting it, and the
+        /// serializer is written to tell the two apart.
+        /// </remarks>
+        private static string RefusedBy(string output, string body = "<a/>")
+        {
+            return Assert.ThrowsExactly<XsltException>(() => Serializes(output, body)).Code ?? string.Empty;
+        }
+
+        /// <summary>Serializes a result with nothing overridden from outside.</summary>
+        private static string Serializes(string output, string body = "<a/>")
+        {
+            return new Xslt(
+                "<xsl:stylesheet version=\"2.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\">"
+                + output + "<xsl:template match=\"/\">" + body + "</xsl:template></xsl:stylesheet>",
+                new XsltOptions()).TransformXml("<r/>");
+        }
+
+        [TestMethod]
+        public void SerializationParametersThatCannotBeHonouredTogetherAreRefused()
+        {
+            // Every one of these is a "the serializer MUST signal the error" in the Serialization
+            // specification, so none of them is something to recover from. The suite asks for each with
+            // assert-serialization-error, in decl/output.
+
+            // §5.1.8: XML 1.0 has no syntax for undeclaring a prefix, so the two cannot both be had.
+            Assert.AreEqual(
+                "SEPM0010",
+                RefusedBy("<xsl:output method=\"xml\" undeclare-prefixes=\"yes\" version=\"1.0\"/>"));
+
+            // §5.1.6: a standalone document declaration is part of the XML declaration, so omitting
+            // the declaration leaves nowhere to say it.
+            Assert.AreEqual(
+                "SEPM0009",
+                RefusedBy("<xsl:output method=\"xml\" omit-xml-declaration=\"yes\" standalone=\"yes\"/>"));
+
+            // §5.1.6 again, from the other side: both a doctype-system and a standalone describe a
+            // document with one element and nothing else beside it.
+            Assert.AreEqual(
+                "SEPM0004",
+                RefusedBy("<xsl:output method=\"xml\" standalone=\"yes\"/>", "<a/><b/>"));
+            Assert.AreEqual(
+                "SEPM0004",
+                RefusedBy(
+                    "<xsl:output method=\"xml\" doctype-system=\"x.dtd\"/>",
+                    "<xsl:text>x</xsl:text><a/>"));
+
+            // §5.1.3 and §8.1.3: an encoding nothing here can produce, whether or not the
+            // destination is one that takes bytes.
+            Assert.AreEqual("SESU0007", RefusedBy("<xsl:output encoding=\"XXX-xx\"/>"));
+            Assert.AreEqual("SESU0007", RefusedBy("<xsl:output method=\"text\" encoding=\"XXX-xx\"/>"));
+
+            // §5.1.1 and §7.4.1: a version of XML, or of HTML, this serializer does not write.
+            Assert.AreEqual("SESU0013", RefusedBy("<xsl:output method=\"xml\" version=\"2.0\"/>"));
+            Assert.AreEqual("SESU0013", RefusedBy("<xsl:output method=\"html\" version=\"0.0\"/>"));
+
+            // §5.1.9: a normalization form it does not apply.
+            Assert.AreEqual(
+                "SESU0011", RefusedBy("<xsl:output normalization-form=\"fully-normalized\"/>"));
+
+            // §7.2: the HTML method ends a processing instruction with '>' rather than '?>', and
+            // there is no escaping inside one.
+            Assert.AreEqual(
+                "SERE0015",
+                RefusedBy(
+                    "<xsl:output method=\"html\"/>",
+                    "<html><xsl:processing-instruction name=\"p\">a&gt;b</xsl:processing-instruction></html>"));
+        }
+
+        [TestMethod]
+        public void TheSameParametersAreHonouredWhereTheyCanBe()
+        {
+            // Undeclaring a prefix is only impossible in XML 1.0.
+            Assert.AreEqual(
+                "<?xml version=\"1.1\" encoding=\"UTF-8\"?><a/>",
+                Serializes("<xsl:output method=\"xml\" undeclare-prefixes=\"yes\" version=\"1.1\"/>"));
+
+            // A result that named no version has not thereby asked for HTML 1.0, which is the whole reason
+            // the serializer keeps whether the version was named at all.
+            Assert.AreEqual("<html></html>", Serializes("<xsl:output method=\"html\"/>", "<html/>"));
+
+            // And one element with nothing beside it is what a standalone describes.
+            Assert.AreEqual(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><a/>",
+                Serializes("<xsl:output method=\"xml\" standalone=\"yes\"/>"));
+        }
+
         [TestMethod]
         public void ALineEndingIsWrittenAsAReferenceSoThatItSurvivesBeingParsedBack()
         {
