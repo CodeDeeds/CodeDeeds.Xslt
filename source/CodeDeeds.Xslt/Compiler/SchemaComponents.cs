@@ -618,6 +618,31 @@ namespace CodeDeeds.Xslt.Compiler
             return text.Length == 0 ? text : char.ToUpperInvariant(text[0]) + text[1..];
         }
 
+        /// <summary>
+        /// The schema for the XML representation of JSON and nothing else, compiled once for the process:
+        /// what <c>fn:json-to-xml()</c> validates against where the stylesheet did not import it.
+        /// </summary>
+        /// <remarks>
+        /// XSLT 3.0 §22.3 says of the <c>validate</c> option that "it is not necessary that the containing
+        /// stylesheet should import the relevant schema". Importing it on the stylesheet's behalf would
+        /// put its names in scope, which is what an import is for and what a stylesheet that wrote none
+        /// has not asked for — <c>element(*, j:mapType)</c> would compile where it should be
+        /// <c>XPST0051</c>. So the schema is kept apart, and shared: nothing is added to it once it is
+        /// compiled, which is all that reading it from every transformation at once needs.
+        /// </remarks>
+        internal static SchemaComponents Json => s_json.Value;
+
+        private static readonly Lazy<SchemaComponents> s_json = new(() =>
+        {
+            SchemaComponents json = new SchemaComponents(null, null);
+            json.Import(JsonNamespace, null, null, null);
+            json.EnsureCompiled();
+            return json;
+        });
+
+        /// <summary>The namespace of the XML representation of JSON, which is the functions namespace.</summary>
+        internal const string JsonNamespace = "http://www.w3.org/2005/xpath-functions";
+
         /// <summary>The schema this engine has built in for a namespace, or null where it has none.</summary>
         /// <param name="namespaceUri">The namespace an <c>xsl:import-schema</c> named with no location.</param>
         internal static string? BuiltInSchemaFor(string namespaceUri)
@@ -625,7 +650,7 @@ namespace CodeDeeds.Xslt.Compiler
             return namespaceUri switch
             {
                 Model.XdmTree.XmlNamespaceUri => XmlNamespaceSchema,
-                "http://www.w3.org/2005/xpath-functions" => JsonSchema,
+                JsonNamespace => JsonSchema,
                 _ => null,
             };
         }

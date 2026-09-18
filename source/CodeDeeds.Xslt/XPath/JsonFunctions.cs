@@ -162,18 +162,39 @@ namespace CodeDeeds.Xslt.XPath
             {
                 bool validate = Flag(options, "validate", false);
 
-                // Validating the result against the schema needs a schema-aware processor with the schema
-                // for the XPath functions namespace in scope; without one, asking for it is the error the
-                // specification gives (FOJS0004).
+                // F&O 3.1 §17.5.3: duplicates defaults to reject "if validate is true", a repeated key being
+                // what would make the result invalid; and retain, which keeps one, "is therefore incompatible
+                // with the option validate=true" whether or not the JSON repeats a key.
+                string duplicates = Duplicates(
+                    options, validate ? "reject" : "retain", "reject", "use-first", "retain");
+
+                if (validate && duplicates == "retain")
+                {
+                    throw XsltErrors.Error(
+                        XsltErrorCode.FOJS0005,
+                        "fn:json-to-xml() was asked both to validate its result and to retain a repeated key, "
+                        + "and a result that keeps one is not valid. Use 'reject' or 'use-first', or leave "
+                        + "'duplicates' out.");
+                }
+
+                // Validating needs a schema-aware processor, and asking for it without one is the error the
+                // specification gives (FOJS0004). It needs no import: XSLT 3.0 §22.3, "it is not necessary
+                // that the containing stylesheet should import the relevant schema". So the stylesheet's own
+                // schemas are used where they have the namespace — an import, or the caller, put it there —
+                // and the built-in schema, kept apart from them, where they do not.
                 Compiler.SchemaComponents? schemas = validate ? context.Runtime?.Schemas : null;
 
-                if (validate && (schemas is null || schemas.FindElement("http://www.w3.org/2005/xpath-functions", "map") is null))
+                if (validate && schemas is null)
                 {
                     throw XsltErrors.Error(
                         XsltErrorCode.FOJS0004,
-                        "fn:json-to-xml() was asked to validate its result, and the schema for the XPath "
-                        + "functions namespace is not in scope. Make the processor schema-aware and import "
-                        + "that namespace's schema.");
+                        "fn:json-to-xml() was asked to validate its result, and validating needs a "
+                        + "schema-aware processor. Set XsltOptions.SchemaAware.");
+                }
+
+                if (schemas is not null && schemas.FindElement(Compiler.SchemaComponents.JsonNamespace, "map") is null)
+                {
+                    schemas = Compiler.SchemaComponents.Json;
                 }
 
                 JsonTreeBuilder.JsonToXmlOptions settings = new JsonTreeBuilder.JsonToXmlOptions
@@ -181,7 +202,7 @@ namespace CodeDeeds.Xslt.XPath
                     Liberal = liberal,
                     Escape = Flag(options, "escape", false),
                     Fallback = Fallback(options, ref context),
-                    Duplicates = Duplicates(options, "retain", "reject", "use-first", "retain"),
+                    Duplicates = duplicates,
                     Typed = validate,
                 };
 
@@ -296,6 +317,8 @@ namespace CodeDeeds.Xslt.XPath
         /// answer that does not depend on how far the parser got. The XML representation has no such
         /// difficulty — two elements can carry one key — so <c>fn:json-to-xml()</c> keeps both by default and
         /// takes <c>retain</c> where the other takes <c>use-last</c> and <c>use-any</c> (F&amp;O 3.1 §17.5).
+        /// Unless it is validating: a result with a key twice is not valid, so there the default is
+        /// <c>reject</c>, and <c>retain</c> is refused.
         /// </remarks>
         /// <param name="options">The options map.</param>
         /// <param name="fallback">What the option means where it is not written.</param>

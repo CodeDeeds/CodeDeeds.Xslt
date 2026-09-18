@@ -7551,7 +7551,8 @@ Two rules beside these are not kept yet, and are written down where they were fo
 option defaults to `reject` "if validate is true", and `retain` with `validate` is `FOJS0005`; this engine
 defaults to `retain` either way and reports both cases as the invalid result they produce, `FOJS0004`. And
 XSLT 3.0 says of `validate` that "it is not necessary that the containing stylesheet should import the
-relevant schema", where this engine refuses unless it does.
+relevant schema", where this engine refuses unless it does. Both are kept now; see *What validating JSON
+asks of the options, and of the stylesheet*.
 
 No test in any run asks any of this. QT3's validating tests need `schemaImport`, which the XPath driver does
 not claim, and the XSLT suite's `json-to-xml-typed` asks only for types, which it still gets: the 173 tests
@@ -7757,6 +7758,42 @@ Seven unit tests, 2,866 in all.
 
 What is left skipped for a feature is streaming, schema-awareness off the `--schema` run, XML 1.1, XSD 1.1,
 and the two Unicode versions. None of those is a list entry that has outlived its omission.
+
+### What validating JSON asks of the options, and of the stylesheet
+
+The two rules *What a typed JSON result says about escaping* left written down are kept now.
+
+**A repeated key.** F&O 3.1 §17.5.3 gives `duplicates` a default that depends on another option: "If
+validate is true then reject, otherwise retain." A result holding one key twice is not valid against the
+schema, whose `xs:unique` says so, and `retain` is the one choice that produces such a result — so it "is
+therefore incompatible with the option validate=true", `FOJS0005`. This engine defaulted to `retain`
+whatever `validate` said. JSON that repeated a key was parsed into a tree holding it twice, and validation
+then refused the tree, `FOJS0004`: the right answer that something was wrong, and the wrong one about
+what. Now the default is `reject` when validating, so a repeated key is `FOJS0003` where it is found, and
+`retain` alongside `validate` is refused as an option before any JSON is read, whether or not the JSON
+would have repeated anything. QT3 asks both in `json-to-xml-error-028` and `042`.
+
+**No import.** XSLT 3.0 §22.3 says of `validate` that "it is not necessary that the containing stylesheet
+should import the relevant schema", and QT3's `json-to-xml-error-028` validates from an expression that
+imports nothing. This engine looked for the schema among the stylesheet's own and refused with `FOJS0004`
+where it was not, telling the caller to import it. Importing it on the stylesheet's behalf would be the
+wrong repair. An import is how a stylesheet puts a schema's names in scope, so `element(*, j:mapType)`
+would compile in a stylesheet that never asked for `j:mapType`, where it is `XPST0051`. So the built-in
+schema is also compiled on its own, once for the process, and shared; nothing is added to it after that,
+which is all that reading it from every transformation at once needs. The stylesheet's own schemas are
+still used where they have the namespace — an import, or the caller's `XsltOptions.Schemas`, put it there —
+because then the stylesheet can name the types, and the type it names has to be the one the result
+carries.
+
+A processor that is not schema-aware still refuses, with F&O's `FOJS0004`, as it gives F&O's codes for this
+function's other errors too. XSLT 3.0 names `XTDE3245` for the same case, and the one test that asks for it,
+`json-to-xml-typed-010`, cannot reach the call — see *Which error codes the suite asks for and does not
+get*.
+
+Nothing moves, since the tests that ask are QT3's and need `schemaImport`, which the XPath driver does not
+claim. The 3.0 run stands at 8,061 of 8,071 and the schema-aware run at 8,668 of 8,727, both on both
+backends; the 2.0 run at 5,678 of 5,701; the XPath runs at 18,268 and 14,553. Every failure set is
+identical test for test. Two new unit tests, 2,868 in all.
 
 ### Which results the suite asks for and does not get
 

@@ -664,15 +664,19 @@ namespace CodeDeeds.Xslt.UnitTests
         /// some options. The JSON's quotation marks are entities, and each backslash the parser is to see is
         /// two in the XPath string and four here.
         /// </summary>
-        private static string AskOfJson(string json, string options, string expression)
+        private static string AskOfJson(string json, string options, string expression, string declarations = JsonImport)
         {
-            return Run(
-                Sheet(
-                    $"<xsl:variable name=\"v\" select=\"json-to-xml('{json}', {options})\"/>"
-                    + "<xsl:value-of xmlns:j=\"http://www.w3.org/2005/xpath-functions\""
-                    + $" select=\"{expression}\"/>",
-                    JsonImport),
-                "<r/>");
+            return Run(JsonSheet(json, options, expression, declarations), "<r/>");
+        }
+
+        /// <summary>The stylesheet <see cref="AskOfJson"/> runs.</summary>
+        private static string JsonSheet(string json, string options, string expression, string declarations = JsonImport)
+        {
+            return Sheet(
+                $"<xsl:variable name=\"v\" select=\"json-to-xml('{json}', {options})\"/>"
+                + "<xsl:value-of xmlns:j=\"http://www.w3.org/2005/xpath-functions\""
+                + $" select=\"{expression}\"/>",
+                declarations);
         }
 
         [TestMethod]
@@ -733,6 +737,57 @@ namespace CodeDeeds.Xslt.UnitTests
                     + "$v/j:map/j:boolean instance of element(j:boolean, j:booleanType), "
                     + "$v/j:map/j:boolean instance of element(j:boolean, j:booleanWithinMapType), "
                     + "$v/j:map/j:string instance of element(j:string, j:stringType)"));
+        }
+
+        [TestMethod]
+        public void ValidatingJsonRejectsARepeatedKeyByDefaultAndWillNotRetainOne()
+        {
+            // F&O 3.1 §17.5.3: duplicates defaults to "reject" "if validate is true", and "retain" makes a
+            // result that is invalid against the schema, so it "is therefore incompatible with the option
+            // validate=true" — refused as an option, whether or not the JSON repeats a key.
+            const string Twice = "{&quot;a&quot;: 3, &quot;a&quot;: 4}";
+            const string Once = "{&quot;a&quot;: 3}";
+
+            Assert.AreEqual("FOJS0003", Refuses(JsonSheet(Twice, "map{'validate': true()}", "count($v//*)"), "<r/>"));
+
+            Assert.AreEqual(
+                "FOJS0005",
+                Refuses(JsonSheet(Once, "map{'validate': true(), 'duplicates': 'retain'}", "count($v//*)"), "<r/>"));
+
+            // The other two choices stand, and without validate the default is still to keep both.
+            Assert.AreEqual(
+                "<out>3</out>",
+                AskOfJson(Twice, "map{'validate': true(), 'duplicates': 'use-first'}", "string($v/j:map/j:number)"));
+
+            Assert.AreEqual("<out>2</out>", AskOfJson(Twice, "map{}", "count($v/j:map/j:number)"));
+        }
+
+        [TestMethod]
+        public void ValidatingJsonNeedsNoImportOfItsSchema()
+        {
+            // XSLT 3.0 §22.3, of validate: "It is not necessary that the containing stylesheet should import
+            // the relevant schema." The result is typed all the same, and the schema's names are still not in
+            // scope, which is what an import would have been for.
+            Assert.AreEqual(
+                "<out>2 3 true true false</out>",
+                AskOfJson(
+                    "{&quot;s&quot;: &quot;x&quot;, &quot;n&quot;: 1, &quot;a&quot;: [&quot;y&quot;]}",
+                    "map{'validate': true()}",
+                    "count($v//@escaped), count($v//@escaped-key), data($v//j:number) instance of xs:double, "
+                    + "($v//@escaped)[1] instance of attribute(*, xs:boolean), type-available('j:mapType')",
+                    declarations: string.Empty));
+
+            // A processor that is not schema-aware has nothing to validate with, and says so.
+            string sheet = JsonSheet("{}", "map{'validate': true()}", "count($v//*)", declarations: string.Empty);
+
+            foreach (XsltBackend backend in new[] { XsltBackend.Interpreted, XsltBackend.Compiled })
+            {
+                XsltOptions plain = new XsltOptions { Backend = backend, OmitXmlDeclaration = true };
+
+                Assert.AreEqual(
+                    "FOJS0004",
+                    Assert.ThrowsExactly<XsltException>(() => new Xslt(sheet, plain).TransformXml("<r/>")).Code);
+            }
         }
     }
 }
