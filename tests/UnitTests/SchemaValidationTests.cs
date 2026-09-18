@@ -317,6 +317,65 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
+        public void AValidatedCopySuppliesTheAttributesTheSchemaDeclaresADefaultFor()
+        {
+            // The same sentence says nothing about how the node being validated was made, so a copy gains
+            // the attribute as a constructed element does — whether validated by mode or against a named
+            // type, deep or shallow, and at any depth of a copied document. An attribute the element did
+            // write keeps the value it was written with.
+            const string Held = "<xsl:variable name=\"v\"><t:z price=\"2.50\"/></xsl:variable>";
+
+            Assert.AreEqual(
+                "<out><t:z xmlns:t=\"urn:t\" price=\"2.50\" cost=\"20.01\"/>"
+                + "<t:z xmlns:t=\"urn:t\" price=\"2.50\" cost=\"20.01\"/>"
+                + "<t:z xmlns:t=\"urn:t\" price=\"2.50\" cost=\"20.01\"/>"
+                + "<t:z xmlns:t=\"urn:t\" price=\"2.50\" cost=\"20.01\"/>"
+                + "<t:z xmlns:t=\"urn:t\" price=\"2.50\" cost=\"20.01\"/></out>",
+                Run(
+                    Sheet(
+                        Held
+                        + "<xsl:copy-of select=\"$v/t:z\" validation=\"strict\"/>"
+                        + "<xsl:copy-of select=\"$v/t:z\" validation=\"lax\"/>"
+                        + "<xsl:copy-of select=\"$v/t:z\" type=\"t:zType\"/>"
+                        + "<xsl:copy select=\"$v/t:z\" validation=\"strict\"><xsl:copy-of select=\"@*\"/></xsl:copy>"
+                        + "<xsl:copy-of select=\"$v\" validation=\"strict\"/>"),
+                    "<r/>"));
+
+            Assert.AreEqual(
+                "<out><t:z xmlns:t=\"urn:t\" price=\"2.50\" cost=\"7\"/></out>",
+                Run(
+                    Sheet(
+                        "<xsl:variable name=\"v\"><t:z price=\"2.50\" cost=\"7\"/></xsl:variable>"
+                        + "<xsl:copy-of select=\"$v/t:z\" validation=\"strict\"/>"),
+                    "<r/>"));
+        }
+
+        [TestMethod]
+        public void AValidatedCopyHeldAsAnItemKeepsItsShapeAndGainsTheDefault()
+        {
+            // Where the copy is an item of a sequence rather than content, it is still what it was — a
+            // parentless element, a document node — and still carries the attribute, annotated as its
+            // declaration says. xsl:document validated into a sequence is the same case built rather than
+            // copied.
+            Assert.AreEqual(
+                "<out>20.01 true true false|20.01 true|20.01 true</out>",
+                Run(
+                    Sheet(
+                        "<xsl:variable name=\"v\"><t:z price=\"2.50\"/></xsl:variable>"
+                        + "<xsl:variable name=\"e\" as=\"element()\">"
+                        + "<xsl:copy-of select=\"$v/t:z\" validation=\"strict\"/></xsl:variable>"
+                        + "<xsl:variable name=\"d\" as=\"document-node()\">"
+                        + "<xsl:copy-of select=\"$v\" validation=\"strict\"/></xsl:variable>"
+                        + "<xsl:variable name=\"n\" as=\"document-node()\">"
+                        + "<xsl:document validation=\"strict\"><t:z price=\"4\"/></xsl:document></xsl:variable>"
+                        + "<xsl:value-of select=\"string($e/@cost), $e/@cost instance of attribute(*, xs:decimal), "
+                        + "$e instance of element(t:z, t:zType), exists($e/..)\"/>|"
+                        + "<xsl:value-of select=\"string($d/t:z/@cost), $d instance of document-node(element(t:z))\"/>|"
+                        + "<xsl:value-of select=\"string($n/t:z/@cost), $n instance of document-node(element(t:z))\"/>"),
+                    "<r/>"));
+        }
+
+        [TestMethod]
         public void AConstructedElementIsHeldToItsIdentityConstraintsAndNotToIdUniqueness()
         {
             // §25.4.1 divides the document-level rules in two for a constructed element. "Validation Root

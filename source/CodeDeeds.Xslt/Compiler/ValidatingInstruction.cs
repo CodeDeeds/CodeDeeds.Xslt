@@ -119,8 +119,7 @@ namespace CodeDeeds.Xslt.Compiler
             // A document node produced by xsl:document is one item where the target holds a sequence, and its
             // children elsewhere; other shapes contribute the constructed content, which is the doc's children.
             if (m_shape == ValidationShape.Document
-                && runtime.Output.TryAppendValue(
-                    XPathValue.FromNodeSet(NodeSet.Singleton(annotated, XdmTree.RootNode))))
+                && runtime.Output.TryAppendValue(Validated(annotated, XdmTree.RootNode, overlay)))
             {
                 return;
             }
@@ -176,15 +175,13 @@ namespace CodeDeeds.Xslt.Compiler
                         ? validator.ValidateElementAgainstType(tree, m_type)
                         : validator.ValidateDocument(tree, m_strict);
 
-                    SequenceWriter.Write(
-                        XPathValue.FromNodeSet(NodeSet.Singleton(tree.WithTypeAnnotations(overlay), node)), runtime);
+                    SequenceWriter.Write(Validated(tree.WithTypeAnnotations(overlay), node, overlay), runtime);
                 }
                 else if (kind == NodeKind.Element)
                 {
                     TypeOverlay overlay = validator.ValidateElementNode(tree, node, m_strict, m_type);
 
-                    SequenceWriter.Write(
-                        XPathValue.FromNodeSet(NodeSet.Singleton(tree.WithTypeAnnotations(overlay), node)), runtime);
+                    SequenceWriter.Write(Validated(tree.WithTypeAnnotations(overlay), node, overlay), runtime);
                 }
                 else if (kind == NodeKind.Attribute)
                 {
@@ -197,6 +194,37 @@ namespace CodeDeeds.Xslt.Compiler
                     SequenceWriter.Write(item, runtime);
                 }
             }
+        }
+
+        /// <summary>
+        /// A validated node as the one item it is, an element or a document node, carrying what validation
+        /// settled for it and for everything beneath it.
+        /// </summary>
+        /// <remarks>
+        /// Usually the node itself, in the tree that carries the overlay's annotations: nothing is copied.
+        /// But §25.4.1 has validation "where necessary create new nodes containing these default values",
+        /// and an attribute a schema supplied is a node the tree does not have and cannot be given without
+        /// renumbering every attribute after it. So where validation supplied one, the item is a copy of
+        /// the node made through the overlay, which is how the copier writes a validated tree anywhere: the
+        /// supplied attributes after the element's own, annotated as their declarations say. The copy is
+        /// taken at the top of a sequence, so a document node is still a document node and an element a
+        /// parentless element, and it keeps the tree's base URI, a document node's unparsed entities and —
+        /// where the copy being validated kept them — what each node answers for the accumulators.
+        /// </remarks>
+        /// <param name="annotated">The tree the node is in, carrying the overlay's annotations.</param>
+        /// <param name="node">The node validated: the tree's document node, or an element in it.</param>
+        /// <param name="overlay">What validation settled.</param>
+        private static XPathValue Validated(XdmTree annotated, int node, TypeOverlay overlay)
+        {
+            if (!overlay.SuppliesAttributes)
+            {
+                return XPathValue.FromNodeSet(NodeSet.Singleton(annotated, node));
+            }
+
+            SequenceCaptureTarget copy = new SequenceCaptureTarget(baseUri: annotated.BaseUri);
+            NodeCopier.CopyDeep(
+                annotated, node, copy, copyAccumulators: annotated.CopiedFrom is not null, types: overlay);
+            return copy.Finish();
         }
 
         /// <summary>Validates a copied attribute against its declaration or the named type, and writes it annotated.</summary>

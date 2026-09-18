@@ -7402,6 +7402,45 @@ of 7,938, the schema-aware run at 8,527 of 8,540, and every failure set is ident
 no test in any run calls a 3.0 library under a 2.0 claim. One new unit test and one amended, which had
 recorded the list-type constructors as available at every version; 2,821 in all.
 
+### What validating a copy adds to it
+
+§25.4.1: "If default values for elements or attributes are defined in the schema, the validation process
+will where necessary create new nodes containing these default values." *What a schema import asks for*
+made that true of a constructed element, and said what made it cheap: the attributes are held in the
+overlay beside the annotations, and written by the copy that takes the validated tree to wherever it was
+going. That copy is the whole of the mechanism, and `xsl:copy` and `xsl:copy-of` validated with
+`validation="strict"`, `"lax"` or a `type` never went through it. The two instructions keep what they copied
+as the sequence it is, so that a document node stays a document node and an element a parentless element,
+and hand each node on as it stands in a tree carrying the overlay's annotations. The annotations went with
+it. The attributes, which only the overlay knew about, did not. Against a type declaring `cost` with a
+default,
+
+```xml
+<t:z price="2.50" xsl:validation="strict"/>
+<xsl:copy-of select="$v/t:z" validation="strict"/>
+```
+
+came out as `<t:z price="2.50" cost="20.01"/>` and `<t:z price="2.50"/>`: the same element validated by the
+same schema, differing only in having been copied rather than written. `xsl:document` had the gap on one
+road of its own. Validated into a sequence — a variable declared `document-node()`, say — it is handed on
+as a node in the same way rather than copied into content, and lost them too.
+
+The tree cannot simply be given the attributes. An attribute is addressed by its place in arrays shared by
+every element of the tree, each element's attributes a contiguous run, so adding one renumbers every
+attribute after it, and the namespace nodes stored after those, and every annotation the overlay holds for
+any of them. What the item needs is not the tree it was validated in but a node that has the attributes,
+and the copier already makes one. So where validation supplied any, the validated node is copied through
+the overlay into a sequence of its own: the copy the constructing path makes, taken at the top so that the
+shape is kept. It keeps the tree's base URI, a document node's unparsed entities, and — where the copy
+being validated was asked to keep them — what each node answers for the accumulators. Where validation
+supplied nothing, which is nearly always, nothing is copied and the item is what it was.
+
+No test in the suite asks this: `import-schema-048`, which measured the defaults, builds its elements
+rather than copying them. So nothing moves, and nothing was expected to. The schema-aware run stands at
+8,527 of 8,540 and the 3.0 run at 7,928 of 7,938, both on both backends; the 2.0 run at 5,616 of 5,639;
+the XPath runs at 18,268 and 14,553. Every failure set is identical test for test. Two new unit tests,
+2,823 in all.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error
