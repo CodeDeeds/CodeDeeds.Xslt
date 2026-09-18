@@ -252,11 +252,14 @@ patch is there to be offered upstream rather than kept as a local advantage.
 
 A sixth failure is not in the patch, and is not really the suite's fault. `validation-0201` compares
 the serialized result against a file, character for character, and that file records one processor's
-indentation — three spaces per level, and the document element on the same line as the XML declaration.
-The Serialization specification says a serializer MAY add whitespace and never says how much. The
+whitespace in three places — three spaces per level of indentation, the document element on the same
+line as the XML declaration, and the `meta` the XHTML method inserts given a line of its own. The
+Serialization specification says a serializer MAY add whitespace and never says how much or where. The
 catalog's own documentation for `assert-serialization` says drivers "are free to ignore differences in
-the serialization that are known to be irrelevant"; this one does not. Of the 104 test cases that assert
-a serialization, it is the only one where comparing exactly costs a pass.
+the serialization that are known to be irrelevant", and that the assertion "should not be used except
+where the purpose of the test is to test the serializer" — which this test says it is not. This
+driver compares exactly anyway. Of the 104 test cases that assert a serialization, it is the only one
+where doing so costs a pass.
 
 `package-200`, the one failure left in `decl/package`, is a third kind of thing again. It asks for
 `XTSE3000` where `use-package-291` to `294` ask for `XTSE0020` on the same shape — an unreadable

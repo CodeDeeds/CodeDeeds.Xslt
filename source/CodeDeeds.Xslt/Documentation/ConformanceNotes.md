@@ -6804,17 +6804,31 @@ to **8,485 of 8,526** when applied.
   on one day.
 
 The third is not a conformance question. `validation-0201` compares the serialized result against
-`schvalid001.out`, character for character, and that file records one processor's indentation: three
-spaces per level, and the document element on the same line as the XML declaration. Both are choices the
-Serialization specification leaves open — it says the serializer MAY add whitespace and never says how
-much — and this engine indents by two and starts the element on its own line. The suite's own catalog
-documentation says of this assertion that "in principle, the serialization must match exactly" but that
-test drivers "are free to ignore differences in the serialization that are known to be irrelevant (that
-is, capable of being produced by a conformant implementation", and adds that the assertion "should not be
-used except where the purpose of the test is to test the serializer". This driver compares exactly. 104
-test cases in the suite assert a serialization, and this is the only one where comparing exactly costs a
-pass — the two others that fail, `result-document-0286` and `0287`, never reach the serializer. Relaxing
-the comparison for one test that is measuring indent width would cost more than it is worth.
+`schvalid001.out`, character for character, and that file records one processor's whitespace in three
+separate places: three spaces per level of indentation, the document element on the same line as the XML
+declaration, and the `meta` element the XHTML output method inserts given a line of its own. All three are
+choices the Serialization specification leaves open — it says the serializer MAY add whitespace and
+never says how much or where — and this engine indents by two, starts the document element on its own
+line, and writes the inserted `meta` against the `head` start tag it inserts it after. The suite's own
+catalog documentation says of this assertion that "in principle, the serialization must match exactly" but
+that test drivers "are free to ignore differences in the serialization that are known to be irrelevant
+(that is, capable of being produced by a conformant implementation", and adds that the assertion "should
+not be used except where the purpose of the test is to test the serializer" — which this one says it
+is not: its own description calls it "a 'system test' of schema-aware processing". This driver compares
+exactly. 104 test cases in the suite assert a serialization, and this is the only one where comparing
+exactly costs a pass — the two others that fail, `result-document-0286` and `0287`, never reach the
+serializer.
+
+It is also the only one that measures any of this. Those assertions name 55 files between them, and
+`schvalid001.out` is the only one whose match turns on whitespace a serializer added: in every other the
+leading whitespace is text the stylesheet wrote, and the result is unindented. So the width could be
+changed to suit this one file without any other comparison noticing — which is the reason not to.
+Nothing would have been learned, and every caller of the library would be indenting by three to make one
+test pass. The other two differences are the same bargain: a document element sharing a line with the XML
+declaration, and an inserted `meta` written a line away from the tag it was inserted after, are both
+worse to read and neither is more correct. Relaxing the comparison instead, for one test that is
+measuring indent width and says itself that it is measuring something else, would cost more than it is
+worth.
 
 The schema-aware run goes from 8,472 of 8,526 to **8,480**, the same on both backends, and `attr/validation`
 from eleven failures to three. Nothing moves elsewhere: 7,911 of 7,924 at 3.0 on both backends, 5,602 of
@@ -6909,11 +6923,14 @@ One failure is left in the set, and it is a disagreement between two tests rathe
 `import-schema-136` and `137` are the same stylesheet — an element whose name no schema declares, written
 with `xsl:validation="strict"` — and ask for different codes: `136` for `XTTE1512`, `137` for `XTTE1510`.
 §25.4.1 names both together, "If there is no matching element declaration, or if the element is not
-considered valid, the transformation fails [see ERR XTTE1510], [see ERR XTTE1512]", and `XTTE1512`'s own
-definition settles which is which: "there is no matching top-level declaration in the schema". That is
-what this engine raises, and it is what `136` asks for. Like *Which error an unreadable version range is*,
-this is a question about which of two codes the specification means rather than a mistake in a file, so it
-is not in the correction patch.
+considered valid, the transformation fails [see ERR XTTE1510], [see ERR XTTE1512]", and the two codes then
+overlap by their own definitions. `XTTE1510` is for strict validation that "concludes that the validity of
+the element or attribute is invalid or unknown", and an element with no declaration to assess against is
+exactly the unknown case; `XTTE1512` is for strict validation where "there is no matching top-level
+declaration in the schema", which is the same case said specifically. So each test is asking for a code
+that fits, and no processor can satisfy both. This engine raises the specific one, which is what `136`
+asks for. Like *Which error an unreadable version range is*, this is a question about which of two codes
+the specification means rather than a mistake in a file, so it is not in the correction patch.
 
 The schema-aware run goes from 8,480 of 8,526 to **8,498**, and `decl/import-schema` from seventeen
 failures to one. The other runs do not move: 7,911 of 7,924 at 3.0 on both backends, 5,602 of 5,623 at 2.0,
