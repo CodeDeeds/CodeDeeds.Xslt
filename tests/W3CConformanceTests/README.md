@@ -244,13 +244,22 @@ nothing there validates a document node; the code for a constructed attribute in
 strict"; the lax code is `XTTE1515`. It is the strict test beside it with one parameter changed and
 the expected code left behind.
 
-The corrections are kept here as [`suite-corrections.patch`](suite-corrections.patch), which `git apply`
-takes from the root of a clone of the suite. With it all five tests raise the code they were written for
-and the 3.0 run goes from 7,928 to **7,931**, the schema-aware run from 8,526 to **8,531**. It is checked
-in rather than applied: every figure in this document is measured against the suite as published, and the
-patch is there to be offered upstream rather than kept as a local advantage.
+Twelve more are one family, and are here because this repository runs the suite's 2.0-applicable subset
+on a 2.0 processor as a control. A test case says which versions it applies to, and twelve say a 2.0
+processor and cannot be run by one: in each the stylesheet declares `version="2.0"`, so it is read as
+2.0 and not forwards-compatibly, and then writes `xsl:evaluate`, `xsl:mode`, `xsl:iterate`,
+`xsl:sequence` with a sequence constructor, `html-version`, an EQName in a `format` attribute, or the
+XPath 3.0 `||`. A 2.0 processor has to refuse each of them. Ten are corrected by the marking; the other
+two are marked for 2.0 and nothing later, and are genuinely 2.0 tests, so the stylesheet is what is
+corrected. None of this is visible to a harness that only ever runs as 3.0.
 
-A sixth failure is not in the patch, and is not really the suite's fault. `validation-0201` compares
+The corrections are kept here as [`suite-corrections.patch`](suite-corrections.patch), which `git apply`
+takes from the root of a clone of the suite. With it the 3.0 run goes from 7,928 to **7,931**, the 2.0
+run from 5,616 of 5,639 to **5,617 of 5,629**, and the schema-aware run from 8,526 to **8,531**. It is
+checked in rather than applied: every figure in this document is measured against the suite as
+published, and the patch is there to be offered upstream rather than kept as a local advantage.
+
+One more failure is not in the patch, and is not really the suite's fault. `validation-0201` compares
 the serialized result against a file, character for character, and that file records one processor's
 whitespace in three places — three spaces per level of indentation, the document element on the same
 line as the XML declaration, and the `meta` the XHTML method inserts given a line of its own. The

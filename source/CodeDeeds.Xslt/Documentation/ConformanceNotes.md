@@ -6659,10 +6659,10 @@ across `decl/accept` and `decl/expose` on 5 March 2023 while these two files wer
 Applied to a clone of the suite, both tests raise the `XTSE3050` they were written for. A third
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
-validation settles about a constructed node*. With all five the 3.0 run reads **7,931 of 7,938** and the
+validation settles about a constructed node*. With all seventeen the 3.0 run reads **7,931 of 7,938**, the 2.0 run **5,617 of 5,629** and the
 schema-aware run **8,531 of 8,540**. The patch is not applied here, and the figures in these notes do not
 include it. A measurement is worth something because of what it is taken against, and a patch kept in the
-repository and offered upstream is worth more than five tests counted differently at home.
+repository and offered upstream is worth more than seventeen tests counted differently at home.
 
 `package-200` is deliberately not in it. It asks for `XTSE3000` where `use-package-291` to `294` ask for
 `XTSE0020` on the same shape, so one of the five is wrong about a rule rather than about a character — see
@@ -7331,6 +7331,42 @@ which pass on the 3.0 run and are the `sort-078` question again — a bad value 
 element does have, in a `version="3.0"` stylesheet a 2.0 processor reads forwards-compatibly. Both XPath
 runs keep their failure sets test for test. Two new unit tests, 2,820 in all.
 
+### A run nobody else takes, and the twelve tests it found
+
+The 2.0 control run had never had its failures enumerated one by one. Eighteen of its twenty-three were
+written up individually over earlier rounds; five had not been looked at at all. Going through all
+twenty-three turned twelve of them into one family, and the family is correctable.
+
+A test case carries a `spec` value saying which versions it applies to, and `XSLT20+` puts it in this
+run. Twelve are marked for a 2.0 processor and cannot be run by one. In each, the stylesheet declares
+`version="2.0"` — so it is read as 2.0 and not forwards-compatibly — and then writes something
+2.0 does not have: `xsl:evaluate`, `xsl:mode`, `xsl:iterate`, `xsl:sequence` with a sequence constructor,
+`html-version`, an EQName in a `format` attribute, the XPath 3.0 `||`. A 2.0 processor is obliged to
+refuse each of them, so the test cannot pass, and ten of the twelve already pass on the 3.0 run. Nothing
+about this is visible to a harness that only ever runs as 3.0, which is what the control run is for.
+
+Ten are corrected by the marking, `XSLT20+` becoming `XSLT30+`. The other two are marked `XSLT20`,
+2.0 and nothing later, and are genuinely 2.0 tests — so there is no later run to move them to and the
+stylesheet is what is corrected. `function-0302` writes `element-available($zls || 'value-of')`, which is
+the same test written with `concat()`. `function-1902` exists to check that a 2.0 processor does *not*
+offer the XPath 3.0 function library, and writes its own diagnostic with `<xsl:message expand-text="yes">`
+and text value templates, both of which are 3.0's; `xsl:value-of` says the same thing.
+
+Correcting the second of those two turned an unrunnable test into a running one that fails, which is the
+more useful outcome. `function-1902` reports nineteen functions this engine offers a 2.0 processor and
+should not: the fourteen `math:` functions, `fn:function-lookup`, and the constructor functions
+`xs:NMTOKENS`, `xs:ENTITIES`, `xs:IDREFS` and `xs:error`. `Availability.IsFunctionAvailable` works out
+whether either the processor or the stylesheet claims 3.0, and then does not ask that question in the
+branches for the map, array and math namespaces, for `function-lookup`, or for the list-type and
+`xs:error` constructors. The other twelve corrections are unaffected by it; it is written down here
+because the correction is what uncovered it.
+
+With the patch applied the 2.0 run goes from 5,616 of 5,639 to **5,617 of 5,629** — ten test cases
+leaving a run they cannot be run in, one that now passes, and one that now fails for a reason worth
+having. The 3.0 and schema-aware runs are unmoved by these twelve; the patch's other five take them to
+7,931 of 7,938 and 8,531 of 8,540 as before. The patch is still not applied here, and the figures in
+these notes are still the suite as published.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error
@@ -7345,19 +7381,21 @@ and close punctuation. `0985` asks for `[\d]` to match U+1369 to U+1371, the Eth
 the data came from the XML Schema test suite and that the matching and non-matching lists were worked out
 by hand. The engine reads `\w` and `\d` from the Unicode data .NET carries, which is current.
 
-**Tests marked for a 2.0 processor that need 3.0.** `strip-space-025` writes `Q{}test1` in a
-`strip-space` element list, `result-document-0286` and `0287` write an EQName in a `format` attribute.
-EQName syntax is 3.0's, and XSLT 2.0's forwards-compatible processing covers an XSLT element it does not
-know and an attribute it does not know — not a value in a syntax a later version defines. All three pass
-on the 3.0 run. `namespace-0912` is the same shape one step removed: it needs `xsl:mode`'s
-`on-no-match="shallow-copy"`, which a 2.0 processor does not have, and its variable then does not hold
-what it declared. `variable-4802` is the same again: a `version="3.0"` stylesheet whose `expand-text="yes"`
-a 2.0 processor is required to ignore, being an attribute of an XSLT element it does not know, so the
-`<out>{.}</out>` it writes says `{.}` and means it. Both pass on the 3.0 run. This one had been skipped
-rather than counted until the declaration it writes at the top of its result came out in the right
-place. `output-0724`, `0725` and `0726` are the plainest of the family: each declares `version="2.0"`
-and then writes `html-version="5"` on its `xsl:output` and starts at a template named
-`xsl:initial-template`, both of which are 3.0's. All three pass on the 3.0 run.
+**Tests marked for a 2.0 processor that need 3.0.** Twelve of these are in the correction patch now —
+see *A run nobody else takes* — because in each the stylesheet declares `version="2.0"` and is
+therefore not read forwards-compatibly at all: `result-document-0286` and `0287` write an EQName in a
+`format` attribute, `output-0724`, `0725` and `0726` write `html-version="5"` and start at a template
+named `xsl:initial-template`, and the rest write an XSLT element 2.0 does not define. What is left here is
+the harder half, where the stylesheet declares `version="3.0"` and the question is how far forwards
+compatibility reaches. `strip-space-025` writes `Q{}test1` in a `strip-space` element list: EQName syntax
+is 3.0's, and 2.0's forwards-compatible processing covers an XSLT element it does not know and an
+attribute it does not know — not a value in a syntax a later version defines. `namespace-0912` needs
+`xsl:mode`'s `on-no-match="shallow-copy"`, and its variable then does not hold what it declared.
+`variable-4802` is a `version="3.0"` stylesheet whose `expand-text="yes"` a 2.0 processor is required to
+ignore, being an attribute of an XSLT element it does not know, so the `<out>{.}</out>` it writes says
+`{.}` and means it. `character-map-026` asks for `method="adaptive"`, which 2.0 has no serializer for.
+All four pass on the 3.0 run, and saying they are mismarked would be asserting that this reading of
+forwards compatibility is the right one, which is the thing in question.
 
 **Two tests that name something their stylesheet does not have.** `format-number-070` asks to start at a
 template called `main` and its stylesheet declares none — it has one template, and it matches `root`.

@@ -1,4 +1,9 @@
-Corrections to five test cases of the W3C xslt30-test suite.
+Corrections to seventeen test cases of the W3C xslt30-test suite.
+
+Five are separate mistakes. Twelve are one family, and are here because this
+repository runs the suite's 2.0-applicable subset on a 2.0 processor as a
+control, which the suite's own harness does not do: a test marked as applying
+to a 2.0 processor that cannot be run by one shows up nowhere else.
 
 1. package-021err and package-022err ask for XTSE3050 and cannot raise it,
    because neither stylesheet is well-formed XSLT. Both were edited on
@@ -51,12 +56,44 @@ Corrections to five test cases of the W3C xslt30-test suite.
    XTTE1510 and is right, 1703 and 1704 (preserve and strip) expect a result,
    and all four were created together on 21 December 2017.
 
+5. Ten test cases are marked XSLT20+ and cannot be run by a 2.0 processor. In
+   each, the stylesheet declares version="2.0", so it is not read
+   forwards-compatibly, and then uses a construct XSLT 2.0 does not have, which
+   a 2.0 processor is obliged to refuse. Each already passes on a 3.0
+   processor. The marking becomes XSLT30+:
+
+     sequence-0132         xsl:sequence with a sequence constructor
+     collations-0128       xsl:evaluate
+     collection-005        xsl:mode
+     number-1004           xsl:iterate
+     system-property-022   xslt:evaluate
+     output-0724           html-version, and a named template xsl:initial-template
+     output-0725           the same
+     output-0726           the same
+     result-document-0286  an EQName in the format attribute
+     result-document-0287  the same
+
+   Two more are marked XSLT20 - 2.0 only - and are genuinely 2.0 tests, each
+   spoiled by one construct 2.0 does not have. Those are corrected in the
+   stylesheet rather than in the marking, there being no later run to move them
+   to:
+
+   function-0302 writes element-available($zls || 'value-of'), and || is XPath
+   3.0's. With concat() it is the same test and a 2.0 processor can read it.
+
+   function-1902 exists to check that a 2.0 processor does not offer the XPath
+   3.0 function library, and writes its diagnostic with
+   <xsl:message expand-text="yes"> and text value templates, both of which are
+   3.0's. The message says the same thing written with xsl:value-of.
+
 Apply from the root of a clone of https://github.com/w3c/xslt30-test:
 
     git apply suite-corrections.patch
 
 With this applied the xslt30-test 3.0 run here goes from 7,928 of 7,938 to
-7,931, and the schema-aware run from 8,526 of 8,540 to 8,531.
+7,931, the 2.0 run from 5,616 of 5,639 to 5,617 of 5,629 - ten test cases
+leaving a run they cannot be run in - and the schema-aware run from 8,526 of
+8,540 to 8,531.
 
 Not included: package-200, which asks for XTSE3000 where use-package-291 to 294
 ask for XTSE0020 on the same shape - an unreadable package-version range on
@@ -100,6 +137,63 @@ index 41e5485..233bbc8 100644
          <out>
            <last><xsl:value-of select="$v/w[last()]/accumulator-after('big')"/></last>
            <first><xsl:value-of select="$v/w[1]/accumulator-after('big')"/></first>
+diff --git a/tests/decl/function/function-0302.xsl b/tests/decl/function/function-0302.xsl
+index d917f6d..dfdbb38 100644
+--- a/tests/decl/function/function-0302.xsl
++++ b/tests/decl/function/function-0302.xsl
+@@ -25,7 +25,7 @@
+       <a7 actual="{element-available('other:handler')}" expected="false"/>
+       <a8 actual="{element-available('get-a-life')}" expected="false"/>
+       <a9 actual="{element-available(concat($xsl, 'text'))}" expected="true"/>
+-      <variable name="v10" xmlns="http://www.w3.org/1999/XSL/Transform" select="element-available($zls || 'value-of')"/> 
++      <variable name="v10" xmlns="http://www.w3.org/1999/XSL/Transform" select="element-available(concat($zls, 'value-of'))"/> 
+       <a10 actual="{$v10}" expected="true"/>
+     </out>
+   </xsl:template>
+diff --git a/tests/decl/function/function-1902.xsl b/tests/decl/function/function-1902.xsl
+index 2c75ef4..be20e14 100644
+--- a/tests/decl/function/function-1902.xsl
++++ b/tests/decl/function/function-1902.xsl
+@@ -35,7 +35,7 @@
+                 <correctly-missing-function name="{@name}" arity="{@arity}"/>
+             </xsl:when>
+             <xsl:otherwise>
+-                <xsl:message expand-text="yes">*** This function should NOT be available in XSLT 2.0 processors: name={@name} arity={@arity}</xsl:message>
++                <xsl:message>*** This function should NOT be available in XSLT 2.0 processors: name=<xsl:value-of select="@name"/> arity=<xsl:value-of select="@arity"/></xsl:message>
+                 <incorrectly-available-function name="{@name}" arity="{@arity}"/>
+             </xsl:otherwise>
+         </xsl:choose>
+diff --git a/tests/decl/output/_output-test-set.xml b/tests/decl/output/_output-test-set.xml
+index 575fc43..3f82f8d 100644
+--- a/tests/decl/output/_output-test-set.xml
++++ b/tests/decl/output/_output-test-set.xml
+@@ -4972,7 +4972,7 @@
+       <created by="Norman Walsh" on="2020-12-22"/>
+       <modified by="Michael Kay" on="2021-03-16" change="input tag in HTML is self-closing; no final '/>'"/>
+       <dependencies>
+-         <spec value="XSLT20+"/>
++         <spec value="XSLT30+"/>
+       </dependencies>
+       <test>
+          <stylesheet file="output-0724.xsl"/>
+@@ -4994,7 +4994,7 @@
+       </description>
+       <created by="Michael Kay" on="2021-06-09"/>
+       <dependencies>
+-         <spec value="XSLT20+"/>
++         <spec value="XSLT30+"/>
+       </dependencies>
+       <test>
+          <stylesheet file="output-0725.xsl"/>
+@@ -5012,7 +5012,7 @@
+       </description>
+       <created by="Michael Kay" on="2021-06-09"/>
+       <dependencies>
+-         <spec value="XSLT20+"/>
++         <spec value="XSLT30+"/>
+       </dependencies>
+       <test>
+          <stylesheet file="output-0726.xsl"/>
 diff --git a/tests/decl/package/package-021err-used.xsl b/tests/decl/package/package-021err-used.xsl
 index 7619a24..c7213bc 100644
 --- a/tests/decl/package/package-021err-used.xsl
@@ -138,3 +232,90 @@ index 38ba4c7..5eb0b5f 100644
      </xsl:use-package>
      
      <xsl:template match="second-child">
+diff --git a/tests/fn/collection/_collection-test-set.xml b/tests/fn/collection/_collection-test-set.xml
+index a5957b0..0f001f9 100644
+--- a/tests/fn/collection/_collection-test-set.xml
++++ b/tests/fn/collection/_collection-test-set.xml
+@@ -122,7 +122,7 @@
+       <created by="Michael Kay" on="2016-06-10"/>
+       <environment ref="collection-e04"/>
+       <dependencies>
+-         <spec value="XSLT20+"/>
++         <spec value="XSLT30+"/>
+       </dependencies>
+       <test>
+          <stylesheet file="collection-005.xsl"/>
+diff --git a/tests/fn/system-property/_system-property-test-set.xml b/tests/fn/system-property/_system-property-test-set.xml
+index 3872a9d..a46b4f5 100644
+--- a/tests/fn/system-property/_system-property-test-set.xml
++++ b/tests/fn/system-property/_system-property-test-set.xml
+@@ -379,7 +379,7 @@
+       <created by="Michael Kay" on="2020-06-15"/>
+       <environment ref="systemprop001"/>
+       <dependencies>
+-         <spec value="XSLT20+"/>
++         <spec value="XSLT30+"/>
+       </dependencies>
+       <test>
+          <stylesheet file="system-property-022.xsl"/>
+diff --git a/tests/insn/number/_number-test-set.xml b/tests/insn/number/_number-test-set.xml
+index 8ac2ade..ab8d924 100644
+--- a/tests/insn/number/_number-test-set.xml
++++ b/tests/insn/number/_number-test-set.xml
+@@ -1192,7 +1192,7 @@
+          <source role="." file="number-10.xml"/>
+       </environment>
+       <dependencies>
+-         <spec value="XSLT20+"/>
++         <spec value="XSLT30+"/>
+       </dependencies>
+       <test>
+          <stylesheet file="number-1004.xsl"/>
+diff --git a/tests/insn/result-document/_result-document-test-set.xml b/tests/insn/result-document/_result-document-test-set.xml
+index 6cab2c3..4c86d8b 100755
+--- a/tests/insn/result-document/_result-document-test-set.xml
++++ b/tests/insn/result-document/_result-document-test-set.xml
+@@ -1928,7 +1928,7 @@ the un-named xsl:format (i.e. no 'name' attribute) has method "text".</assert-se
+       <created by="Michael Kay" on="2019-01-14"/>
+       <environment ref="result-document-02"/>
+       <dependencies>
+-         <spec value="XSLT20+"/>
++         <spec value="XSLT30+"/>
+          <feature value="serialization" satisfied="true"/>
+       </dependencies>
+       <test>
+@@ -1950,7 +1950,7 @@ the un-named xsl:format (i.e. no 'name' attribute) has method "text".</assert-se
+       <created by="Michael Kay" on="2019-01-15"/>
+       <environment ref="result-document-02"/>
+       <dependencies>
+-         <spec value="XSLT20+"/>
++         <spec value="XSLT30+"/>
+          <feature value="serialization" satisfied="true"/>
+       </dependencies>
+       <test>
+diff --git a/tests/insn/sequence/_sequence-test-set.xml b/tests/insn/sequence/_sequence-test-set.xml
+index 43fe543..d27ab56 100644
+--- a/tests/insn/sequence/_sequence-test-set.xml
++++ b/tests/insn/sequence/_sequence-test-set.xml
+@@ -614,7 +614,7 @@
+       <modified by="Michael Kay" on="2018-09-25" change="corrected error code (again)"/>
+       <environment ref="sequence-01"/>
+       <dependencies>
+-         <spec value="XSLT20+"/>
++         <spec value="XSLT30+"/>
+       </dependencies>
+       <test>
+          <stylesheet file="sequence-0132.xsl"/>
+diff --git a/tests/misc/collations/_collations-test-set.xml b/tests/misc/collations/_collations-test-set.xml
+index aa0041b..cb556df 100644
+--- a/tests/misc/collations/_collations-test-set.xml
++++ b/tests/misc/collations/_collations-test-set.xml
+@@ -453,7 +453,7 @@
+       <created by="Michael Kay" on="2022-08-05"/>
+       <environment ref="collations-01"/>
+       <dependencies>
+-         <spec value="XSLT20+"/>
++         <spec value="XSLT30+"/>
+       </dependencies>
+       <test>
+          <stylesheet file="collations-0128.xsl"/>
