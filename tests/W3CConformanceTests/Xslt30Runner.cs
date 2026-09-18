@@ -411,11 +411,11 @@ namespace CodeDeeds.Xslt.Conformance
                     StylesheetResolver = resolver,
                     DocumentResolver = resolver,
                     // The collections the environment declares, as lists of files the suite resolver then
-                    // reads; with none declared there is no collection, which is what the tests asking
-                    // for one anyway expect to hear.
-                    CollectionResolver = environment is { Collections.Count: > 0 }
-                        ? new CatalogCollections(environment.Collections, directory)
-                        : null,
+                    // reads, and a directory listing for the one test set that asks for a collection no
+                    // environment declares. A URI matching neither is no collection, which is what the
+                    // tests asking for one anyway expect to hear.
+                    CollectionResolver = new CatalogCollections(
+                        environment?.Collections ?? s_noCollections, directory),
                     // The suite's own case-blind collation, which a test names by URI and expects the
                     // driver to supply; everything else an environment declares the engine provides.
                     CollationResolver = SuiteCollations.Instance,
@@ -950,6 +950,9 @@ namespace CodeDeeds.Xslt.Conformance
         /// Serves the collections a catalog environment declares: each a list of files under a name, which a
         /// stylesheet asks for relative to the test set's directory.
         /// </summary>
+        /// <summary>Stands in for an environment that declares no collection at all.</summary>
+        private static readonly List<(string? Uri, List<string> Files)> s_noCollections = new();
+
         private sealed class CatalogCollections : IXsltCollectionResolver
         {
             private readonly Uri m_directory;
@@ -1003,10 +1006,51 @@ namespace CodeDeeds.Xslt.Conformance
 
                 Uri against = baseUri is null ? m_directory : new Uri(baseUri);
 
-                return Uri.TryCreate(against, uri, out Uri? asked)
-                    && m_named.TryGetValue(asked.AbsoluteUri, out IReadOnlyList<string>? members)
+                if (!Uri.TryCreate(against, uri, out Uri? asked))
+                {
+                    return null;
+                }
+
+                return m_named.TryGetValue(asked.AbsoluteUri, out IReadOnlyList<string>? members)
                     ? members
-                    : null;
+                    : Listed(asked);
+            }
+
+            /// <summary>
+            /// The files a directory holds that match a pattern: a collection URI written as a directory,
+            /// then <c>?select=</c> and a glob.
+            /// </summary>
+            /// <remarks>
+            /// No specification defines that form, and the test set that writes it says so itself —
+            /// merge-097 carries a note from the suite's editor that the URIs "are therefore not
+            /// interoperable". What a collection URI means is left to the processor, and the engine leaves
+            /// it to whoever configures one; here that is this driver, and this is what it takes the form
+            /// to mean. Nothing in the engine knows about it.
+            /// </remarks>
+            /// <param name="asked">The collection URI, resolved.</param>
+            private static IReadOnlyList<string>? Listed(Uri asked)
+            {
+                const string Select = "?select=";
+
+                if (!asked.IsFile || !asked.Query.StartsWith(Select, StringComparison.Ordinal))
+                {
+                    return null;
+                }
+
+                string directory = new Uri(asked.GetLeftPart(UriPartial.Path)).LocalPath;
+                string pattern = Uri.UnescapeDataString(asked.Query[Select.Length..]);
+
+                if (!Directory.Exists(directory) || pattern.Length == 0)
+                {
+                    return null;
+                }
+
+                // Ordered, so that a stylesheet reading the collection twice reads it the same way both
+                // times, which is what a collection is required to be.
+                return Directory.GetFiles(directory, pattern)
+                    .OrderBy(file => file, StringComparer.Ordinal)
+                    .Select(file => new Uri(file).AbsoluteUri)
+                    .ToArray();
             }
         }
 

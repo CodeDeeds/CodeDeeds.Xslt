@@ -246,7 +246,7 @@ the expected code left behind.
 
 The corrections are kept here as [`suite-corrections.patch`](suite-corrections.patch), which `git apply`
 takes from the root of a clone of the suite. With it all five tests raise the code they were written for
-and the 3.0 run goes from 7,912 to **7,915**, the schema-aware run from 8,511 to **8,516**. It is checked
+and the 3.0 run goes from 7,913 to **7,916**, the schema-aware run from 8,512 to **8,517**. It is checked
 in rather than applied: every figure in this document is measured against the suite as published, and the
 patch is there to be offered upstream rather than kept as a local advantage.
 
@@ -687,7 +687,7 @@ The largest skip left is not a failure either: **6,518 are XSLT 3.0 tests**, rea
 
 ## What the 3.0 run says
 
-That opt-in run measures the XSLT 3.0 half at **7,912 of 7,924, 99.8%**, from 4,994 of 6,427 when it was first
+That opt-in run measures the XSLT 3.0 half at **7,913 of 7,924, 99.9%**, from 4,994 of 6,427 when it was first
 taken. It reads more tests than it did as well as passing more of them, which is the part worth reading twice:
 opening a feature the suite writes *around* stops whole files being skipped, so the denominator moves too — and
 the percentage can fall while the work goes forward, which is why the two numbers are always given together.
@@ -1206,10 +1206,13 @@ list of files under a name, the name relative to the test set — so the sevente
 tests had never been seen and found **three gaps in `xsl:merge`**, none of them about collections: two
 `xsl:merge-action` children were accepted, `stable` was accepted on an `xsl:merge-key` as if it were an
 `xsl:sort`, and `xsl:fallback` was refused inside the instruction, where the content model ends in
-`xsl:fallback*` — after the action, not before, which a fourth test asks. Still failing in that set is
-`merge-097`, which asks for a collection by a directory-and-query URI the suite's own note calls
-non-interoperable; the driver declares no such collection. On the 2.0 run four of the six collection tests
-pass, the other two being 3.0 stylesheets marked as applying to a 2.0 processor.
+`xsl:fallback*` — after the action, not before, which a fourth test asks. The last of them, `merge-097`,
+asks for a collection no environment declares: a URI written as a directory, then `?select=` and a glob,
+which is Saxon's form and which the test set's own note calls "not interoperable". No specification says
+what a collection URI means, which is exactly why the engine leaves it to whoever configures a resolver;
+here that is the driver, so the driver is where the form is understood, and it lists the directory. The
+engine knows nothing about it. On the 2.0 run four of the six collection tests pass, the other two being
+3.0 stylesheets marked as applying to a 2.0 processor.
 
 Then the environment. `fn:environment-variable()` and `fn:available-environment-variables()` read the
 process's environment where the caller has said they may, through `XsltOptions.EnvironmentVariablesEnabled`,

@@ -6654,8 +6654,8 @@ across `decl/accept` and `decl/expose` on 5 March 2023 while these two files wer
 Applied to a clone of the suite, both tests raise the `XTSE3050` they were written for. A third
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
-validation settles about a constructed node*. With all five the 3.0 run reads **7,915 of 7,924** and the
-schema-aware run **8,516 of 8,526**. The patch is not applied here, and the figures in these notes do not
+validation settles about a constructed node*. With all five the 3.0 run reads **7,916 of 7,924** and the
+schema-aware run **8,517 of 8,526**. The patch is not applied here, and the figures in these notes do not
 include it. A measurement is worth something because of what it is taken against, and a patch kept in the
 repository and offered upstream is worth more than five tests counted differently at home.
 
