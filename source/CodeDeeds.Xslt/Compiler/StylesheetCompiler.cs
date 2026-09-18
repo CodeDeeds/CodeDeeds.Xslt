@@ -5036,6 +5036,19 @@ namespace CodeDeeds.Xslt.Compiler
                 }
             }
 
+            // The parameter-document is a template too, and the one attribute that is not a setting but a
+            // place to read settings from. Written plainly it is read here, where a missing document is
+            // ignored once and for all; computed, it has to wait for the instruction, and is kept out of
+            // the reading below the way a templated attribute is.
+            AttributeValueTemplate? parameters = OptionalAttributeValueTemplate(element, "parameter-document");
+            bool parametersComputed = parameters is not null
+                && (parameters.ConstantValue is null || formatComputed);
+
+            if (parametersComputed)
+            {
+                m_templatedOutput.Add("parameter-document");
+            }
+
             settings = ReadLocalOutputSettings(element, settings);
             m_templatedOutput.Clear();
 
@@ -5050,7 +5063,10 @@ namespace CodeDeeds.Xslt.Compiler
                 formatComputed || templated.Count != 0 ? PrefixesInScope() : null,
                 validateResult,
                 strictResult,
-                resultType));
+                resultType,
+                parametersComputed ? parameters : null,
+                StaticBaseUriAt(element),
+                Implements30));
         }
 
         /// <summary>
@@ -5352,228 +5368,32 @@ namespace CodeDeeds.Xslt.Compiler
         /// whose parameters take precedence over the attributes written alongside (§26.1).
         /// </summary>
         /// <remarks>
-        /// The document is fetched through the stylesheet resolver, since it is read while the stylesheet is
-        /// compiled and settles how the stylesheet's own results are written: it is part of the stylesheet's
-        /// configuration rather than data it processes. One that cannot be found is ignored, which is what
-        /// the specification says of it — the attribute is a way of keeping settings outside the stylesheet,
-        /// not a requirement on the deployment.
+        /// Only where the reference is written plainly, which is always on <c>xsl:output</c> and usually on
+        /// <c>xsl:result-document</c>. Where that one computes it, the document cannot be named until the
+        /// instruction runs and <see cref="ResultDocumentInstruction"/> reads it then; see
+        /// <see cref="ParameterDocument"/>, which both go through.
         /// </remarks>
         private void ReadParameterDocument(int element, OutputSettings settings)
         {
+            // An xsl:result-document may write the reference as an attribute value template, and then
+            // there is nothing to read until the instruction runs: CompileResultDocument takes that case
+            // out of the way before this is reached.
             if (OutputAttribute(element, "parameter-document") is not string href
-                || m_options.StylesheetResolver is null
-                || m_options.StylesheetResolver.Resolve(href.Trim(), StaticBaseUriAt(element)) is not ResolvedResource resolved)
+                || ParameterDocument.Fetch(href, StaticBaseUriAt(element), m_options) is not XdmTree document)
             {
                 return;
             }
 
-            XdmTree document;
+            OutputMethod? named = ParameterDocument.ApplyTo(
+                settings, document, href, Implements30, QualifiedNameOf(element));
 
-            try
+            // The principal result's method is what an unprefixed name in a pattern is matched against and
+            // what the serializer is chosen by, so a document that names one settles that too.
+            if (named is OutputMethod method
+                && CurrentPackage == 0
+                && ReferenceEquals(settings, OutputSettingsFor(0)))
             {
-                document = XdmTreeBuilder.FromXml(resolved.Reader, entityResolver: m_options.EntityResolver, baseUri: resolved.Uri);
-            }
-            finally
-            {
-                resolved.Reader.Dispose();
-            }
-
-            int root = -1;
-
-            for (int child = document.FirstChildOf(XdmTree.RootNode); child >= 0; child = document.NextSiblingOf(child))
-            {
-                if (document.KindOf(child) == NodeKind.Element)
-                {
-                    root = child;
-                    break;
-                }
-            }
-
-            if (root < 0
-                || NamespaceIn(document, root) != Serializer.ParameterNamespace
-                || LocalNameIn(document, root) != "serialization-parameters")
-            {
-                throw XsltErrors.Error(
-                    XsltErrorCode.SEPM0017,
-                    $"The parameter-document '{href}' of {QualifiedNameOf(element)} does not hold an "
-                    + "output:serialization-parameters element.");
-            }
-
-            for (int child = document.FirstChildOf(root); child >= 0; child = document.NextSiblingOf(child))
-            {
-                if (document.KindOf(child) != NodeKind.Element)
-                {
-                    continue;
-                }
-
-                string name = LocalNameIn(document, child);
-
-                if (NamespaceIn(document, child) != Serializer.ParameterNamespace)
-                {
-                    throw XsltErrors.Error(
-                        XsltErrorCode.SEPM0017,
-                        $"The parameter-document '{href}' names '{name}' outside the serialization namespace.");
-                }
-
-                if (name == "use-character-maps")
-                {
-                    Dictionary<int, string> entries = new Dictionary<int, string>();
-
-                    for (int map = document.FirstChildOf(child); map >= 0; map = document.NextSiblingOf(map))
-                    {
-                        if (document.KindOf(map) != NodeKind.Element || LocalNameIn(document, map) != "character-map")
-                        {
-                            continue;
-                        }
-
-                        string character = AttributeIn(document, map, "character") ?? string.Empty;
-                        string replacement = AttributeIn(document, map, "map-string") ?? string.Empty;
-
-                        if (character.Length == 0 || char.ConvertToUtf32(character, 0) is int codePoint
-                            && character.Length != (codePoint > 0xFFFF ? 2 : 1))
-                        {
-                            throw XsltErrors.Error(
-                                XsltErrorCode.SEPM0017,
-                                $"A character-map in the parameter-document '{href}' maps '{character}', which "
-                                + "is not one character.");
-                        }
-
-                        entries[char.ConvertToUtf32(character, 0)] = replacement;
-                    }
-
-                    settings.CharacterMap = new CharacterMap(entries);
-                    continue;
-                }
-
-                string value = AttributeIn(document, child, "value")
-                    ?? throw XsltErrors.Error(
-                        XsltErrorCode.SEPM0017,
-                        $"The parameter '{name}' in the parameter-document '{href}' has no value attribute.");
-
-                ApplyDocumentParameter(document, child, href, name, value, settings);
-            }
-        }
-
-        private void ApplyDocumentParameter(XdmTree document, int node, string href, string name, string value, OutputSettings settings)
-        {
-            bool Flag()
-            {
-                return value.Trim() switch
-                {
-                    "yes" or "true" or "1" => true,
-                    "no" or "false" or "0" => false,
-                    _ => throw XsltErrors.Error(
-                        XsltErrorCode.SEPM0017,
-                        $"The parameter '{name}' in the parameter-document '{href}' is '{value}', and it takes "
-                        + "yes or no."),
-                };
-            }
-
-            OutputMethod Method()
-            {
-                return value.Trim() switch
-                {
-                    "xml" => OutputMethod.Xml,
-                    "html" => OutputMethod.Html,
-                    "xhtml" => OutputMethod.Xhtml,
-                    "text" => OutputMethod.Text,
-                    "json" when Implements30 => OutputMethod.Json,
-                    "adaptive" when Implements30 => OutputMethod.Adaptive,
-                    _ => throw XsltErrors.Error(
-                        XsltErrorCode.XTSE1570,
-                        $"The parameter '{name}' in the parameter-document '{href}' is '{value}', which is not "
-                        + "an output method."),
-                };
-            }
-
-            List<(string NamespaceUri, string LocalName)> Names()
-            {
-                List<(string, string)> names = new();
-
-                foreach (string token in value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
-                {
-                    int colon = token.IndexOf(':');
-                    string prefix = colon < 0 ? string.Empty : token[..colon];
-                    string uri = colon < 0
-                        ? string.Empty
-                        : document.ResolvePrefix(node, prefix)
-                            ?? throw XsltErrors.Error(
-                                XsltErrorCode.SEPM0017,
-                                $"The prefix of '{token}' in the parameter-document '{href}' is not declared.");
-
-                    names.Add((uri, token[(colon + 1)..]));
-                }
-
-                return names;
-            }
-
-            switch (name)
-            {
-                case "method":
-                    settings.Method = Method();
-                    settings.MethodSpecified = true;
-
-                    if (CurrentPackage == 0 && ReferenceEquals(settings, OutputSettingsFor(0)))
-                    {
-                        m_outputMethod = settings.Method;
-                    }
-
-                    break;
-
-                case "json-node-output-method":
-                    settings.JsonNodeOutputMethod = Method() is OutputMethod.Json or OutputMethod.Adaptive
-                        ? throw XsltErrors.Error(
-                            XsltErrorCode.SEPM0017,
-                            $"The json-node-output-method in the parameter-document '{href}' is '{value}', and a "
-                            + "node inside a JSON string is written with xml, html, xhtml or text.")
-                        : Method();
-                    break;
-
-                case "indent":
-                    settings.Indent = Flag();
-                    settings.IndentSpecified = true;
-                    break;
-
-                case "omit-xml-declaration": settings.OmitXmlDeclaration = Flag(); break;
-                case "byte-order-mark": settings.ByteOrderMark = Flag(); break;
-                case "escape-uri-attributes": settings.EscapeUriAttributes = Flag(); break;
-                case "include-content-type": settings.IncludeContentType = Flag(); break;
-                case "allow-duplicate-names": settings.AllowDuplicateNames = Flag(); break;
-                case "build-tree": settings.BuildTree = Flag(); break;
-                case "undeclare-prefixes": break;
-                case "standalone": settings.Standalone = value.Trim() == "omit" ? null : Flag(); break;
-                case "encoding": settings.Encoding = value.Trim(); break;
-                case "version": settings.Version = value.Trim(); break;
-                case "media-type": settings.MediaType = value.Trim(); break;
-                case "doctype-public": settings.DoctypePublic = value; break;
-                case "doctype-system": settings.DoctypeSystem = value; break;
-                case "item-separator": settings.ItemSeparator = value; break;
-                case "normalization-form": settings.NormalizationForm = ReadNormalizationForm(value); break;
-
-                case "html-version":
-                    settings.HtmlVersion = decimal.TryParse(
-                        value.Trim(),
-                        System.Globalization.NumberStyles.AllowLeadingSign | System.Globalization.NumberStyles.AllowDecimalPoint,
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        out decimal parsed)
-                        ? parsed
-                        : throw XsltErrors.Error(
-                            XsltErrorCode.SEPM0017,
-                            $"The html-version in the parameter-document '{href}' is '{value}', which is not a number.");
-                    break;
-
-                case "cdata-section-elements":
-                    settings.CDataSectionElements.AddRange(Names());
-                    break;
-
-                case "suppress-indentation":
-                    settings.SuppressIndentation.AddRange(Names());
-                    break;
-
-                default:
-                    throw XsltErrors.Error(
-                        XsltErrorCode.SEPM0017,
-                        $"'{name}' in the parameter-document '{href}' is not a serialization parameter.");
+                m_outputMethod = method;
             }
         }
 

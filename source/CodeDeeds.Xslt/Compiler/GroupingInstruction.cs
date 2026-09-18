@@ -817,6 +817,10 @@ namespace CodeDeeds.Xslt.Compiler
         private readonly IReadOnlyDictionary<ExpandedName, OutputSettings>? m_formats;
         private readonly IReadOnlyDictionary<string, string>? m_prefixes;
 
+        private readonly AttributeValueTemplate? m_parameterDocument;
+        private readonly string? m_baseUri;
+        private readonly bool m_implements30;
+
         /// <summary>Initializes a result-document instruction.</summary>
         /// <param name="href">Where to write, or <see langword="null"/> for the unnamed result.</param>
         /// <param name="settings">How to serialize it.</param>
@@ -834,8 +838,14 @@ namespace CodeDeeds.Xslt.Compiler
             IReadOnlyDictionary<string, string>? prefixes = null,
             bool validate = false,
             bool strictValidation = false,
-            XdmSchemaType? validationType = null)
+            XdmSchemaType? validationType = null,
+            AttributeValueTemplate? parameterDocument = null,
+            string? baseUri = null,
+            bool implements30 = false)
         {
+            m_parameterDocument = parameterDocument;
+            m_baseUri = baseUri;
+            m_implements30 = implements30;
             m_href = href;
             m_settings = settings;
             m_body = body;
@@ -857,9 +867,9 @@ namespace CodeDeeds.Xslt.Compiler
         /// The settings for this run of the instruction: the compiled ones, or where the format or any
         /// serialization attribute was a template, those with the templates settled.
         /// </summary>
-        private OutputSettings Settle(ref DynamicContext context)
+        private OutputSettings Settle(ref DynamicContext context, XsltRuntime runtime)
         {
-            if (m_format is null && m_templated.Length == 0)
+            if (m_format is null && m_templated.Length == 0 && m_parameterDocument is null)
             {
                 return m_settings;
             }
@@ -885,6 +895,22 @@ namespace CodeDeeds.Xslt.Compiler
             foreach ((string name, AttributeValueTemplate template) in m_templated)
             {
                 SerializationAttributes.Apply(settings, name, template.Evaluate(ref context), ResolvePrefix);
+            }
+
+            // Last, because §26.1 puts it last: a parameter the document names "takes precedence over a
+            // value supplied directly as an attribute of xsl:result-document". It is read here rather than
+            // where the stylesheet was compiled because the reference is a template and may name a
+            // different document each time the instruction runs — which is what the specification asks
+            // for anyway: "the parameter document should be read during run-time evaluation of the
+            // stylesheet".
+            if (m_parameterDocument is not null)
+            {
+                string href = m_parameterDocument.Evaluate(ref context).Trim();
+
+                if (href.Length != 0 && runtime.ParameterDocumentAt(href, m_baseUri) is XdmTree parameters)
+                {
+                    ParameterDocument.ApplyTo(settings, parameters, href, m_implements30, "xsl:result-document");
+                }
             }
 
             return settings;
@@ -945,7 +971,7 @@ namespace CodeDeeds.Xslt.Compiler
                     + "variable, a function's result, or a captured sequence.");
             }
 
-            OutputSettings settings = Settle(ref context);
+            OutputSettings settings = Settle(ref context, runtime);
             string href = m_href is null ? string.Empty : m_href.Evaluate(ref context);
             string? outerUri = runtime.CurrentOutputUri;
 

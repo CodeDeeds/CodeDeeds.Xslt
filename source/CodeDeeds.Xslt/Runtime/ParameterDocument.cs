@@ -26,6 +26,38 @@ namespace CodeDeeds.Xslt.Runtime
     internal static class ParameterDocument
     {
         /// <summary>
+        /// Reads the document a <c>parameter-document</c> names, or null where there is none to read.
+        /// </summary>
+        /// <remarks>
+        /// Fetched through the stylesheet resolver rather than the document resolver, whichever of the two
+        /// moments it is read at: it settles how the stylesheet's own results are written, so it is part of
+        /// the stylesheet's configuration and not data the transformation processes. One that cannot be
+        /// found is ignored, which is what the specification says of it — the attribute is a way of
+        /// keeping settings outside the stylesheet, not a requirement on the deployment.
+        /// </remarks>
+        /// <param name="href">The reference as written.</param>
+        /// <param name="baseUri">What a relative reference resolves against.</param>
+        /// <param name="options">The transformation's options, which say what may be read.</param>
+        public static XdmTree? Fetch(string href, string? baseUri, XsltOptions options)
+        {
+            if (options.StylesheetResolver is null
+                || options.StylesheetResolver.Resolve(href.Trim(), baseUri) is not ResolvedResource resolved)
+            {
+                return null;
+            }
+
+            try
+            {
+                return XdmTreeBuilder.FromXml(
+                    resolved.Reader, entityResolver: options.EntityResolver, baseUri: resolved.Uri);
+            }
+            finally
+            {
+                resolved.Reader.Dispose();
+            }
+        }
+
+        /// <summary>
         /// Applies what a parameter document says over the settings given.
         /// </summary>
         /// <param name="settings">The settings to write into, which the document takes precedence over.</param>

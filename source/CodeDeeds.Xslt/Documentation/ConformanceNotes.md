@@ -6061,9 +6061,14 @@ Four tests against one, and the engine says `XTSE0020` to all five.
 processor is *not* schema-aware, and wants `XTDE3245` — which is what `fn:json-to-xml` raises when asked
 to validate and unable to. Its stylesheet also carries an `xsl:import-schema`, and §3.14 is not optional
 about that: "a non-schema-aware processor **must** signal a static error if a package includes an
-`xsl:import-schema` declaration". The declaration is not even needed for what the test measures — the same
-specification says "it is not necessary that the containing stylesheet should import the relevant schema"
-— but it is there, and it is refused before anything runs.
+`xsl:import-schema` declaration". The function does not need the import — the same specification says
+"it is not necessary that the containing stylesheet should import the relevant schema" — but the test
+does: it measures what came back with `instance of element(j:map, j:mapType)`, and `j:mapType` is a schema
+type whose name has to be in scope to be written at all. Take the import out and a non-schema-aware
+processor refuses the type name instead, with `XPST0051`; leave it in and it refuses the import, with
+`XTSE1650`. Either way the dynamic error the test is named for is out of reach, which is why this one is
+not in the correction patch: what it needs is a stylesheet of its own for the non-schema-aware case, and
+writing that is the suite's to do.
 
 **Two errors in one stylesheet, and the suite names the other one.** `iterate-024` puts
 `xsl:on-completion` outside the `xsl:iterate` it belongs to, which is `XTSE0010` and what the test asks
@@ -6654,8 +6659,8 @@ across `decl/accept` and `decl/expose` on 5 March 2023 while these two files wer
 Applied to a clone of the suite, both tests raise the `XTSE3050` they were written for. A third
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
-validation settles about a constructed node*. With all five the 3.0 run reads **7,916 of 7,924** and the
-schema-aware run **8,517 of 8,526**. The patch is not applied here, and the figures in these notes do not
+validation settles about a constructed node*. With all five the 3.0 run reads **7,917 of 7,924** and the
+schema-aware run **8,518 of 8,526**. The patch is not applied here, and the figures in these notes do not
 include it. A measurement is worth something because of what it is taken against, and a patch kept in the
 repository and offered upstream is worth more than five tests counted differently at home.
 
@@ -7222,6 +7227,34 @@ The 3.0 run goes from 7,911 of 7,924 to **7,912** and the schema-aware run from 
 **8,511**, both on both backends, and `insn/sort` is empty. The 2.0 run does not move, no 2.0 test naming
 the parameter, and neither do the XPath runs, which keep their failure sets test for test. One new unit
 test, 2,817 in all.
+
+### Reading a document the stylesheet has not chosen yet
+
+`result-document-1406` writes `parameter-document="result-document-{$o}-params.xml"`. The engine took that
+for a file name with braces in it, went looking for one, and found nothing; the `method="json"` the
+document would have supplied never arrived, and the map the instruction writes was handed to the XML
+serializer, which has no way to write a map.
+
+`parameter-document` is one attribute with two readings, and §26 gives them separately. On `xsl:output`
+it is `parameter-document? = uri`: plain text, read when the stylesheet is read. On `xsl:result-document`
+it is `parameter-document? = { uri }`, an attribute value template like every other serialization
+attribute there, and the specification adds that "the parameter document should be read during run-time
+evaluation of the stylesheet". The engine had the first reading and was applying it to both.
+
+The instruction already settles its computed attributes as it runs: a `method` or an `indent` written in
+braces is applied over the compiled settings each time through. The parameter document now joins them, and
+goes last, because §26.1 puts it last — a parameter it names "takes precedence over a value
+supplied directly as an attribute of `xsl:result-document`", which in turn takes precedence over the
+output definition the instruction started from. Written plainly it is still read while the stylesheet is
+compiled, where a document that cannot be found is ignored once instead of once per run.
+
+What that took was moving the reading of a serialization parameter document out of the stylesheet
+compiler, which was the only thing that could do it, and into `Runtime/ParameterDocument.cs`, which both
+can. What it reads and what it refuses are unchanged, line for line.
+
+The 3.0 run goes from 7,913 of 7,924 to **7,914** and the schema-aware run from 8,512 of 8,526 to
+**8,513**, both on both backends, and `insn/result-document` is empty. The 2.0 run does not move —
+`parameter-document` is 3.0's — and neither do the XPath runs. One new unit test, 2,818 in all.
 
 ### Which results the suite asks for and does not get
 

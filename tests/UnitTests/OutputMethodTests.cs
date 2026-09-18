@@ -237,6 +237,45 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
+        public void AParameterDocumentAnInstructionWorksOutIsReadWhenItRuns()
+        {
+            const string Ns = "http://www.w3.org/2010/xslt-xquery-serialization";
+
+            Files files = new Files().Add(
+                "p-1406.xml",
+                $"<output:serialization-parameters xmlns:output=\"{Ns}\"><output:method value=\"json\"/>"
+                + "</output:serialization-parameters>");
+
+            // §26.2 writes parameter-document in braces on xsl:result-document, where §26.1 writes it
+            // plainly on xsl:output, and says of the first that "the parameter document should be read
+            // during run-time evaluation of the stylesheet". Here there is no choice about it: which
+            // document to read is not known until $o has a value. The suite's result-document-1406 is this
+            // shape, and would be a map handed to the xml method if the document were not read.
+            Assert.AreEqual(
+                "{\"a\":\"bar\"}",
+                Run(
+                    Sheet(
+                        string.Empty,
+                        "<xsl:variable name=\"o\" select=\"'1406'\"/>"
+                        + "<xsl:result-document method=\"xml\" parameter-document=\"p-{$o}.xml\" "
+                        + "build-tree=\"no\">"
+                        + "<xsl:map><xsl:map-entry key=\"'a'\" select=\"'bar'\"/></xsl:map>"
+                        + "</xsl:result-document>"),
+                    files));
+
+            // And one that cannot be found is ignored, as it is when the name is written plainly, so what
+            // the attributes said stands.
+            Assert.AreEqual(
+                "<out/>",
+                Run(
+                    Sheet(
+                        string.Empty,
+                        "<xsl:variable name=\"o\" select=\"'nowhere'\"/>"
+                        + "<xsl:result-document parameter-document=\"p-{$o}.xml\"><out/></xsl:result-document>"),
+                    files));
+        }
+
+        [TestMethod]
         public void AnEmptyElementIsWrittenWithoutASpaceExceptInXhtml()
         {
             Assert.AreEqual("<out><a b=\"1\"/></out>", Run(Sheet(string.Empty, "<out><a b=\"1\"/></out>")));

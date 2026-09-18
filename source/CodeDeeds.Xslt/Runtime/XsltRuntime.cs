@@ -684,6 +684,21 @@ namespace CodeDeeds.Xslt.Runtime
         }
 
         /// <summary>
+        /// Reads a serialization parameter document, for an <c>xsl:result-document</c> that works out
+        /// which one to read as it runs.
+        /// </summary>
+        /// <remarks>
+        /// Not cached and not counted among the transformation's documents: it is configuration and not
+        /// data, its nodes never reach the result, and the specification says a missing one is ignored.
+        /// </remarks>
+        /// <param name="href">The reference the attribute value template came to.</param>
+        /// <param name="baseUri">The base URI of the instruction that wrote it.</param>
+        internal XdmTree? ParameterDocumentAt(string href, string? baseUri)
+        {
+            return ParameterDocument.Fetch(href, baseUri, m_options);
+        }
+
+        /// <summary>
         /// Loads a document named by <c>document()</c>, reusing one already loaded for the same URI.
         /// </summary>
         /// <remarks>
