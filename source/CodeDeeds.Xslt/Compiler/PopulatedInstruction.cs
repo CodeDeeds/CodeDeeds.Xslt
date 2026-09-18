@@ -191,43 +191,60 @@ namespace CodeDeeds.Xslt.Compiler
     /// not to be so.
     /// </summary>
     /// <remarks>
-    /// Not <c>xsl:message terminate="yes"</c> written shorter. The difference is what it says to the reader:
-    /// an assertion is a claim about what the stylesheet expects to be true, so it may be turned off wholesale
-    /// by a processor that trusts its input, and a message may not. The code is <c>XTMM9000</c> unless the
-    /// stylesheet names its own.
+    /// <para>
+    /// Not <c>xsl:message terminate="yes"</c> written shorter, though that is what it does. The difference
+    /// is what it says to the reader: an assertion is a claim about what the stylesheet expects to be true,
+    /// so it may be turned off wholesale by a processor that trusts its input, and a message may not. This
+    /// processor checks them always, having no mechanism to turn them off — which is the opposite of the
+    /// specification's default and is left to the processor to choose.
+    /// </para>
+    /// <para>
+    /// What happens when one fails is defined by reference (§23.2): the effect is an
+    /// <c>xsl:message</c> with the same <c>select</c>, the same <c>error-code</c>, the same content and
+    /// <c>terminate="yes"</c>, except that the code where none is named is <c>XTMM9001</c> rather than
+    /// <c>XTMM9000</c>. So that is what this holds and runs, rather than a second rendering of the same
+    /// rules: the message is written to whoever is reading messages, its content travels with the error for
+    /// an <c>xsl:catch</c> to read, and a message that cannot be built does not itself stop the
+    /// transformation.
+    /// </para>
     /// </remarks>
     internal sealed class AssertInstruction : Instruction
     {
         private readonly Expr m_test;
-        private readonly Expr? m_select;
-        private readonly Instruction[] m_body;
+        private readonly MessageInstruction m_failure;
 
         /// <summary>Initializes an assert instruction.</summary>
         /// <param name="test">What has to be true.</param>
-        /// <param name="select">The message, where given as an expression.</param>
-        /// <param name="body">The message, where given as content.</param>
-        public AssertInstruction(Expr test, Expr? select, Instruction[] body)
+        /// <param name="failure">The terminating message a failure is defined to be.</param>
+        public AssertInstruction(Expr test, MessageInstruction failure)
         {
             m_test = test;
-            m_select = select;
-            m_body = body;
+            m_failure = failure;
         }
 
         /// <inheritdoc/>
         public override void Execute(ref DynamicContext context, XsltRuntime runtime)
         {
-            if (m_test.EvaluateAsBoolean(ref context))
+            bool held;
+
+            try
             {
-                return;
+                held = m_test.EvaluateAsBoolean(ref context);
+            }
+            catch (XsltException)
+            {
+                // "If the effective boolean value is false, or if a dynamic error occurs during evaluation
+                // of the expression, then the assertion fails" — and the note is explicit that the
+                // instruction then fails with XTMM9001 rather than with what the expression raised. An
+                // assertion is a claim that something holds, and an expression that cannot be evaluated has
+                // not shown that it does.
+                held = false;
             }
 
-            string message = m_select is not null
-                ? m_select.Evaluate(ref context).ToStringValue()
-                : CaptureText(m_body, ref context, runtime);
-
-            throw XsltErrors.Error(
-                XsltErrorCode.XTMM9000,
-                message.Length == 0 ? "An xsl:assert failed." : message.Trim());
+            if (!held)
+            {
+                m_failure.Execute(ref context, runtime);
+            }
         }
     }
 

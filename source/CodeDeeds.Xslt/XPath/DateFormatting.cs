@@ -252,7 +252,7 @@ namespace CodeDeeds.Xslt.XPath
                 case 'w':
                     Fit(
                         result,
-                        Number(((instant.Day - 1) / 7) + 1, presentation, ordinal, scratch, language),
+                        Number(WeekOfMonth(instant), presentation, ordinal, scratch, language),
                         minimum,
                         maximum,
                         presentation);
@@ -950,6 +950,35 @@ namespace CodeDeeds.Xslt.XPath
         private static int WeekOfYear(DateTime instant)
         {
             return ISOWeek.GetWeekOfYear(instant);
+        }
+
+        /// <summary>The week a date falls in within its month, which is <c>[w]</c>.</summary>
+        /// <remarks>
+        /// <para>
+        /// ISO 8601's rule for a year, applied to a month: weeks run Monday to Sunday, and week 1 is the
+        /// week holding the first Thursday of the month. Counting the day of the month in sevens is the
+        /// obvious reading and is not this one — 7 December 2005 is in week 2 and not week 1, December
+        /// having begun on a Thursday, so its first week runs from 28 November.
+        /// </para>
+        /// <para>
+        /// A date before that Monday is in the month's own first days but in the last week of the month
+        /// before, which is where it is numbered: 1 January 2006 was a Sunday, and the week it ends is
+        /// December's fifth.
+        /// </para>
+        /// </remarks>
+        /// <param name="instant">The date.</param>
+        private static int WeekOfMonth(DateTime instant)
+        {
+            DateTime first = new DateTime(instant.Year, instant.Month, 1);
+
+            // How far the first of the month is into its week, counting from Monday. Where that is Friday,
+            // Saturday or Sunday the week holds no Thursday of this month, and week 1 is the next.
+            int into = ((int)first.DayOfWeek + 6) % 7;
+            DateTime opening = first.AddDays(into > 3 ? 7 - into : -into);
+
+            return instant.Date < opening
+                ? WeekOfMonth(first.AddDays(-1))
+                : ((instant.Date - opening).Days / 7) + 1;
         }
 
         /// <summary>

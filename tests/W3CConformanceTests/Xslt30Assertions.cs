@@ -241,15 +241,7 @@ namespace CodeDeeds.Xslt.Conformance
 
         private static TestResult CheckError(XElement assertion, Transformation outcome)
         {
-            string expected = (string?)assertion.Attribute("code") ?? "*";
-
-            // A code the catalog writes in the Q{uri}local form, which xsl:message error-code allows a
-            // stylesheet to invent. In no namespace it is the local name, which is what the engine
-            // reports; in one this driver cannot present it, the engine carrying codes as names alone.
-            if (expected.StartsWith("Q{}", StringComparison.Ordinal))
-            {
-                expected = expected["Q{}".Length..];
-            }
+            string expected = ExpandedCode(assertion, (string?)assertion.Attribute("code") ?? "*");
 
             if (outcome.Error is null)
             {
@@ -273,6 +265,54 @@ namespace CodeDeeds.Xslt.Conformance
                     // With the message, because a code that is wrong is a code the engine chose for
                     // a reason, and the reason is what says which of the two is mistaken.
                     : Fail($"expected error {expected}, got {outcome.ErrorCode}: {Flat(outcome.Error ?? string.Empty)}");
+        }
+
+        /// <summary>
+        /// The code an <c>error</c> assertion names, written the way the engine reports one.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A code is a QName, and the three ways of writing one all turn up in the catalog. A bare name is
+        /// one of the specification's own, in the error namespace, and the engine reports those by their
+        /// local name alone — <c>XTDE0040</c> and not <c>Q{http://www.w3.org/2005/xqt-errors}XTDE0040</c>
+        /// — so a bare name is already what the engine says. <c>Q{}local</c> is no namespace at all,
+        /// which an <c>error-code</c> may invent and which the engine again reports by the local name.
+        /// </para>
+        /// <para>
+        /// The third is a prefixed name: <c>assert-006</c> writes <c>code="my:ABCD9999"</c> with
+        /// <c>xmlns:my</c> declared on the assertion itself. That is a code in a namespace of the
+        /// stylesheet's own, which the engine reports as <c>Q{uri}local</c>, so the prefix is resolved
+        /// against what is in scope where the assertion is written and the name rebuilt in that form. A
+        /// prefix nothing declares is left as written, which then does not match and says so.
+        /// </para>
+        /// </remarks>
+        /// <param name="assertion">The assertion, for the prefixes in scope on it.</param>
+        /// <param name="code">The code as the catalog wrote it.</param>
+        private static string ExpandedCode(XElement assertion, string code)
+        {
+            const string ErrorNamespace = "http://www.w3.org/2005/xqt-errors";
+
+            if (code.StartsWith("Q{", StringComparison.Ordinal) && code.IndexOf('}') is int close && close > 1)
+            {
+                string uri = code[2..close];
+
+                return uri.Length == 0 || uri == ErrorNamespace ? code[(close + 1)..] : code;
+            }
+
+            int colon = code.IndexOf(':');
+
+            if (colon < 0)
+            {
+                return code;
+            }
+
+            XNamespace? bound = assertion.GetNamespaceOfPrefix(code[..colon]);
+
+            return bound is null
+                ? code
+                : bound.NamespaceName == ErrorNamespace
+                    ? code[(colon + 1)..]
+                    : $"Q{{{bound.NamespaceName}}}{code[(colon + 1)..]}";
         }
 
         private static TestResult CheckResultDocument(XElement assertion, Transformation outcome)

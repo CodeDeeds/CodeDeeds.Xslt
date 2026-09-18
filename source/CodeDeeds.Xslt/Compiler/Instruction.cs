@@ -2969,6 +2969,18 @@ namespace CodeDeeds.Xslt.Compiler
         /// <summary>The code a terminating message raises, where the stylesheet named one.</summary>
         public AttributeValueTemplate? ErrorCode { get; set; }
 
+        /// <summary>
+        /// Whether this is the message a failing <c>xsl:assert</c> reports, which changes two things: the
+        /// code where the stylesheet named none, and what the error says it was stopped by.
+        /// </summary>
+        /// <remarks>
+        /// XSLT 3.0 §23.2 defines a failing assertion as an <c>xsl:message</c> with the same
+        /// <c>select</c>, the same <c>error-code</c>, the same content and <c>terminate="yes"</c>,
+        /// "However, the default error code if the error-code attribute is omitted is XTMM9001 rather than
+        /// XTMM9000." So it is this instruction that runs, with that one difference.
+        /// </remarks>
+        public bool IsAssertion { get; init; }
+
         /// <summary>The prefixes in scope where the message was written, for reading the code's.</summary>
         public IReadOnlyDictionary<string, string>? Prefixes { get; set; }
         private readonly AttributeValueTemplate? m_computedTerminate;
@@ -3056,18 +3068,24 @@ namespace CodeDeeds.Xslt.Compiler
 
             if (terminate)
             {
-                // The same code xsl:assert raises, and for the same reason: both are a stylesheet stopping
-                // the transformation deliberately, which is a different thing from a transformation that
-                // went wrong. A caller distinguishing the two has to be able to tell them apart — unless the
-                // stylesheet named the error itself, in which case that name is the code.
-                string described = $"Transformation terminated by xsl:message: {message}";
+                // A stylesheet stopping the transformation deliberately, which is a different thing from a
+                // transformation that went wrong, and a caller has to be able to tell the two apart. The
+                // two instructions that do it have a code each — XTMM9000 for a terminating message and
+                // XTMM9001 for a failing assertion — unless the stylesheet named the error itself, in
+                // which case that name is the code.
+                string described = IsAssertion
+                    ? $"Transformation terminated by xsl:assert: {message}"
+                    : $"Transformation terminated by xsl:message: {message}";
 
                 // The content travels with the error, so that an xsl:catch reads what the message said as
                 // $err:value rather than only as text. It is the sequence the instruction built and not a
                 // rendering of it: a message may carry a whole element, and the catch may go into it.
                 if (ErrorCode is null || CodeOf(ErrorCode.Evaluate(ref context).Trim()) is not string named)
                 {
-                    throw new XsltException(XsltErrorCode.XTMM9000, described) { Value = content };
+                    throw new XsltException(
+                        IsAssertion ? XsltErrorCode.XTMM9001 : XsltErrorCode.XTMM9000,
+                        described)
+                    { Value = content };
                 }
 
                 throw new XsltException(described, named) { Value = content };

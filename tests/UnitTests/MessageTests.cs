@@ -2,7 +2,8 @@ namespace CodeDeeds.Xslt.UnitTests
 {
     /// <summary>
     /// Tests for <c>xsl:message</c>: what it reports, what it does when it cannot, and what a terminating
-    /// one hands to whoever catches it.
+    /// one hands to whoever catches it. And for <c>xsl:assert</c>, which the specification defines as one
+    /// of these.
     /// </summary>
     [TestClass]
     public sealed class MessageTests
@@ -33,6 +34,81 @@ namespace CodeDeeds.Xslt.UnitTests
         private static string Root(string content)
         {
             return "<xsl:template match=\"/\"><out>" + content + "</out></xsl:template>";
+        }
+
+        [TestMethod]
+        public void AFailingAssertionHasACodeOfItsOwn()
+        {
+            // §23.2: a failing xsl:assert is an xsl:message with the same select, the same
+            // error-code, the same content and terminate="yes", "However, the default error code if the
+            // error-code attribute is omitted is XTMM9001 rather than XTMM9000."
+            Assert.AreEqual("XTMM9001", CodeFrom(Root("<xsl:assert test=\"false()\">no</xsl:assert>")));
+            Assert.AreEqual(
+                "XTMM9000",
+                CodeFrom(Root("<xsl:message terminate=\"yes\">no</xsl:message>")));
+
+            // And an assertion that holds is an empty sequence and nothing else.
+            Assert.AreEqual(
+                "<out>on</out>",
+                Run(Root("<xsl:assert test=\"true()\">no</xsl:assert>on")).Result);
+        }
+
+        [TestMethod]
+        public void AnAssertionMayNameTheErrorItRaises()
+        {
+            // The same attribute xsl:message has, read the same way: a prefixed name, an EQName, and a
+            // value template that works one out. A name in the error namespace is reported by its local
+            // part, which is how every standard code is reported.
+            Assert.AreEqual(
+                "Q{http://example.com/my}ABCD9999",
+                CodeFrom(Root(
+                    "<xsl:assert xmlns:my=\"http://example.com/my\" error-code=\"my:ABCD9999\" "
+                    + "test=\"false()\">no</xsl:assert>")));
+
+            Assert.AreEqual(
+                "XTDE1665",
+                CodeFrom(Root(
+                    "<xsl:assert error-code=\"Q{{http://www.w3.org/2005/xqt-errors}}XTDE1665\" "
+                    + "test=\"false()\"/>")));
+
+            Assert.AreEqual(
+                "Q{urn:x}e2",
+                CodeFrom(Root(
+                    "<xsl:assert xmlns:x=\"urn:x\" error-code=\"x:e{1+1}\" test=\"false()\"/>")));
+        }
+
+        [TestMethod]
+        public void AnAssertionWhoseTestRaisesHasNotHeld()
+        {
+            // "If the effective boolean value is false, or if a dynamic error occurs during evaluation of
+            // the expression, then the assertion fails", and the note is explicit that it then fails with
+            // XTMM9001 rather than with what the expression raised. An assertion is a claim that something
+            // holds, and an expression that cannot be evaluated has not shown that it does.
+            Assert.AreEqual("XTMM9001", CodeFrom(Root("<xsl:assert test=\"1 idiv 0\"/>")));
+
+            // Which is what lets one be caught by the code it is defined to raise.
+            Assert.AreEqual(
+                "<out>caught</out>",
+                Run(Root(
+                    "<xsl:try><xsl:assert test=\"1 idiv 0\"/>"
+                    + "<xsl:catch errors=\"*:XTMM9001\">caught</xsl:catch></xsl:try>")).Result);
+        }
+
+        [TestMethod]
+        public void AFailingAssertionSaysWhatItSaysThroughTheMessageWriter()
+        {
+            // Being an xsl:message, it writes one. The select and the content are both the message, in that
+            // order, exactly as they are for xsl:message.
+            StringWriter messages = new StringWriter();
+
+            Assert.ThrowsExactly<XsltException>(() => new Xslt(
+                "<xsl:stylesheet version=\"3.0\" " + Xsl + ">"
+                + Root("<xsl:assert test=\"false()\" select=\"'wanted '\">two</xsl:assert>")
+                + "</xsl:stylesheet>",
+                new XsltOptions { OmitXmlDeclaration = true, MessageWriter = messages })
+                .TransformXml("<r/>"));
+
+            Assert.AreEqual("wanted two", messages.ToString().Trim());
         }
 
         private static string CodeFrom(string body, XsltVersion? version = null, string declared = "3.0")

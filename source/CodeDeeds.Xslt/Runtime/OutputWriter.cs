@@ -404,14 +404,7 @@ namespace CodeDeeds.Xslt.Runtime
         {
             if (Method == OutputMethod.Html)
             {
-                decimal? asked = m_settings.HtmlVersion
-                    ?? (m_settings.VersionSpecified && decimal.TryParse(
-                            m_settings.Version.Trim(),
-                            System.Globalization.NumberStyles.AllowDecimalPoint,
-                            System.Globalization.CultureInfo.InvariantCulture,
-                            out decimal written)
-                        ? written
-                        : null);
+                decimal? asked = RequestedHtmlVersion;
 
                 // A requested version that is not a decimal at all is left alone: the specification makes
                 // what a serializer does with one implementation-defined.
@@ -1119,10 +1112,13 @@ namespace CodeDeeds.Xslt.Runtime
                 return attribute.Value;
             }
 
+            // Which elements have URI-valued attributes is a fact about HTML, so it is asked of an element
+            // the method writes as HTML: one in no namespace under the HTML method, and one in the XHTML
+            // namespace under the XHTML method or under HTML 5.
             string element = m_elementNamespaces[^1] switch
             {
                 "" when Method == OutputMethod.Html => m_elementLocalNames[^1],
-                XhtmlNamespace => m_elementLocalNames[^1],
+                XhtmlNamespace when Method == OutputMethod.Xhtml || WritesHtml5 => m_elementLocalNames[^1],
                 _ => string.Empty,
             };
 
@@ -1616,7 +1612,7 @@ namespace CodeDeeds.Xslt.Runtime
                 return;
             }
 
-            if (Method == OutputMethod.Html && IsHtmlVoid(localName))
+            if (Method == OutputMethod.Html && SerializesAsHtml(namespaceUri) && IsHtmlVoid(localName))
             {
                 // HTML void elements are never closed and never self-closed.
                 if (m_startTagOpen)
@@ -2267,9 +2263,17 @@ namespace CodeDeeds.Xslt.Runtime
         /// Writes the <c>Content-Type</c> meta the HTML and XHTML methods put at the top of the head.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// Written with the head's own prefix, so that a page whose XHTML namespace is bound to a prefix
         /// rather than to the default gets a meta in the same namespace as everything around it rather than
         /// one in no namespace.
+        /// </para>
+        /// <para>
+        /// And closed the way an element of that namespace is closed. The XHTML method writes the empty
+        /// form; the HTML method writes no end tag for a <c>meta</c> it serializes as HTML, and an end tag
+        /// for one it does not — a head in the XHTML namespace at a version below 5 being an XML island,
+        /// meta and all. See <see cref="SerializesAsHtml"/>.
+        /// </para>
         /// </remarks>
         private void WriteContentTypeMeta()
         {
@@ -2283,15 +2287,81 @@ namespace CodeDeeds.Xslt.Runtime
             WriteEscapedAttributeValue(
                 $"{m_settings.MediaTypeFor(Method)}; charset={m_settings.Encoding}", m_characterMap);
 
-            m_writer.Write(Method == OutputMethod.Xhtml ? "\" />" : "\">");
+            if (Method == OutputMethod.Xhtml)
+            {
+                m_writer.Write("\" />");
+                return;
+            }
+
+            m_writer.Write(SerializesAsHtml(m_elementNamespaces[^1]) ? "\">" : "\"></" + Qualify(prefix, "meta") + ">");
         }
 
         /// <inheritdoc/>
         public override string ItemSeparator => m_settings.ItemSeparator ?? " ";
 
+        /// <summary>
+        /// Which version of HTML the result asked for, or null where it asked for none this serializer can
+        /// read as a number.
+        /// </summary>
+        /// <remarks>
+        /// Serialization §7.4.1: "If the html-version serialization parameter is not absent, the
+        /// requested HTML version is the value of the html-version serialization parameter; otherwise, it
+        /// is the value of the version serialization parameter." That second half is the HTML method's
+        /// alone — for the XML and XHTML methods <c>version</c> is the version of XML, and reading
+        /// <c>version="1.0"</c> on an XHTML result as a request for HTML 1.0 would be reading the wrong
+        /// parameter. <c>output-0195b</c> is where it is measured: <c>method="html" version="5.0"</c> and
+        /// no <c>html-version</c>, which is a request for HTML 5.
+        /// </remarks>
+        private decimal? RequestedHtmlVersion
+        {
+            get
+            {
+                if (m_settings.HtmlVersion is decimal named)
+                {
+                    return named;
+                }
+
+                return Method == OutputMethod.Html
+                    && m_settings.VersionSpecified
+                    && decimal.TryParse(
+                        m_settings.Version.Trim(),
+                        System.Globalization.NumberStyles.AllowDecimalPoint,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out decimal written)
+                    ? written
+                    : null;
+            }
+        }
+
         /// <summary>Whether the <c>html</c> or <c>xhtml</c> method is writing HTML 5 rather than HTML 4.</summary>
         private bool WritesHtml5 =>
-            m_settings.HtmlVersion >= 5.0m && Method is OutputMethod.Html or OutputMethod.Xhtml;
+            RequestedHtmlVersion >= 5.0m && Method is OutputMethod.Html or OutputMethod.Xhtml;
+
+        /// <summary>
+        /// Whether an element in this namespace is one the HTML output method writes as HTML, rather than
+        /// as XML inside the result.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Serialization §7.2 defines it: "An element node is serialized as an HTML element if the
+        /// expanded QName of the element has a null namespace URI, regardless of the value of the requested
+        /// HTML version, or the value of the requested HTML version is 5.0 or greater, and the element node
+        /// is in the XHTML namespace." What is not serialized as an HTML element is an <em>XML island</em>,
+        /// and is written as XML would write it.
+        /// </para>
+        /// <para>
+        /// Which is a rule about the namespace and not about the name, and easy to miss because nearly
+        /// every HTML result is in no namespace and so passes it without being asked. The suite asks once:
+        /// <c>result-document-1402</c> writes XHTML-namespace elements through <c>method="html"</c> at the
+        /// default version, and wants <c>&lt;meta&gt;&lt;/meta&gt;</c> — the XML spelling, closed —
+        /// where an HTML <c>meta</c> would have no end tag at all.
+        /// </para>
+        /// </remarks>
+        /// <param name="namespaceUri">The element's namespace.</param>
+        private bool SerializesAsHtml(string namespaceUri)
+        {
+            return namespaceUri.Length == 0 || (WritesHtml5 && namespaceUri == XhtmlNamespace);
+        }
 
         /// <summary>
         /// Whether <em>prefix normalization</em> applies to a name in this namespace.
@@ -2378,6 +2448,7 @@ namespace CodeDeeds.Xslt.Runtime
         {
             return Method == OutputMethod.Html
                 && m_elementLocalNames.Count > 0
+                && SerializesAsHtml(m_elementNamespaces[^1])
                 && s_htmlUnescapedElements.Contains(m_elementLocalNames[^1]);
         }
 
@@ -2682,6 +2753,7 @@ namespace CodeDeeds.Xslt.Runtime
 
             if (character <= (char)0x9F && Method is OutputMethod.Html or OutputMethod.Xhtml)
             {
+                RefuseControlCharacter(character);
                 return $"&#{(int)character};";
             }
 
@@ -2696,6 +2768,36 @@ namespace CodeDeeds.Xslt.Runtime
             return m_limit is null || character < (char)0x80
                 ? null
                 : OutsideTheEncoding(value, at, out length);
+        }
+
+        /// <summary>
+        /// Refuses a character XML permits and HTML before version 5 does not.
+        /// </summary>
+        /// <remarks>
+        /// Serialization §7.2: the control characters #x7F to #x9F are permitted in XML and in none of
+        /// HTML before 5, and "it is a serialization error [err:SERE0014] to use the HTML output method if
+        /// such characters appear in the instance of the data model and the value of the requested HTML
+        /// version is less than 5.0. The serializer MUST signal the error." A reference is not a way round
+        /// it: the error is about the character being in the result at all, and §6.1 says in as many
+        /// words that an implementation-defined parameter may not instruct a serializer to suppress it.
+        /// <para>
+        /// The requested HTML version is <c>html-version</c> where written and <c>version</c> otherwise
+        /// (§7.4.1); with neither, this serializer writes HTML 4, so the error stands unless the
+        /// result asked for 5. The XHTML method is not named by the rule — it is defined in terms of the
+        /// XML method, which permits these characters — so it keeps writing the reference.
+        /// </para>
+        /// </remarks>
+        /// <param name="character">The character about to be written.</param>
+        private void RefuseControlCharacter(char character)
+        {
+            if (Method == OutputMethod.Html && !WritesHtml5)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.SERE0014,
+                    $"The result holds the character U+{(int)character:X4}, which XML permits and HTML "
+                    + "before version 5 does not. Write html-version=\"5\" to serialize it, or keep it out "
+                    + "of the result.");
+            }
         }
 
         /// <summary>

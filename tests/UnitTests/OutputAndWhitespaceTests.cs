@@ -416,6 +416,65 @@ namespace CodeDeeds.Xslt.UnitTests
                 new XsltOptions()).TransformXml("<r/>");
         }
 
+        /// <summary>Serializes a 3.0 result, for the output attributes 3.0 added.</summary>
+        private static string SerializesAt30(string output, string body)
+        {
+            return new Xslt(
+                "<xsl:stylesheet version=\"3.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\">"
+                + output + "<xsl:template match=\"/\">" + body + "</xsl:template></xsl:stylesheet>",
+                new XsltOptions()).TransformXml("<r/>");
+        }
+
+        [TestMethod]
+        public void ACharacterHtmlCannotCarryIsRefusedBelowVersionFive()
+        {
+            // Serialization §7.2: the control characters #x7F to #x9F are permitted in XML and in no
+            // version of HTML before 5, and "it is a serialization error [err:SERE0014] to use the HTML
+            // output method if such characters appear in the instance of the data model and the value of
+            // the requested HTML version is less than 5.0. The serializer MUST signal the error." A
+            // character reference is not a way round it: the error is about the character being in the
+            // result at all.
+            Assert.AreEqual(
+                "SERE0014",
+                RefusedBy("<xsl:output method=\"html\"/>", "<doc>&#x9f;</doc>"));
+
+            // The requested HTML version is html-version where written and version otherwise (§7.4.1),
+            // so either spelling of 5 lifts it.
+            Assert.Contains(
+                "&#159;",
+                SerializesAt30("<xsl:output method=\"html\" html-version=\"5\"/>", "<doc>&#x9f;</doc>"));
+            Assert.Contains(
+                "&#159;",
+                SerializesAt30("<xsl:output method=\"html\" version=\"5.0\"/>", "<doc>&#x9f;</doc>"));
+
+            // The rule names the HTML output method. The XHTML method is defined in terms of the XML
+            // method, which permits the character, and writes the reference this engine writes for a
+            // control nobody agrees the meaning of.
+            Assert.Contains(
+                "&#159;",
+                Serializes("<xsl:output method=\"xhtml\"/>", "<doc>&#x9f;</doc>"));
+        }
+
+        [TestMethod]
+        public void OnlyAnElementInNoNamespaceIsAnHtmlElementBeforeVersionFive()
+        {
+            // §7.2: "An element node is serialized as an HTML element if the expanded QName of the
+            // element has a null namespace URI, regardless of the value of the requested HTML version, or
+            // the value of the requested HTML version is 5.0 or greater, and the element node is in the
+            // XHTML namespace." What is not serialized as an HTML element is an XML island, written the way
+            // XML writes it — so a br in no namespace has no end tag, and one in the XHTML namespace
+            // has one until the version says 5.
+            const string Xhtml = "xmlns=\"http://www.w3.org/1999/xhtml\"";
+
+            Assert.AreEqual("<br>", Serializes("<xsl:output method=\"html\"/>", "<br/>"));
+            Assert.AreEqual(
+                $"<br {Xhtml}></br>",
+                Serializes("<xsl:output method=\"html\"/>", $"<br {Xhtml}/>"));
+            Assert.AreEqual(
+                $"<br {Xhtml}>",
+                SerializesAt30("<xsl:output method=\"html\" html-version=\"5\"/>", $"<br {Xhtml}/>"));
+        }
+
         [TestMethod]
         public void SerializationParametersThatCannotBeHonouredTogetherAreRefused()
         {

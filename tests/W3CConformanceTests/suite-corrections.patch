@@ -90,10 +90,10 @@ Apply from the root of a clone of https://github.com/w3c/xslt30-test:
 
     git apply suite-corrections.patch
 
-With this applied the xslt30-test 3.0 run here goes from 7,961 of 7,971 to
-7,964, the 2.0 run from 5,621 of 5,644 to 5,623 of 5,634 - ten test cases
-leaving a run they cannot be run in - and the schema-aware run from 8,560 of
-8,573 to 8,565.
+With this applied the xslt30-test 3.0 run here goes from 8,043 of 8,053 to
+8,046, the 2.0 run from 5,660 of 5,683 to 5,662 of 5,673 - ten test cases
+leaving a run they cannot be run in - and the schema-aware run from 8,650 of
+8,709 to 8,655.
 
 Not included: package-200, which asks for XTSE3000 where use-package-291 to 294
 ask for XTSE0020 on the same shape - an unreadable package-version range on

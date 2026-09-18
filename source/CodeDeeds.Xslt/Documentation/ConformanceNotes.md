@@ -6659,8 +6659,8 @@ across `decl/accept` and `decl/expose` on 5 March 2023 while these two files wer
 Applied to a clone of the suite, both tests raise the `XTSE3050` they were written for. A third
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
-validation settles about a constructed node*. With all seventeen the 3.0 run reads **7,964 of 7,971**,
-the 2.0 run **5,623 of 5,634** and the schema-aware run **8,565 of 8,573**. The patch is not applied here,
+validation settles about a constructed node*. With all seventeen the 3.0 run reads **8,046 of 8,053**,
+the 2.0 run **5,662 of 5,673** and the schema-aware run **8,655 of 8,709**. The patch is not applied here,
 and the figures in these notes do not include it. A measurement is worth something because of what it is
 taken against, and a patch kept in the repository and offered upstream is worth more than seventeen tests
 counted differently at home.
@@ -7560,6 +7560,137 @@ schema-aware run stands at 8,560 of 8,573 and the 3.0 run at 7,961 of 7,971, bot
 2.0 run at 5,621 of 5,644; the XPath runs at 18,268 and 14,553. Every failure set is identical test for
 test with and without the change, `call-template-1001` failing on one interpreted schema-aware run in both,
 as the recursion-depth test that lands either side of the limit does. Three new unit tests, 2,838 in all.
+
+### A dependency is a question, not a limit
+
+The driver had a catch-all: any dependency it had not been taught to answer for was a skip that named the
+dependency and stopped. Eighteen kinds fell into it, and 1,890 test cases with them. The catch-all was the
+mistake. A dependency asks whether the processor has some implementation-defined property, and answering
+*no* is as much a measurement as answering yes — it is what lets the test written for the opposite,
+`satisfied="false"`, be run instead. Answering nothing measures neither.
+
+So each was worked out and written down. Five are properties this engine has and eleven are properties it
+has not, and both halves are in the report now, named:
+
+| Dependency | The answer, and where it comes from |
+| --- | --- |
+| `unicode-version` | No, for every version the suite names. The two test sets that ask assert what a given Unicode version classified: `unicode-90` names the count of characters in each class as 9.0 had them, and `regex-classes` checks its answers against stored results for 3.1, 5.2 and 6.0. A later version is a different answer, not a better one, and this engine reads the Unicode data .NET carries — `\d` matches 760 characters here against the 370 `unicode-90` asserts. |
+| `combinations_for_numbering` | No. The value is the Unicode name of a numbering family's digit-one, `CIRCLED DIGIT ONE` and the like, which are Number-Other rather than decimal digits; numbering in them is allowed and not required, and this engine answers `format-integer(5, '①')` with `5`. The decimal digit families the specification does require are all here — Devanagari, Arabic-Indic, fullwidth — and carry no dependency. |
+| `year_component_values` | Negative years yes, years past 9999 yes, year zero no. XSD 1.0's limits, which is the schema language this engine reads: 1 BC is `-0001` there and year zero is not in the lexical space at all. |
+| `package_version_resolution` | `highest_version` yes, `unspecified` yes, `lowest_version` no. Where several versions match an `xsl:use-package` range this engine takes the highest, which is what a caller naming a range means. |
+| `additional_normalization_form` | Yes, for NFD, NFKC and NFKD. All four of XPath's forms are .NET's. |
+| `enable_assertions` | Yes. `xsl:assert` is always checked here, which is the opposite of the specification's default and is one of the things it leaves to the processor; a test wanting them off is the one this cannot present. |
+| `maximum_number_of_decimal_digits` | No, for every value the suite names. `xs:decimal` is .NET's, which keeps 28 significant digits against the 18 required; the tests ask for 30, 50, 60 and 101. |
+| `default_html_version` | 4. With no `html-version` and no `version`, the html method writes HTML 4. |
+| `supported_calendars_in_date_formatting_functions` and `default_calendar_in_date_formatting_functions` | ISO, which is also AD, and nothing else. Another calendar is written the way the specification says to write an unsupported one, a `[Calendar: X]` prefix and the date in this one. |
+| `unparsed_text_encoding` | UTF-8. The tests want iso-8859-1 assumed, so they stay out. |
+| `default_output_encoding` | UTF-8. |
+| `ignore_doc_failure` | No: `document()` raises where `doc()` would, rather than answering an empty sequence. XSLT 3.0 allows either, and the test asking for the other one runs now. |
+| `default_language_for_numbering` | English, which is the one language this engine spells numbers in. |
+| `recognize_id_as_uri_fragment` | Yes. `document('doc.xml#k')` answers the element `k` names. |
+| `detect_accumulator_cycles` | Yes: `XTDE3400` rather than a stack that runs out. |
+| `extension-function` | No. Nothing can register one, and the one test asks for a RELAX NG function. |
+
+Three of the driver's own limits went with them. A source the environment marks `streaming="true"` is read
+as any other is: the attribute says the test intends the document to be streamed, not that it must be, and
+this engine evaluates every streamable construct over a tree it holds in memory — `accumulator-034`
+even sets its own `streamable="no"`. A test that is about streaming declares the feature and is still
+skipped for that. The reader that looks for `xsl:initial-template` follows `xsl:include` and `xsl:import`
+now, `override-f-029` being an `xsl:stylesheet` holding one `xsl:include` and nothing else. And an
+environment whose source names no file and no content but carries a `select` is building the document
+rather than selecting within one, so the driver evaluates it and uses the result: `id-043`'s context
+document is `parse-xml('<root/>')`, written in the catalog's XPath and not in the 2.0 its stylesheet
+declares.
+
+### What five skips were hiding
+
+63 test cases came into the 3.0 run with the dependencies answered, and eleven of them failed. Every one
+was a gap the skip had been covering.
+
+**`xsl:assert` had the wrong code, and no `error-code`.** §23.2 defines a failing assertion by
+reference: "the effect of the instruction is governed by the rules for evaluation of an `xsl:message`
+instruction with the same `select` attribute, `error-code` attribute, and contained sequence constructor,
+and with the value `terminate="yes"`. However, the default error code if the `error-code` attribute is
+omitted is `XTMM9001` rather than `XTMM9000`." This engine raised `XTMM9000`, read no `error-code`, and
+wrote nothing to the message writer. It is one instruction now: the compiler builds the `xsl:message` the
+sentence describes and the assertion runs it, so the message is written, its content travels with the error
+for an `xsl:catch` to read, and a message that cannot be built does not itself stop the transformation.
+Writing the rules out a second time would have been writing somewhere for the two to drift apart, which is
+how the codes came to be the wrong way round.
+
+The other half of the same section: "If the effective boolean value is false, **or if a dynamic error
+occurs during evaluation of the expression**, then the assertion fails", and the note says the instruction
+then fails with `XTMM9001` rather than with what the expression raised. An assertion is a claim that
+something holds, and an expression that cannot be evaluated has not shown that it does. `error-1665a`
+measures the `error-code` half by asserting `false()` under `Q{…}XTDE1665`; `assert-005` measures the
+catching half.
+
+**A character HTML cannot carry.** Serialization §7.2: the control characters #x7F to #x9F are
+permitted in XML and in no version of HTML before 5, and "it is a serialization error [`err:SERE0014`] to
+use the HTML output method if such characters appear in the instance of the data model and the value of the
+requested HTML version is less than 5.0. The serializer MUST signal the error." This engine wrote them as
+character references on both HTML methods and signalled nothing. A reference is not a way round the rule
+— §6.1 says in as many words that an implementation-defined parameter may not instruct a
+serializer to suppress this error.
+
+Which brought the requested HTML version with it. §7.4.1 defines it as `html-version` where that is
+written and `version` otherwise, and this engine had that for `SESU0013` and not for anything else, so
+`method="html" version="5.0"` wrote HTML 4. The definition is one property now and everything that turns on
+the version reads it. The second half of the sentence is the HTML method's alone: for the XML and XHTML
+methods `version` is the version of XML, and reading `version="1.0"` on an XHTML result as a request for
+HTML 1.0 would be reading the wrong parameter.
+
+**Which elements are HTML elements.** §7.2 again: "An element node is serialized as an HTML element
+if the expanded QName of the element has a null namespace URI, regardless of the value of the requested
+HTML version, or the value of the requested HTML version is 5.0 or greater, and the element node is in the
+XHTML namespace." Anything else is an *XML island* and is written as XML writes it. That is a rule about
+the namespace and not about the name, and it is easy to miss because nearly every HTML result is in no
+namespace and passes it without being asked. `result-document-1402` asks: XHTML-namespace elements through
+`method="html"` at the default version, wanting `<meta …></meta>` where an HTML `meta` would have no end
+tag at all — including the `Content-Type` meta the serializer writes itself, which takes the head's
+namespace along with its prefix.
+
+**The week in a month.** `[w]` was the day of the month counted in sevens. It is ISO 8601's rule for a year
+applied to a month: weeks run Monday to Sunday and week 1 is the one holding the first Thursday. 7 December
+2005 is in the second week and not the first, December having begun on a Thursday so that its first week
+runs from 28 November; 9 April 2006 is a Sunday in April's first week, April having begun on a Saturday so
+that the week of its first Thursday starts on the 3rd. A day before its month's first week is in the last
+week of the month before, which is where it is numbered: 1 January 2006 was a Sunday, and the week it ends
+is December's fifth. `format-date-011` walks 48 days across five months and agrees with all of it.
+
+**An accumulator rule's content is a sequence.** §18.2.2 gives the new value as "the value of the
+expression in the `select` attribute of Q, or the contained sequence constructor", converted to the
+accumulator's declared type. This engine was building a document node from the constructor, which is
+`xsl:variable`'s rule (§9.3) and only where *that* declaration has no `as` attribute; nothing brings
+it here. An accumulator declared `as="map(*)"` is where the difference shows, its rules building maps that
+no document node can hold: `accumulator-043` computes a histogram by publisher and could not run at all.
+
+### What the schema-aware run found in a negative year
+
+Answering `year_component_values` opened 136 tests on the schema-aware run, and 46 of them fail — 44
+for one reason and the last two for a consequence of it. `.NET`'s XSD validator cannot hold a year outside
+the years `System.DateTime` holds, so a source document carrying `<elem-date>-0012-12-03-05:00</elem-date>`
+cannot be validated at all: *the string is not a valid Date value*, says a validator whose date type begins
+in the common era. Thirteen `attr/as` tests, twenty-two `attr/match`, and the rest across
+`strip-type-annotations`, `nodetest`, `treat-as` and `type-expr` all read the same document.
+
+The dependency is answered yes all the same, and the answer is not a guess: this engine's own dates reach
+negative years and past 9999 — that is what *Dates outside the years DateTime holds* built, and every
+test on the runs without validation confirms it. What the schema-aware run shows is a different thing, and
+a real one: validation here is `System.Xml.Schema`'s, as `XsltCompatibility.md` has always said, and a
+validator that cannot represent 13 BC cannot type it either. Saying so costs the schema-aware figure four
+tenths of a point and is worth more than a skip that said nothing.
+
+The two that follow from it are `type-functions-0101` and `-0401`, which want a typed `xs:date` out of the
+same document. Inferring validation from the environment's `schema role="source-reference"` was tried and
+is not the catalog's rule: it fixes neither of them — the document still cannot be validated —
+and costs `strip-type-annotations-018`, which passes only while its source stays untyped.
+
+The 3.0 run goes from 7,961 of 7,971 to **8,043 of 8,053** and the 2.0 run from 5,621 of 5,644 to
+**5,660 of 5,683**, both on both backends and with the same ten and twenty-three failures as before. The
+schema-aware run goes from 8,560 of 8,573 to **8,650 of 8,709**: 136 more read, 90 more passing, and 46
+failing on one validator. Both XPath runs are unmoved at 18,268 of 18,285 and 14,553 of 14,577. Twenty-one
+unit tests, and one corrected that had recorded `xsl:assert` as raising `XTMM9000`; 2,859 in all.
 
 ### Which results the suite asks for and does not get
 

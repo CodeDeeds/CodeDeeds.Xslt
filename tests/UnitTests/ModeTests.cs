@@ -1069,7 +1069,9 @@ namespace CodeDeeds.Xslt.UnitTests
         public void AnAssertionThatFailsCarriesItsOwnMessage()
         {
             // Not xsl:message terminate="yes" written shorter: an assertion is a claim about what the
-            // stylesheet expects, which is why it gets a code of its own.
+            // stylesheet expects, which is why it gets a code of its own. XTMM9001, and the one a
+            // terminating message raises is XTMM9000; this had them the same way round for a while, there
+            // being no test in reach that measured it.
             XsltException error = Assert.ThrowsExactly<XsltException>(
                 () => Run(
                     "<xsl:param name=\"p\" select=\"2\"/>"
@@ -1077,7 +1079,7 @@ namespace CodeDeeds.Xslt.UnitTests
                     "<r/>",
                     "3.0"));
 
-            Assert.AreEqual("XTMM9000", error.Code);
+            Assert.AreEqual("XTMM9001", error.Code);
             StringAssert.Contains(error.Message, "p was not 3");
         }
 
@@ -1288,6 +1290,35 @@ namespace CodeDeeds.Xslt.UnitTests
         /// nothing about accumulators says none.
         /// </summary>
         private const string Applies = "<xsl:mode use-accumulators=\"#all\"/>";
+
+        [TestMethod]
+        public void AnAccumulatorRulesContentIsASequenceAndNotADocument()
+        {
+            // §18.2.2 gives the new value as "the value of the expression in the select attribute of
+            // Q, or the contained sequence constructor", converted to the accumulator's declared type. The
+            // rule that wraps what a sequence constructor produced in a document node is xsl:variable's
+            // (§9.3), and only where that declaration has no as attribute; nothing brings it here. An
+            // accumulator declared as a map is where the difference shows: a map is not something a
+            // document node can hold, so building one would raise rather than count.
+            Assert.AreEqual(
+                "<out>2</out>",
+                Run(
+                    "<xsl:accumulator name=\"tally\" as=\"map(xs:string, xs:integer)\" initial-value=\"map{}\">"
+                    + "<xsl:accumulator-rule match=\"a\">"
+                    + "<xsl:choose>"
+                    + "<xsl:when test=\"map:contains($value, string(@k))\">"
+                    + "<xsl:sequence select=\"map:put($value, string(@k), $value(string(@k)) + 1)\"/>"
+                    + "</xsl:when>"
+                    + "<xsl:otherwise><xsl:sequence select=\"map:put($value, string(@k), 1)\"/></xsl:otherwise>"
+                    + "</xsl:choose>"
+                    + "</xsl:accumulator-rule></xsl:accumulator>"
+                    + "<xsl:mode use-accumulators=\"tally\"/>"
+                    + "<xsl:template match=\"/\"><out>"
+                    + "<xsl:value-of select=\"accumulator-after('tally')('x')\"/>"
+                    + "</out></xsl:template>",
+                    "<r><a k=\"x\"/><a k=\"y\"/><a k=\"x\"/></r>",
+                    "3.0"));
+        }
 
         [TestMethod]
         public void AnAccumulatorCountsANodeAsThatNodeBegins()

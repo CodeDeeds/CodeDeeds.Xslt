@@ -17,13 +17,13 @@ Conformance as last measured, on 18 September 2026, against the W3C suites (see 
 
 | Suite | Result |
 | --- | --- |
-| XSLT 3.0 test suite, 3.0 processor | 7,961 of 7,971, 99.9% |
-| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,621 of 5,644, 99.6% |
+| XSLT 3.0 test suite, 3.0 processor | 8,043 of 8,053, 99.9% |
+| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,660 of 5,683, 99.6% |
 | QT3 (XPath), 3.1 | 18,268 of 18,285, 99.9% |
 | QT3 (XPath), 2.0 | 14,553 of 14,577, 99.8% |
 
 The 2,900 streaming tests are skipped by design. The 686 schema-aware tests are read only by the driver's
-opt-in `--schema` run, which stands at 8,560 of 8,573 (99.8%), the same on both backends; the figures
+opt-in `--schema` run, which stands at 8,650 of 8,709 (99.3%), the same on both backends; the figures
 above are the run without it.
 
 ## Not implemented, and not planned
@@ -81,7 +81,9 @@ above are the run without it.
 | Document order across documents | Nodes of several documents are ordered by the sequence the documents were loaded in. Stable within a transformation, which is all the specification asks. |
 | Binary ordering | `xs:hexBinary` and `xs:base64Binary` are ordered octet by octet at every version, which XPath 3.1 defines and 2.0 left undefined. |
 | `xsl:message` | Presented as XML to `XsltOptions.MessageWriter`, one message per line. A message is a document node built from the instruction's content, so one writing an element writes the element rather than the text inside it; how a message is presented is left to the processor and this is what the conformance suite asks about. |
+| `xsl:assert` | Always checked. The specification's default is the other way — assertions off unless the processor is asked to enable them — and leaves the mechanism to the processor; there is none here, so a stylesheet's assertions are its own to remove. A failing one is an `xsl:message` with the same `select`, the same `error-code` and `terminate="yes"`, raising `XTMM9001` where the stylesheet names no code of its own. An error while evaluating the `test` is a failed assertion and not that error. |
 | Warnings | `xsl:mode`'s `warning-on-no-match` and `warning-on-multiple-match` both default to *no*, which XSLT 3.0 §6.6.1 leaves to the processor: a stylesheet that has not asked is not told, and the second search of the template rules that the multiple-match question costs is not paid by a transformation that would throw the answer away. What a mode does ask for goes to `XsltOptions.WarningWriter`, one warning per line, falling back to `MessageWriter` where the caller has named no other. Neither warning is an error and neither changes the result: two rules of one precedence and priority still leave the last-declared one winning unless `on-multiple-match="fail"` says otherwise. |
+| HTML versions and namespaces | The <em>requested HTML version</em> is `html-version` where written and `version` otherwise, which is the HTML method's reading of `version` — for the XML and XHTML methods that parameter is the version of XML. With neither, the html method writes HTML 4. Before version 5 only an element in no namespace is written as HTML: one in the XHTML namespace is an XML island and keeps its end tag, and at version 5 it becomes HTML like the rest. A character in #x7F to #x9F through the html method below version 5 is `SERE0014`, which the serializer is required to signal rather than escape. |
 | Output details | Indentation uses `\n` and indents uniformly; where exactly lines break is the processor's choice. `xsl:vendor` is `CodeDeeds` and `xsl:vendor-url` is the repository, `https://github.com/CodeDeeds/CodeDeeds.Xslt`. |
 
 ## Using it from .NET

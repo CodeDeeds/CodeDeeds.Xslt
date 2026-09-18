@@ -10644,13 +10644,16 @@ namespace CodeDeeds.Xslt.Compiler
                     return;
 
                 case "assert" when Implements30:
-                    output.Add(new AssertInstruction(
-                        RequireExpression(element, "test"),
-                        GetAttribute(element, "select") is string said
-                            ? ParseExpression(element, said)
-                            : null,
-                        CompileSequence(element)));
+                {
+                    Expr held = RequireExpression(element, "test");
+
+                    // What a failing assertion does is defined as what an xsl:message does, so it is one
+                    // that is built: the same select folded in front of the same content, the same
+                    // error-code read with the prefixes in scope here, and terminate="yes". Only the code
+                    // where none is named differs, and the message knows which instruction it is for.
+                    output.Add(new AssertInstruction(held, CompileMessage(element, terminate: null, assertion: true)));
                     return;
+                }
 
                 case "fork" when Implements30:
                     output.Add(new ForkInstruction(CompileSequence(element)));
@@ -10937,42 +10940,7 @@ namespace CodeDeeds.Xslt.Compiler
                     // until the message is reached. A value written out is settled here, which keeps the
                     // ordinary xsl:message free of an expression to evaluate.
                     string? terminate = GetAttribute(element, "terminate");
-                    Instruction[] body = CompileSequence(element);
-                    m_scopeElement = element;
-
-                    // What to report may be given as an expression as well as as content, and the message
-                    // is built from the two together — the expression first, then the constructor — so the
-                    // select is simply the first thing the message constructs. Unlike xsl:value-of and
-                    // xsl:comment, which take one or the other, this element takes both: the suite's
-                    // version-017 writes <xsl:message select="'message 1: '">A message</xsl:message> and
-                    // reads the message as "message 1: A message".
-                    if (GetAttribute(element, "select") is string written)
-                    {
-                        Instruction[] both = new Instruction[body.Length + 1];
-
-                        both[0] = new SequenceInstruction(ParseExpression(element, written));
-                        Array.Copy(body, 0, both, 1, body.Length);
-                        body = both;
-                    }
-
-                    // A terminating message may name the error it raises, which is the code a caller sees —
-                    // computed or not, resolved with the prefixes in scope here.
-                    AttributeValueTemplate? errorCode = Implements30
-                        ? OptionalAttributeValueTemplate(element, "error-code")
-                        : null;
-
-                    MessageInstruction message = terminate is not null && terminate.IndexOf('{') >= 0
-                        ? new MessageInstruction(
-                            body, AttributeValueTemplate.Parse(terminate, this, m_backend), Implements30)
-                        : new MessageInstruction(body, IsYes(terminate), Implements30);
-
-                    if (errorCode is not null)
-                    {
-                        message.ErrorCode = errorCode;
-                        message.Prefixes = PrefixesInScope();
-                    }
-
-                    output.Add(message);
+                    output.Add(CompileMessage(element, terminate, assertion: false));
                     return;
                 }
 
@@ -11315,6 +11283,63 @@ namespace CodeDeeds.Xslt.Compiler
         {
             string? text = GetAttribute(element, attributeName);
             return text is null ? null : ParseExpression(element, text);
+        }
+
+        /// <summary>
+        /// Compiles the message an <c>xsl:message</c> writes, or the one a failing <c>xsl:assert</c> is
+        /// defined to write.
+        /// </summary>
+        /// <remarks>
+        /// One method because the specification defines the second as the first (§23.2): the same
+        /// <c>select</c>, the same <c>error-code</c>, the same content, and <c>terminate="yes"</c>, with
+        /// only the default code differing. Writing the assertion's rules out a second time would be
+        /// writing somewhere for the two to drift apart.
+        /// </remarks>
+        /// <param name="element">The instruction being compiled.</param>
+        /// <param name="terminate">
+        /// The <c>terminate</c> attribute as written, or null for an assertion, which always terminates.
+        /// </param>
+        /// <param name="assertion">Whether this is what a failing <c>xsl:assert</c> reports.</param>
+        private MessageInstruction CompileMessage(int element, string? terminate, bool assertion)
+        {
+            Instruction[] body = CompileSequence(element);
+            m_scopeElement = element;
+
+            // What to report may be given as an expression as well as as content, and the message is built
+            // from the two together — the expression first, then the constructor — so the select is
+            // simply the first thing the message constructs. Unlike xsl:value-of and xsl:comment, which take
+            // one or the other, this element takes both: the suite's version-017 writes
+            // <xsl:message select="'message 1: '">A message</xsl:message> and reads the message as
+            // "message 1: A message".
+            if (GetAttribute(element, "select") is string written)
+            {
+                Instruction[] both = new Instruction[body.Length + 1];
+
+                both[0] = new SequenceInstruction(ParseExpression(element, written));
+                Array.Copy(body, 0, both, 1, body.Length);
+                body = both;
+            }
+
+            // A terminating message may name the error it raises, which is the code a caller sees —
+            // computed or not, resolved with the prefixes in scope here.
+            AttributeValueTemplate? errorCode = Implements30
+                ? OptionalAttributeValueTemplate(element, "error-code")
+                : null;
+
+            MessageInstruction message = terminate is not null && terminate.IndexOf('{') >= 0
+                ? new MessageInstruction(
+                    body, AttributeValueTemplate.Parse(terminate, this, m_backend), Implements30)
+                    { IsAssertion = assertion }
+                : new MessageInstruction(body, assertion || IsYes(terminate), Implements30)
+                    { IsAssertion = assertion };
+
+            if (errorCode is not null)
+            {
+                message.ErrorCode = errorCode;
+                message.Prefixes = PrefixesInScope();
+            }
+
+            return message;
         }
 
         private Instruction CompileNumber(int element)

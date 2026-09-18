@@ -467,8 +467,11 @@ namespace CodeDeeds.Xslt
         /// <summary>An accumulator defined in terms of itself.</summary>
         XTDE3400,
 
-        /// <summary>An <c>xsl:assert</c> whose test was false.</summary>
+        /// <summary>An <c>xsl:message</c> with <c>terminate="yes"</c>.</summary>
         XTMM9000,
+
+        /// <summary>An <c>xsl:assert</c> whose test was false, or raised.</summary>
+        XTMM9001,
 
         /// <summary>Two entries of one <c>xsl:map</c> sharing a key.</summary>
         XTDE3365,
@@ -1099,6 +1102,11 @@ namespace CodeDeeds.Xslt
         SESU0013,
 
         /// <summary>A processing instruction holding <c>&gt;</c>, which the HTML method ends one with.</summary>
+        /// <summary>
+        /// A character XML permits and HTML before version 5 does not, written by the HTML output method.
+        /// </summary>
+        SERE0014,
+
         SERE0015,
 
         /// <summary>A serialization parameter document this processor cannot use.</summary>

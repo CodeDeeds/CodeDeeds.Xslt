@@ -222,7 +222,7 @@ namespace CodeDeeds.Xslt.Conformance
 
             try
             {
-                source = LoadSource(environment, directory);
+                source = LoadSource(environment, directory) ?? BuiltSource(environment);
             }
             catch (Exception exception)
             {
@@ -476,16 +476,18 @@ namespace CodeDeeds.Xslt.Conformance
                     FunctionArguments = FunctionArgumentsOf(test),
 
                     // What templates are first applied to, where the test says: the initial-mode's own
-                    // selection, or the environment's selection within the source document.
+                    // selection, or the environment's selection within the source document. A selection on
+                    // a source that names no document is not a selection within one — it builds the
+                    // document, and has already been evaluated to produce the source.
                     InitialMatchSelection = (string?)test.Element(Xslt30Catalog.Ns + "initial-mode")?.Attribute("select")
-                        ?? environment?.SourceSelect,
+                        ?? SelectionWithin(environment),
 
                     // And what a global reads as the context item. The catalog's select on a source is
                     // "a path expression to select the initial context node within the document", which is
                     // the one node earlier versions of XSLT gave both jobs to — so it is supplied as both.
                     // A test whose selection is empty has no initial context node, and then a global that
                     // reads one is an error rather than reading the document instead.
-                    GlobalContextItem = environment?.SourceSelect,
+                    GlobalContextItem = SelectionWithin(environment),
 
                     // Where the input came from, which is not where the stylesheet is.
                     InputUri = SourcePath(environment, directory) is string path && File.Exists(path)
@@ -636,13 +638,38 @@ namespace CodeDeeds.Xslt.Conformance
         /// it binds to the XSLT namespace — a test written with <c>t:</c> declares it as surely as one
         /// written with <c>xsl:</c>, and reading the text for the usual spelling missed those.
         /// </summary>
-        private static bool DeclaresInitialTemplate(string path)
+        private static bool DeclaresInitialTemplate(string path, int depth = 0)
         {
             XNamespace xsl = "http://www.w3.org/1999/XSL/Transform";
 
             try
             {
                 XDocument stylesheet = XDocument.Load(path);
+
+                // A module may declare it and be included rather than declaring it here: override-f-029 is
+                // an xsl:stylesheet holding one xsl:include and nothing else, and the template the test
+                // starts at is in the module it includes. The depth is a guard against a pair of modules
+                // that include each other, which the engine reports but this reader would only recurse on.
+                if (depth < 8)
+                {
+                    foreach (XElement composed in stylesheet.Descendants()
+                        .Where(element => element.Name == xsl + "include" || element.Name == xsl + "import"))
+                    {
+                        if ((string?)composed.Attribute("href") is not string href)
+                        {
+                            continue;
+                        }
+
+                        string module = Path.Combine(
+                            Path.GetDirectoryName(path) ?? string.Empty,
+                            href.Replace('/', Path.DirectorySeparatorChar));
+
+                        if (File.Exists(module) && DeclaresInitialTemplate(module, depth + 1))
+                        {
+                            return true;
+                        }
+                    }
+                }
 
                 foreach (XElement template in stylesheet.Descendants(xsl + "template"))
                 {
@@ -1259,6 +1286,55 @@ namespace CodeDeeds.Xslt.Conformance
         }
 
         /// <summary>
+        /// The environment's selection where it selects within a document, which is null where it builds one.
+        /// </summary>
+        private static string? SelectionWithin(Xslt30Environment? environment)
+        {
+            return environment is { SourceFile: null, SourceContent: null } ? null : environment?.SourceSelect;
+        }
+
+        /// <summary>
+        /// The source document an environment builds with an expression rather than naming, or null where
+        /// it names one or supplies none.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The catalog's <c>select</c> on a source is documented as a path expression selecting the initial
+        /// context node <em>within the document</em>, and three of the four uses in the suite are that. The
+        /// fourth is <c>id-043</c>, whose source names no file and no content at all:
+        /// <c>&lt;source role="." select="parse-xml('&lt;root/&gt;')"/&gt;</c>. There is no document for
+        /// that to select within — the expression is the document.
+        /// </para>
+        /// <para>
+        /// So it is evaluated here rather than handed to the engine as an initial match selection. It is the
+        /// catalog's expression and not the stylesheet's, written in the catalog's own version of XPath:
+        /// <c>fn:parse-xml</c> is 3.0's and <c>id-043</c>'s stylesheet says <c>version="2.0"</c>, so asking
+        /// the stylesheet to evaluate it asks the wrong processor. A stylesheet of the driver's own, at 3.0,
+        /// is the right one to ask.
+        /// </para>
+        /// </remarks>
+        /// <param name="environment">The environment, or null where the test declares none.</param>
+        private static string? BuiltSource(Xslt30Environment? environment)
+        {
+            if (environment is not { SourceFile: null, SourceContent: null, SourceSelect: string expression })
+            {
+                return null;
+            }
+
+            string escaped = expression
+                .Replace("&", "&amp;", StringComparison.Ordinal)
+                .Replace("<", "&lt;", StringComparison.Ordinal)
+                .Replace("\"", "&quot;", StringComparison.Ordinal);
+
+            return new Xslt(
+                "<xsl:stylesheet version=\"3.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\">"
+                + $"<xsl:template name=\"go\"><xsl:copy-of select=\"{escaped}\"/></xsl:template>"
+                + "</xsl:stylesheet>",
+                new XsltOptions { OmitXmlDeclaration = true, InitialTemplate = "go" })
+                .Transform();
+        }
+
+        /// <summary>
         /// Reads a source document, in the encoding the document says it is in.
         /// </summary>
         /// <remarks>
@@ -1414,16 +1490,260 @@ namespace CodeDeeds.Xslt.Conformance
 
                         break;
 
+                    // What follows are properties of the processor that the specification leaves to it, and
+                    // that this one has an answer for. A dependency is a question, not a limit: answering it
+                    // no is as much a measurement as answering it yes, and is what lets the test that asks
+                    // for the opposite — satisfied="false" — be run.
+
+                    case "unicode-version":
+                        // The tests that ask are two sets that assert exactly what a given Unicode version
+                        // classifies: unicode-90 names the count of characters in each class as 9.0 had
+                        // them, and regex-classes checks its answers against stored results for 3.1, 5.2
+                        // and 6.0. Neither is satisfied by a later version — it is a different answer,
+                        // not a better one. This engine reads the Unicode data .NET carries, which is
+                        // later than any version the suite names: \d matches 760 characters here against
+                        // the 370 unicode-90 asserts.
+                        if (wanted)
+                        {
+                            why = $"needs Unicode {value}, and this engine reads the later Unicode .NET carries";
+                            return false;
+                        }
+
+                        break;
+
+                    case "combinations_for_numbering":
+                        // The Unicode name of the digit-one of a numbering family: CIRCLED DIGIT ONE and
+                        // the like, which are Number-Other rather than decimal digits. A processor numbering
+                        // in them is allowed and not required, and this one does not: format-integer(5, '1')
+                        // written with a circled one answers 5. The decimal digit families the
+                        // specification does require are all here — Devanagari, Arabic-Indic, fullwidth
+                        // and the rest — and those carry no dependency.
+                        if (wanted)
+                        {
+                            why = $"does not number in the '{value}' family";
+                            return false;
+                        }
+
+                        break;
+
+                    case "year_component_values":
+                        if (SupportsYears(value) != wanted)
+                        {
+                            why = wanted ? $"does not {value}" : $"does {value}";
+                            return false;
+                        }
+
+                        break;
+
+                    case "package_version_resolution":
+                        // Where several versions of a package match a use-package range, this engine takes
+                        // the highest. "unspecified" is the test saying it does not mind which.
+                        if ((value is "highest_version" or "unspecified") != wanted)
+                        {
+                            why = $"resolves a package version range to the highest match, not '{value}'";
+                            return false;
+                        }
+
+                        break;
+
+                    case "additional_normalization_form":
+                        // The four .NET provides, which are the four XPath names: NFC, NFD, NFKC and NFKD.
+                        // fully-normalized is a check on the result rather than a form to normalize to, and
+                        // is not one of these.
+                        if (NormalizesTo(value) != wanted)
+                        {
+                            why = wanted ? $"does not {value}" : $"does {value}";
+                            return false;
+                        }
+
+                        break;
+
+                    case "enable_assertions":
+                        // xsl:assert is always checked here. The specification's default is the other way
+                        // — assertions off unless asked for — so a test wanting them off is the one
+                        // this cannot present.
+                        if (!wanted)
+                        {
+                            why = "checks xsl:assert always, and cannot be asked not to";
+                            return false;
+                        }
+
+                        break;
+
+                    case "maximum_number_of_decimal_digits":
+                        // xs:decimal is .NET's decimal, which holds 28 significant digits against the 18 the
+                        // specification requires. A test needing more is naming a limit this one has.
+                        if ((int.TryParse(value, out int digits) && digits <= 28) != wanted)
+                        {
+                            why = wanted
+                                ? $"needs {value} decimal digits and keeps 28"
+                                : $"keeps 28 decimal digits";
+                            return false;
+                        }
+
+                        break;
+
+                    case "default_html_version":
+                        // With no html-version and no version, the html method writes HTML 4: no doctype of
+                        // its own, and the empty-element and escaping rules 4.01 asks for.
+                        if ((value is "4" or "4.0" or "4.01") != wanted)
+                        {
+                            why = $"writes HTML 4 by default, not {value}";
+                            return false;
+                        }
+
+                        break;
+
+                    case "supported_calendars_in_date_formatting_functions":
+                    case "default_calendar_in_date_formatting_functions":
+                        // The one calendar this engine formats dates in, which is therefore also its
+                        // default: the one the data model's dates are in, whose eras are BC and AD.
+                        // Another is written out the way the specification says to write an unsupported
+                        // one, a [Calendar: AD] prefix and the date in this one, which is not the same as
+                        // formatting in it.
+                        if ((value is "ISO" or "AD" or "ISO 8601") != wanted)
+                        {
+                            why = kind.StartsWith("default", StringComparison.Ordinal)
+                                ? $"formats dates in the AD calendar by default, not '{value}'"
+                                : $"does not format dates in the '{value}' calendar";
+                            return false;
+                        }
+
+                        break;
+
+                    case "unparsed_text_encoding":
+                        // What unparsed-text() assumes where the call names no encoding, which the
+                        // specification leaves to the processor for a resource that says nothing about
+                        // itself. Here it is UTF-8.
+                        if (value.Equals("UTF-8", StringComparison.OrdinalIgnoreCase) != wanted)
+                        {
+                            why = $"assumes UTF-8 for unparsed-text(), not {value}";
+                            return false;
+                        }
+
+                        break;
+
+                    case "default_output_encoding":
+                        if (value.Equals("UTF-8", StringComparison.OrdinalIgnoreCase) != wanted)
+                        {
+                            why = $"serializes as UTF-8 by default, not {value}";
+                            return false;
+                        }
+
+                        break;
+
+                    case "ignore_doc_failure":
+                        // document() raises where doc() would: FODC0002 reaches the stylesheet rather than
+                        // the call answering an empty sequence. XSLT 3.0 allows either.
+                        if (wanted)
+                        {
+                            why = "raises rather than ignoring a document() that cannot be read";
+                            return false;
+                        }
+
+                        break;
+
+                    case "default_language_for_numbering":
+                        if (SpellsNumbersIn(value) != wanted)
+                        {
+                            why = wanted
+                                ? $"does not spell numbers in '{value}' by default"
+                                : $"spells numbers in '{value}' by default";
+                            return false;
+                        }
+
+                        break;
+
+                    case "recognize_id_as_uri_fragment":
+                        // document('doc.xml#id') answers the element that id names, which is what XSLT 3.0
+                        // 20.1 lets a processor do for a media type that defines fragment identifiers.
+                        if (!wanted)
+                        {
+                            why = "reads a fragment identifier as an ID, and cannot be asked not to";
+                            return false;
+                        }
+
+                        break;
+
+                    case "detect_accumulator_cycles":
+                        // XTDE3400 rather than a stack that runs out: an accumulator building itself is
+                        // caught by a flag set while it is being built.
+                        if (!wanted)
+                        {
+                            why = "detects a cyclic accumulator, and cannot be asked not to";
+                            return false;
+                        }
+
+                        break;
+
+                    case "extension-function":
+                        // No caller can register one, so the only extension functions are EXSLT's Common
+                        // module, and no test declares a dependency on those.
+                        if (wanted)
+                        {
+                            why = $"needs the extension function {value}";
+                            return false;
+                        }
+
+                        break;
+
                     default:
                         // Anything else is a property of the processor that this driver has not been taught
-                        // to answer for — a calendar, a numbering combination, a collation URI. Skipping
-                        // names it in the report, which is how the list of them stays honest.
+                        // to answer for. Skipping names it in the report, which is how the list of them
+                        // stays honest.
                         why = $"declares a '{kind}' dependency";
                         return false;
                 }
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// Whether this engine's dates and durations reach the years a test needs.
+        /// </summary>
+        /// <remarks>
+        /// The limits are XSD 1.0's, which is the schema language this engine reads. Years before the
+        /// common era and years past four digits are both in its lexical space; year zero is not, 1.0
+        /// numbering 1 BC as <c>-0001</c>. XSD 1.1 renumbered that and is not what this reads.
+        /// </remarks>
+        /// <param name="value">What the dependency asks for, as the catalog writes it.</param>
+        private static bool SupportsYears(string value)
+        {
+            return value switch
+            {
+                "support negative year" => true,
+                "support year above 9999" => true,
+                "support year zero" => false,
+                _ => false,
+            };
+        }
+
+        /// <summary>
+        /// Whether this engine normalizes to every form a test names beyond NFC.
+        /// </summary>
+        /// <remarks>
+        /// The catalog writes the value as the word <c>support</c> and then the forms, so
+        /// <c>support NFD NFKC NFKD</c> asks for three. All four of XPath's forms are .NET's, and
+        /// <c>fully-normalized</c> is not among them: it is a check on the result rather than a form to
+        /// normalize to, and a test asking for it is asking for something this does not do.
+        /// </remarks>
+        /// <param name="value">What the dependency asks for, as the catalog writes it.</param>
+        private static bool NormalizesTo(string value)
+        {
+            string[] words = value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (string word in words)
+            {
+                if (word is "support" or "NFC" or "NFD" or "NFKC" or "NFKD")
+                {
+                    continue;
+                }
+
+                return false;
+            }
+
+            return words.Length > 0;
         }
 
         /// <summary>

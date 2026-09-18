@@ -1550,10 +1550,18 @@ namespace CodeDeeds.Xslt.Runtime
                 inner.Size = 1;
                 inner.Locals[rule.ValueSlot] = value;
 
-                return XdmTypeConversion.Apply(
-                    VariableInstruction.Evaluate(rule.Select, rule.Body, ref inner, this),
-                    accumulator.Type,
-                    AccumulatorTypeError);
+                // The rule's content is a sequence and not a document node. §18.2.2 gives the value as
+                // "the value of the expression in the select attribute of Q, or the contained sequence
+                // constructor", converted to the accumulator's declared type — which is item()* where
+                // none is declared. The rule that wraps a constructor's result in a document node is
+                // xsl:variable's (§9.3), and only where that declaration has no as attribute; nothing
+                // brings it here. An accumulator declared as="map(*)" is the case that shows the
+                // difference, its rules building maps that no document node could hold.
+                XPathValue produced = rule.Select is not null
+                    ? rule.Select.Evaluate(ref inner)
+                    : VariableInstruction.CaptureSequence(rule.Body, ref inner, this);
+
+                return XdmTypeConversion.Apply(produced, accumulator.Type, AccumulatorTypeError);
             }
 
             return value;

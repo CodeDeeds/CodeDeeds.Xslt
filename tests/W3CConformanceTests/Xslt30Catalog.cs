@@ -244,10 +244,13 @@ namespace CodeDeeds.Xslt.Conformance
                 // The context document's own validation, which is what the transformation is given.
                 validates |= strict;
 
-                if ((string?)source.Attribute("streaming") == "true")
-                {
-                    unsupported ??= "environment asks for a streamed source document";
-                }
+                // A source marked streaming="true" is read as any other is. The attribute says the test
+                // intends the document to be streamed, not that it must be: this engine accepts every
+                // streamable construct and evaluates it over a tree it holds in memory, so a stylesheet
+                // written to be streamed runs here and produces what it would produce. A test that is
+                // about streaming itself declares the streaming feature and is skipped for that instead;
+                // the fifteen left are ordinary tests — accumulator-034 even sets its own
+                // streamable="no" — that happened to mark the source they read.
 
                 sourceFile = (string?)source.Attribute("file");
                 sourceContent = (string?)source.Element(ns + "content");

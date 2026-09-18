@@ -680,6 +680,40 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
+        [DataRow("2005-12-04", "1")]
+        [DataRow("2005-12-07", "2")]
+        [DataRow("2005-12-10", "2")]
+        [DataRow("2005-12-13", "3")]
+        [DataRow("2005-12-31", "5")]
+        [DataRow("2006-01-03", "1")]
+        [DataRow("2006-01-09", "2")]
+        [DataRow("2006-01-30", "5")]
+        [DataRow("2006-02-02", "1")]
+        [DataRow("2006-02-26", "4")]
+        [DataRow("2006-03-19", "3")]
+        [DataRow("2006-04-09", "1")]
+        [DataRow("2006-04-12", "2")]
+        public void TheWeekInAMonthIsCountedTheWayTheWeekInAYearIs(string date, string expected)
+        {
+            // ISO 8601's rule for a year applied to a month: weeks run Monday to Sunday and week 1 is the
+            // one holding the first Thursday. Counting the day of the month in sevens is the obvious
+            // reading and is not this one — 7 December 2005 is in the second week and not the first,
+            // December having begun on a Thursday, so its first week runs from 28 November. 9 April 2006
+            // is a Sunday in the first week of April for the same reason, April having begun on a
+            // Saturday: the week of the first Thursday starts on the 3rd.
+            Assert.AreEqual(expected, Value(Writes($"format-date(xs:date('{date}'), '[w]')")));
+        }
+
+        [TestMethod]
+        public void ADayBeforeTheFirstWeekOfItsMonthBelongsToTheMonthBefore()
+        {
+            // 1 January 2006 was a Sunday, and the week that ends on it holds no Thursday of January, so
+            // January's first week begins on the 2nd. The 1st is in the week before that, which is
+            // December's fifth — there being no week zero to put it in.
+            Assert.AreEqual("5", Value(Writes("format-date(xs:date('2006-01-01'), '[w]')")));
+        }
+
+        [TestMethod]
         [DataRow("2026-08-20", "[FNn,3-4]", "Thur")]
         [DataRow("2026-08-20", "[FNn,3-5]", "Thurs")]
         [DataRow("2026-08-20", "[FNn,2-2]", "Th")]
