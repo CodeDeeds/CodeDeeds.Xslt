@@ -6654,8 +6654,8 @@ across `decl/accept` and `decl/expose` on 5 March 2023 while these two files wer
 Applied to a clone of the suite, both tests raise the `XTSE3050` they were written for. A third
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
-validation settles about a constructed node*. With all five the 3.0 run reads **7,914 of 7,924** and the
-schema-aware run **8,515 of 8,526**. The patch is not applied here, and the figures in these notes do not
+validation settles about a constructed node*. With all five the 3.0 run reads **7,915 of 7,924** and the
+schema-aware run **8,516 of 8,526**. The patch is not applied here, and the figures in these notes do not
 include it. A measurement is worth something because of what it is taken against, and a patch kept in the
 repository and offered upstream is worth more than five tests counted differently at home.
 
@@ -7196,6 +7196,33 @@ The schema-aware run goes from 8,509 of 8,526 to **8,510** on both backends, and
 empty. Nothing else moves: without a schema there are no user-defined types for a name to collide with,
 and the 3.0, 2.0 and XPath runs keep their failure sets test for test. One new unit test, 2,816 in all.
 
+### The variable weighting that is two rules with one answer
+
+`sort-079` sorts six spellings of *deluge* nine times over: three collation strengths, and at each of them
+the three values the UCA `alternate` parameter takes, which is what says how much a space or a hyphen is
+worth. `non-ignorable` weighs one as an ordinary character. `blanked` ignores it outright. `shifted` gives
+it a weight at the fourth level and none at the first three. The engine had the first two and refused the
+third, so six of the nine assertions passed and three did not.
+
+`System.Globalization.CompareInfo` has `IgnoreSymbols`, which is `blanked`, and nothing for `shifted` —
+which is what the earlier note in this file said, and why it was left. What that reading missed is that the
+fourth level is only reached by a comparison that goes that far. At primary, secondary or tertiary strength
+a shifted character has no weight the comparison will ever look at, and having no weight that is looked at
+is having none: `shifted` and `blanked` settle every pair the same way, and `IgnoreSymbols` says both. So
+the engine honours `shifted` up to tertiary strength, and goes on refusing it above, where that fourth
+weight is the whole of what tells two strings apart. The XPath suite has the case that proves the line is
+in the right place: `compare-044` asks for `database` and `data base` to differ at quaternary strength, and
+under `blanked` they do not.
+
+The test's author left a note saying he was not convinced by the expected results for `shifted`. They are
+the same as the ones for `blanked`, which is what makes them look wrong; they are also what the algorithm
+gives.
+
+The 3.0 run goes from 7,911 of 7,924 to **7,912** and the schema-aware run from 8,510 of 8,526 to
+**8,511**, both on both backends, and `insn/sort` is empty. The 2.0 run does not move, no 2.0 test naming
+the parameter, and neither do the XPath runs, which keep their failure sets test for test. One new unit
+test, 2,817 in all.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error
@@ -7412,12 +7439,12 @@ table; 672 tests ask for it and are skipped.
   `xsl:expose` a component a package accepted rather than declared. That is `decl/override`, `decl/package`
   and `decl/use-package` together: 5 failures, down from 121.
 
-- **Five one-offs that were looked at and left**, each for a reason worth writing down rather than
-  rediscovering. `sort-079` asks for the UCA `alternate` option — variable weighting, where a space or a
-  hyphen is either ignored outright or sorted before every ordinary character — which
-  `System.Globalization.CompareInfo` does not expose; the test's own author records that he is not
-  convinced by the expected results either. `base-uri-052` reads its source through XInclude, which nothing
-  here does. `doe-0191` writes `disable-output-escaping` inside an `xsl:try`, whose content is built as a
+- **Four one-offs that were looked at and left**, each for a reason worth writing down rather than
+  rediscovering. `base-uri-052` reads its source through XInclude, which nothing here does — and doing
+  it would not be enough: the test asserts that an `xml:base` already on an included element survives base
+  URI fixup, where XInclude says "if an `xml:base` attribute information item is already present, it is
+  replaced by the new attribute". Its own comment says so, and says Xerces is what it follows instead.
+  `doe-0191` writes `disable-output-escaping` inside an `xsl:try`, whose content is built as a
   tree so that the catch can discard it, and the flag is a serialization property no tree carries; the
   test's comment says Saxon cannot do it either. `accumulator-038` starts at a named template of an
   `xsl:package` that does not say `visibility="public"` — which the suite itself decided is not an eligible

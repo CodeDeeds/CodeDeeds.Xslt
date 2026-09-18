@@ -246,7 +246,7 @@ the expected code left behind.
 
 The corrections are kept here as [`suite-corrections.patch`](suite-corrections.patch), which `git apply`
 takes from the root of a clone of the suite. With it all five tests raise the code they were written for
-and the 3.0 run goes from 7,911 to **7,914**, the schema-aware run from 8,510 to **8,515**. It is checked
+and the 3.0 run goes from 7,912 to **7,915**, the schema-aware run from 8,511 to **8,516**. It is checked
 in rather than applied: every figure in this document is measured against the suite as published, and the
 patch is there to be offered upstream rather than kept as a local advantage.
 
@@ -687,7 +687,7 @@ The largest skip left is not a failure either: **6,518 are XSLT 3.0 tests**, rea
 
 ## What the 3.0 run says
 
-That opt-in run measures the XSLT 3.0 half at **7,911 of 7,924, 99.8%**, from 4,994 of 6,427 when it was first
+That opt-in run measures the XSLT 3.0 half at **7,912 of 7,924, 99.8%**, from 4,994 of 6,427 when it was first
 taken. It reads more tests than it did as well as passing more of them, which is the part worth reading twice:
 opening a feature the suite writes *around* stops whole files being skipped, so the denominator moves too — and
 the percentage can fall while the work goes forward, which is why the two numbers are always given together.

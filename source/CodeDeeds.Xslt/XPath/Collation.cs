@@ -506,10 +506,10 @@ namespace CodeDeeds.Xslt.XPath
         /// <remarks>
         /// Every parameter is either honoured or refused, and a refusal only becomes an error where the URI
         /// says <c>fallback=no</c>. Honoured: <c>lang</c>, <c>strength</c>, <c>caseLevel</c>,
-        /// <c>normalization</c>, and <c>caseFirst=lower</c>, which is what ICU already does for a language
-        /// with no rule of its own. Refused — <c>alternate</c>, <c>backwards</c>, <c>caseFirst=upper</c>,
-        /// <c>maxVariable</c>, <c>numeric</c>, <c>reorder</c>, <c>version</c>, quaternary strength — are
-        /// things <see cref="CompareOptions"/> cannot express.
+        /// <c>normalization</c>, <c>alternate</c>, and <c>caseFirst=lower</c>, which is what ICU already
+        /// does for a language with no rule of its own. Refused — <c>backwards</c>,
+        /// <c>caseFirst=upper</c>, <c>maxVariable</c>, <c>numeric</c>, <c>reorder</c>, <c>version</c>,
+        /// quaternary strength — are things <see cref="CompareOptions"/> cannot express.
         /// </remarks>
         private static Collation Uca(string uri, string query)
         {
@@ -517,6 +517,8 @@ namespace CodeDeeds.Xslt.XPath
             int strength = 3;
             bool caseLevel = false;
             bool blankVariables = false;
+            bool shiftVariables = false;
+            bool aboveTertiary = false;
             bool fallback = true;
             string? refused = null;
 
@@ -563,7 +565,11 @@ namespace CodeDeeds.Xslt.XPath
                             case "secondary" or "2": strength = 2; break;
                             case "tertiary" or "3": strength = 3; break;
                             case "identical" or "5": strength = 5; break;
-                            case "quaternary" or "4": strength = 3; refused ??= "quaternary strength"; break;
+                            case "quaternary" or "4":
+                                strength = 3;
+                                aboveTertiary = true;
+                                refused ??= "quaternary strength";
+                                break;
                             default: throw Unknown(uri, $"'{value}' is not a collation strength");
                         }
 
@@ -588,11 +594,13 @@ namespace CodeDeeds.Xslt.XPath
 
                     case "alternate":
                         // 'blanked' says the variable characters — punctuation, spaces, symbols — weigh
-                        // nothing at all, which is what IgnoreSymbols does. 'shifted' weighs them at the
-                        // fourth level, and .NET has no way to say that.
+                        // nothing at all, which is what IgnoreSymbols does. 'shifted' gives them a weight at
+                        // the fourth level instead; what that comes to depends on the strength, which the
+                        // parameters may not have said yet, so it is settled once the whole URI is read.
                         switch (value)
                         {
                             case "blanked": blankVariables = true; break;
+                            case "shifted": shiftVariables = true; break;
                             case "non-ignorable": break;
                             default: refused ??= $"'alternate={value}'"; break;
                         }
@@ -602,6 +610,25 @@ namespace CodeDeeds.Xslt.XPath
                     default:
                         refused ??= $"'{key}'";
                         break;
+                }
+            }
+
+            if (shiftVariables)
+            {
+                // Under 'shifted' a variable character keeps no primary, secondary or tertiary weight of
+                // its own and is given a fourth-level one instead. A comparison that stops at or before the
+                // third level never reaches the fourth, so up to tertiary strength 'shifted' settles every
+                // pair exactly as 'blanked' does, and that much can be said with IgnoreSymbols. Above it,
+                // where that fourth weight is the whole of what tells two strings apart, it cannot: the
+                // suite's compare-044 asks for 'database' and 'data base' to differ at quaternary strength
+                // and they are equal under blanked.
+                if (strength <= 3 && !aboveTertiary)
+                {
+                    blankVariables = true;
+                }
+                else
+                {
+                    refused ??= "'alternate=shifted' above tertiary strength";
                 }
             }
 

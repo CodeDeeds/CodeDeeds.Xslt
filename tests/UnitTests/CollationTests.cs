@@ -218,6 +218,46 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
+        public void VariableCharactersShiftedAwayWeighNothingUntilTheFourthLevel()
+        {
+            // Under alternate=shifted a variable character — a space, a hyphen — keeps no primary,
+            // secondary or tertiary weight of its own and is given a fourth-level one instead. A comparison
+            // that stops at or before the third level never reaches the fourth, so up to tertiary strength
+            // shifted settles every pair as blanked does. The suite's sort-079 measures that over all three.
+            const string Uca = "http://www.w3.org/2013/collation/UCA?lang=en";
+
+            foreach (string strength in new[] { "primary", "secondary", "tertiary" })
+            {
+                string shifted = $"{Uca};strength={strength};alternate=shifted";
+                string blanked = $"{Uca};strength={strength};alternate=blanked";
+                string plain = $"{Uca};strength={strength};alternate=non-ignorable";
+
+                // The hyphen weighs nothing, so what is left is delug against deluge.
+                Assert.AreEqual("-1", Writes($"compare('delug', 'delu-ge', '{shifted}')"), strength);
+                Assert.AreEqual("-1", Writes($"compare('delug', 'delu-ge', '{blanked}')"), strength);
+
+                // Where it weighs as a character of its own it sorts before every letter, and the answer
+                // is the other way about.
+                Assert.AreEqual("1", Writes($"compare('delug', 'delu-ge', '{plain}')"), strength);
+
+                // A trailing one makes no difference at all, which is the case shifted and blanked are
+                // said to differ over — and they do, at the fourth level, which none of these reaches.
+                Assert.AreEqual("0", Writes($"compare('deluge', 'deluge-', '{shifted}')"), strength);
+                Assert.AreEqual("-1", Writes($"compare('deluge', 'deluge-', '{plain}')"), strength);
+            }
+
+            // At the identical level the fourth weight is what tells two strings apart, so there the
+            // difference between the two is real and cannot be expressed.
+            Assert.AreEqual(
+                "0", Writes($"compare('a', 'a', '{Uca};strength=identical;alternate=shifted')"));
+
+            XsltException error = Assert.ThrowsExactly<XsltException>(
+                () => Writes($"compare('a', 'a', '{Uca};strength=identical;alternate=shifted;fallback=no')"));
+
+            Assert.AreEqual("FOCH0002", error.Code);
+        }
+
+        [TestMethod]
         public void AnUnknownCollationIsRefusedRatherThanQuietlyIgnored()
         {
             foreach (string uri in new[]
@@ -242,10 +282,10 @@ namespace CodeDeeds.Xslt.UnitTests
             // and an error in the other, and that difference is the whole of what fallback means.
             const string Uca = "http://www.w3.org/2013/collation/UCA";
 
-            Assert.AreEqual("0", Writes($"compare('a', 'a', '{Uca}?lang=en;alternate=shifted')"));
+            Assert.AreEqual("0", Writes($"compare('a', 'a', '{Uca}?lang=en;numeric=yes')"));
 
             XsltException error = Assert.ThrowsExactly<XsltException>(
-                () => Writes($"compare('a', 'a', '{Uca}?lang=en;alternate=shifted;fallback=no')"));
+                () => Writes($"compare('a', 'a', '{Uca}?lang=en;numeric=yes;fallback=no')"));
 
             Assert.AreEqual("FOCH0002", error.Code);
 
