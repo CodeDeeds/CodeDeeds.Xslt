@@ -40,7 +40,7 @@ namespace CodeDeeds.Xslt.Compiler
     /// get <see cref="Default"/>, which is the behaviour every mode had before 3.0.
     /// </remarks>
     /// <param name="OnNoMatch">What to do with a node no rule in this mode matches.</param>
-    /// <param name="WarnOnNoMatch">Whether to report such a node through the message writer.</param>
+    /// <param name="WarnOnNoMatch">Whether to report such a node as a warning.</param>
     /// <param name="FailOnMultipleMatch">
     /// Whether two rules of one precedence and priority both matching a node is <c>XTDE0540</c> rather than
     /// the later one winning, which is <c>on-multiple-match="fail"</c>.
@@ -55,12 +55,18 @@ namespace CodeDeeds.Xslt.Compiler
     /// Whether the mode was declared <c>typed="strict"</c> in particular, which holds every template rule
     /// in it to a pattern whose first step names a declared element (<c>XTSE3105</c>).
     /// </param>
+    /// <param name="WarnOnMultipleMatch">
+    /// Whether two rules of one precedence and priority both matching is to be reported as a warning,
+    /// which is <c>warning-on-multiple-match="yes"</c>. Off unless asked for, because the question costs a
+    /// second search of the rules for every node the first one answered.
+    /// </param>
     internal readonly record struct ModeDeclaration(
         OnNoMatch OnNoMatch,
         bool WarnOnNoMatch,
         bool FailOnMultipleMatch = false,
         bool? Typed = null,
-        bool StrictlyTyped = false)
+        bool StrictlyTyped = false,
+        bool WarnOnMultipleMatch = false)
     {
         /// <summary>The rules a mode follows when the stylesheet says nothing about it.</summary>
         public static ModeDeclaration Default => new ModeDeclaration(OnNoMatch.TextOnlyCopy, false);

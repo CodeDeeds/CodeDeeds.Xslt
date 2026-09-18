@@ -357,6 +357,94 @@ namespace CodeDeeds.Xslt
         }
 
         /// <summary>
+        /// Runs the stylesheet with no document to transform, starting at the template or function the
+        /// options name, and gives the result as the sequence of items it is rather than as a tree.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A stylesheet need not produce a document. An initial function returns whatever its body returns,
+        /// and <c>build-tree="no"</c> says the same of a template: the result is a sequence, and its items
+        /// may be atomic values, parentless attributes or maps as readily as elements. Serializing that
+        /// loses what the items were — the integer 42 and the string "42" serialize alike — so a
+        /// caller who wants the values asks for them here.
+        /// </para>
+        /// <para>
+        /// What the other methods do is build a document from the same sequence, which is what
+        /// <c>build-tree="yes"</c>, the default, asks for. Ask for the sequence when the stylesheet says no.
+        /// </para>
+        /// </remarks>
+        /// <returns>The items of the result, in order.</returns>
+        /// <exception cref="XsltException">
+        /// No entry point was named, or the stylesheet declares none of that name.
+        /// </exception>
+        public IReadOnlyList<XPathValue> TransformToSequence()
+        {
+            return RunToSequence(XdmTreeBuilder.Empty(), hasSource: false, release: true);
+        }
+
+        /// <summary>
+        /// Transforms XML held in a string, giving the result as the sequence of items it is rather than as
+        /// a tree.
+        /// </summary>
+        /// <param name="xmlInput">The document to transform, as XML text.</param>
+        /// <returns>The items of the result, in order.</returns>
+        /// <remarks>See <see cref="TransformToSequence()"/> for when a sequence is what to ask for.</remarks>
+        public IReadOnlyList<XPathValue> TransformXmlToSequence(string xmlInput)
+        {
+            ArgumentNullException.ThrowIfNull(xmlInput);
+            return RunToSequence(ParseXmlText(xmlInput), hasSource: true, release: true);
+        }
+
+        /// <summary>
+        /// Transforms a tree the caller already has, giving the result as the sequence of items it is
+        /// rather than as a tree.
+        /// </summary>
+        /// <param name="input">The document to transform, which is left as it was.</param>
+        /// <returns>The items of the result, in order.</returns>
+        /// <remarks>See <see cref="TransformToSequence()"/> for when a sequence is what to ask for.</remarks>
+        public IReadOnlyList<XPathValue> TransformToSequence(XdmTree input)
+        {
+            ArgumentNullException.ThrowIfNull(input);
+            return RunToSequence(input, hasSource: true, release: false);
+        }
+
+        /// <summary>
+        /// Runs the transformation into a sequence rather than into a tree or a writer.
+        /// </summary>
+        /// <param name="input">The document to transform.</param>
+        /// <param name="hasSource">Whether there is a source document, or the run starts at an entry point.</param>
+        /// <param name="release">
+        /// Whether the input's storage may go back to the pool it came from, which it may when this
+        /// transformation parsed it and must not when the caller handed it over.
+        /// </param>
+        private IReadOnlyList<XPathValue> RunToSequence(XdmTree input, bool hasSource, bool release)
+        {
+            try
+            {
+                SequenceCaptureTarget output = new SequenceCaptureTarget(baseUri: m_options.InputUri)
+                {
+                    StandsForFinalOutput = true,
+                };
+
+                XsltRuntime runtime = new XsltRuntime(m_stylesheet, input, output, m_options, hasSource)
+                {
+                    MessageWriter = m_options.MessageWriter,
+                    WarningWriter = m_options.WarningWriter,
+                };
+
+                runtime.Run();
+                return XdmSequence.Items(output.Finish());
+            }
+            finally
+            {
+                if (release)
+                {
+                    input.ReleaseStorage();
+                }
+            }
+        }
+
+        /// <summary>
         /// Runs the transformation into a tree rather than into a writer.
         /// </summary>
         /// <param name="input">The document to transform.</param>
@@ -378,6 +466,7 @@ namespace CodeDeeds.Xslt
                 XsltRuntime runtime = new XsltRuntime(m_stylesheet, input, output, m_options, hasSource)
                 {
                     MessageWriter = m_options.MessageWriter,
+                    WarningWriter = m_options.WarningWriter,
                 };
 
                 runtime.Run();
@@ -622,6 +711,7 @@ namespace CodeDeeds.Xslt
                 XsltRuntime gathering = new XsltRuntime(m_stylesheet, input, capture, m_options, hasSource)
                 {
                     MessageWriter = m_options.MessageWriter,
+                    WarningWriter = m_options.WarningWriter,
                 };
 
                 gathering.Run();
@@ -634,6 +724,7 @@ namespace CodeDeeds.Xslt
             XsltRuntime runtime = new XsltRuntime(m_stylesheet, input, output, m_options, hasSource)
             {
                 MessageWriter = m_options.MessageWriter,
+                WarningWriter = m_options.WarningWriter,
             };
 
             runtime.Run();

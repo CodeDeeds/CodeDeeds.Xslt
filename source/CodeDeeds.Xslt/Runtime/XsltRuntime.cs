@@ -481,6 +481,17 @@ namespace CodeDeeds.Xslt.Runtime
         public TextWriter? MessageWriter { get; set; }
 
         /// <summary>
+        /// Gets or sets the sink that receives warnings, which is the message sink where the caller named
+        /// no other.
+        /// </summary>
+        /// <remarks>
+        /// Set alongside <see cref="MessageWriter"/> rather than read from the options, because
+        /// <c>fn:transform</c> runs a transformation whose messages the caller may have asked to be
+        /// dropped, and a warning is a message for that purpose.
+        /// </remarks>
+        public TextWriter? WarningWriter { get; set; }
+
+        /// <summary>
         /// Where the result documents go, for a transformation <c>fn:transform</c> is running.
         /// </summary>
         /// <remarks>
@@ -1716,6 +1727,13 @@ namespace CodeDeeds.Xslt.Runtime
             MessageWriter?.WriteLine(message);
         }
 
+        /// <summary>Writes a warning the stylesheet asked for, where anything is listening.</summary>
+        /// <param name="warning">What to say.</param>
+        private void Warn(string warning)
+        {
+            (WarningWriter ?? MessageWriter)?.WriteLine(warning);
+        }
+
         /// <summary>
         /// Applies the best-matching template to a node, falling back to the built-in rule for its kind when
         /// no template matches.
@@ -1756,15 +1774,24 @@ namespace CodeDeeds.Xslt.Runtime
             TemplateIndex index = IndexFor(context.Tree);
             TemplateRule? rule = index.Find(node, mode, ref context, int.MaxValue);
 
+            // Asked only where the mode asked to be told, the question costing a second search of the rules
+            // for every node the first search answered.
             if (rule is TemplateRule chosen
                 && m_stylesheet.ModeRules.TryGetValue(mode, out ModeDeclaration failing)
-                && failing.FailOnMultipleMatch
+                && (failing.FailOnMultipleMatch || failing.WarnOnMultipleMatch)
                 && index.HasRivalOfEqualRank(node, mode, ref context, chosen))
             {
-                throw XsltErrors.Error(
-                    XsltErrorCode.XTDE0540,
-                    "More than one template rule of the same precedence and priority matches this node, and "
-                    + "the mode says that is a failure rather than the later rule winning.");
+                if (failing.FailOnMultipleMatch)
+                {
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XTDE0540,
+                        "More than one template rule of the same precedence and priority matches this node, "
+                        + "and the mode says that is a failure rather than the later rule winning.");
+                }
+
+                Warn(
+                    $"More than one template rule of the same precedence and priority matches "
+                    + $"{Describe(context.Tree, node)}; the one declared last is the one used.");
             }
 
             return rule;
@@ -2896,8 +2923,7 @@ namespace CodeDeeds.Xslt.Runtime
 
             if (rules.WarnOnNoMatch)
             {
-                m_options.MessageWriter?.WriteLine(
-                    $"No template rule matched {Describe(context.Tree, node)} in this mode.");
+                Warn($"No template rule matched {Describe(context.Tree, node)} in this mode.");
             }
 
             if (rules.OnNoMatch != OnNoMatch.TextOnlyCopy)
@@ -3361,13 +3387,20 @@ namespace CodeDeeds.Xslt.Runtime
             }
 
             if (m_stylesheet.ModeRules.TryGetValue(mode, out ModeDeclaration failing)
-                && failing.FailOnMultipleMatch
+                && (failing.FailOnMultipleMatch || failing.WarnOnMultipleMatch)
                 && index.HasRivalOfEqualRankForItem(item, mode, ref context, rule))
             {
-                throw XsltErrors.Error(
-                    XsltErrorCode.XTDE0540,
-                    "More than one template rule of the same precedence and priority matches this item, and "
-                    + "the mode says that is a failure rather than the later rule winning.");
+                if (failing.FailOnMultipleMatch)
+                {
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XTDE0540,
+                        "More than one template rule of the same precedence and priority matches this item, "
+                        + "and the mode says that is a failure rather than the later rule winning.");
+                }
+
+                Warn(
+                    "More than one template rule of the same precedence and priority matches an item; "
+                    + "the one declared last is the one used.");
             }
 
             InvokeRule(rule, parameters, mode, ref context);

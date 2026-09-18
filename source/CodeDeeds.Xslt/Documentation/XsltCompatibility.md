@@ -17,13 +17,13 @@ Conformance as last measured, on 18 September 2026, against the W3C suites (see 
 
 | Suite | Result |
 | --- | --- |
-| XSLT 3.0 test suite, 3.0 processor | 7,928 of 7,938, 99.9% |
-| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,616 of 5,639, 99.6% |
+| XSLT 3.0 test suite, 3.0 processor | 7,961 of 7,971, 99.9% |
+| XSLT 3.0 test suite, 2.0 subset on a 2.0 processor | 5,621 of 5,644, 99.6% |
 | QT3 (XPath), 3.1 | 18,268 of 18,285, 99.9% |
 | QT3 (XPath), 2.0 | 14,553 of 14,577, 99.8% |
 
 The 2,900 streaming tests are skipped by design. The 686 schema-aware tests are read only by the driver's
-opt-in `--schema` run, which stands at 8,526 of 8,540 (99.8%), the same on both backends; the figures
+opt-in `--schema` run, which stands at 8,560 of 8,573 (99.8%), the same on both backends; the figures
 above are the run without it.
 
 ## Not implemented, and not planned
@@ -81,6 +81,7 @@ above are the run without it.
 | Document order across documents | Nodes of several documents are ordered by the sequence the documents were loaded in. Stable within a transformation, which is all the specification asks. |
 | Binary ordering | `xs:hexBinary` and `xs:base64Binary` are ordered octet by octet at every version, which XPath 3.1 defines and 2.0 left undefined. |
 | `xsl:message` | Presented as XML to `XsltOptions.MessageWriter`, one message per line. A message is a document node built from the instruction's content, so one writing an element writes the element rather than the text inside it; how a message is presented is left to the processor and this is what the conformance suite asks about. |
+| Warnings | `xsl:mode`'s `warning-on-no-match` and `warning-on-multiple-match` both default to *no*, which XSLT 3.0 §6.6.1 leaves to the processor: a stylesheet that has not asked is not told, and the second search of the template rules that the multiple-match question costs is not paid by a transformation that would throw the answer away. What a mode does ask for goes to `XsltOptions.WarningWriter`, one warning per line, falling back to `MessageWriter` where the caller has named no other. Neither warning is an error and neither changes the result: two rules of one precedence and priority still leave the last-declared one winning unless `on-multiple-match="fail"` says otherwise. |
 | Output details | Indentation uses `\n` and indents uniformly; where exactly lines break is the processor's choice. `xsl:vendor` is `CodeDeeds` and `xsl:vendor-url` is the repository, `https://github.com/CodeDeeds/CodeDeeds.Xslt`. |
 
 ## Using it from .NET
@@ -95,6 +96,7 @@ above are the run without it.
 | `XsltOptions.DynamicEvaluation` | `xsl:evaluate` is on by default and can be switched off, which makes `element-available('xsl:evaluate')` false. |
 | `XsltOptions.EnvironmentVariablesEnabled` | Off by default, so `environment-variable()` and `available-environment-variables()` answer nothing. On, they read the process's environment as it stood when the transformation first asked. |
 | `XsltOptions.CollationResolver` | Collations of the caller's own, as `XsltCollation` subclasses under URIs of the caller's choosing, for `xsl:sort`, `xsl:for-each-group`, `xsl:key`, `default-collation` and every function that takes a collation. The three collations the specification defines are provided without one (see *Collations* under Partly implemented for the UCA parameters); any other URI is `FOCH0002`. A caller's collation that makes no key cannot group, key or `distinct-values()`, and one that does not match substrings cannot `contains()`; both are `FOCH0004`. |
+| `Xslt.TransformToSequence`, `TransformXmlToSequence` | The result as the sequence of items the stylesheet produced, rather than as the document node `build-tree="yes"` — the default — wraps that sequence in. `build-tree="no"` says not to wrap it, and so does starting at an `XsltOptions.InitialFunction`, whose result is whatever the function returns: the items may be atomic values, parentless attributes or maps as readily as elements. Serializing loses what they were, the integer 42 and the string "42" being the same two characters written down, so a caller who wants the values asks here. Three overloads matching the three tree methods: no input, XML text, or a tree the caller already has. |
 | `Xslt.TransformXmlToTree`, `TransformToTree`, `Transform(XdmTree)` | Trees in and trees out, for chaining transformations or reading a result rather than writing it. `TransformXmlToTree` and `TransformToTree()` give the result as the document node the transformation produced; `TransformToTree(XdmTree)` takes one back and gives another; `Transform(XdmTree)` and its writer overload serialize one. Nothing is serialized on the way out, so `xsl:output` is not consulted and atomic values are written into the tree as their string values, as the content of an `xsl:variable` is. The input tree is read and not altered, so one document may be transformed by several stylesheets. What this saves over serializing and parsing back is not only the round trip: a type annotation is in the tree and not in the text, so a schema-aware result loses its types the moment it becomes XML. |
 | `XsltOptions.SchemaAware`, `SchemaResolver`, `Schemas`, `InputValidation` | Schema awareness, off by default (see *Schema awareness* under Partly implemented). `InputValidation` is `Strip` by default and needs `SchemaAware`; `Strict` validates the input the caller hands in against a top-level declaration of its document element (`XTTE1512` where there is none, `XTTE1510` where it is invalid) and `Lax` leaves an undeclared document untyped (`XTTE1515` where a declared one is invalid). Validation costs about five times the parse and nothing else; an unvalidated document is read as it always was. Validation of what the stylesheet constructs is asked for per instruction, with `validation` or `type` and the stylesheet's `default-validation`, not through the options. |
 | `ResolvedResource.Validation` | How a document the stylesheet fetched for itself is to be validated. `document()`, `doc()` and `collection()` read what they find as it stands, whatever `InputValidation` says, since that setting is about the input the caller supplied; a resolver that knows what it is handing over can ask for it to be validated instead. Needs a schema-aware stylesheet with schemas in scope, and is ignored for anything that is not a document. |

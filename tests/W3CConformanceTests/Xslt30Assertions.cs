@@ -125,6 +125,27 @@ namespace CodeDeeds.Xslt.Conformance
                 case "assert-message":
                     return CheckMessage(assertion, outcome);
 
+                case "assert-warning":
+                    return CheckWarning(outcome);
+
+                // The five assertions about the result as a sequence of items rather than as a document.
+                // Each is a question with one shape, so each is asked by writing the question out and
+                // putting it to the same evaluator.
+                case "assert-eq":
+                    return CheckItems(assertion, outcome, $"($result) eq ({assertion.Value})");
+
+                case "assert-deep-eq":
+                    return CheckItems(assertion, outcome, $"deep-equal(($result), ({assertion.Value}))");
+
+                case "assert-type":
+                    return CheckItems(assertion, outcome, $"($result) instance of {assertion.Value}");
+
+                case "assert-count":
+                    return CheckItems(assertion, outcome, $"count($result) eq {assertion.Value}");
+
+                case "assert-empty":
+                    return CheckItems(assertion, outcome, "empty($result)");
+
                 default:
                     return Skip($"assertion '{assertion.Name.LocalName}' is not one this driver can present");
             }
@@ -171,6 +192,12 @@ namespace CodeDeeds.Xslt.Conformance
                         Directory = outcome.Directory,
                         ResultUri = outcome.ResultUri,
                         Schemas = outcome.Schemas,
+
+                        // What a message is, as items: one string. The driver collects each message as
+                        // text, so an assert-eq inside an assert-message — which is how avt-0701 asks
+                        // what its message said — is a comparison with a string, and saying so is
+                        // what lets it be asked at all.
+                        Values = () => new[] { XPathValue.FromString(message) },
                     });
 
                 if (last.Outcome == Outcome.Passed)
@@ -180,6 +207,36 @@ namespace CodeDeeds.Xslt.Conformance
             }
 
             return last;
+        }
+
+        /// <summary>Asserts that the run warned about something.</summary>
+        /// <remarks>
+        /// <para>
+        /// The catalog writes this one empty: what it asserts is that a warning was issued, not what the
+        /// warning said. Which is all it could assert, the form of a warning being left to the processor
+        /// by XSLT 3.0 §6.6.1 along with where it goes. Every test asking it declares a mode
+        /// <c>warning-on-no-match="yes"</c> or <c>warning-on-multiple-match="yes"</c> and then arranges for
+        /// the condition to arise.
+        /// </para>
+        /// <para>
+        /// The same section leaves the default value of both attributes to the processor, and this one
+        /// says no to both, so a warning is issued where a stylesheet has asked for one and nowhere else.
+        /// That is what makes the assertion worth checking rather than trivially true: mode-0803 and
+        /// mode-1441 arrange for exactly the same conditions with the attribute set to no and assert
+        /// nothing here, and a processor warning regardless would pass those without being measured by
+        /// them.
+        /// </para>
+        /// </remarks>
+        private static TestResult CheckWarning(Transformation outcome)
+        {
+            if (outcome.Warnings.Count > 0)
+            {
+                return Pass();
+            }
+
+            return outcome.Error is not null
+                ? Fail($"error raised: {outcome.Error}")
+                : Fail("the transformation issued no warning");
         }
 
         private static TestResult CheckError(XElement assertion, Transformation outcome)
@@ -256,16 +313,192 @@ namespace CodeDeeds.Xslt.Conformance
                 return Fail($"error raised: {outcome.Error}");
             }
 
-            XdmTree? tree = Parse(outcome.Result);
+            XPathStaticContext staticContext = ContextForAssertion(assertion, outcome);
 
-            if (tree is null)
+            Expr compiled;
+
+            try
             {
-                return Skip("the result is not well-formed XML, so an XPath assertion cannot be put to it");
+                compiled = XPathParser.Parse(assertion.Value, staticContext);
+            }
+            catch (XsltException exception)
+            {
+                // The assertion is the driver's instrument. One this engine cannot read measures the
+                // instrument rather than the test, so it is skipped and named.
+                return Skip($"the assertion expression could not be evaluated: {Flat(exception.Message)}");
             }
 
-            // A result document knows where it was written, which is what base-uri() of its nodes is.
-            tree.DocumentUri = outcome.ResultUri;
+            // One result in three renderings, asked in turn, and an assertion the engine satisfies in any
+            // of them it satisfies. The text is the result after a serializer has been over it, which is
+            // what most assertions are written against and the only rendering that shows what the
+            // serializer did. It is also the one that loses the most: type annotations do not survive the
+            // round trip, indent="yes" puts whitespace between elements that the result tree never held,
+            // an html or json method writes text no XML parser will read at all, and a build-tree="no" run
+            // has no document to write. So where it does not answer yes, the tree the transformation
+            // produced is asked, and then the items that went into the tree.
+            XdmTree? tree = Parse(outcome.Result);
 
+            if (tree is not null)
+            {
+                // A result document knows where it was written, which is what base-uri() of its nodes is.
+                tree.DocumentUri = outcome.ResultUri;
+
+                try
+                {
+                    DynamicContext context = new DynamicContext(
+                        tree, XdmTree.RootNode, staticContext.Names.BuildFingerprintMap(tree), staticContext.Names)
+                    {
+                        Globals = new[] { XPathValue.FromNode(tree, XdmTree.RootNode) },
+                    };
+
+                    if (compiled.Evaluate(ref context).ToBoolean())
+                    {
+                        return Pass();
+                    }
+                }
+                catch (XsltException exception)
+                {
+                    return Skip($"the assertion expression could not be evaluated: {Flat(exception.Message)}");
+                }
+            }
+
+            if (AskTheResultTree(compiled, staticContext, outcome)
+                || AskTheResultItems(compiled, staticContext, outcome))
+            {
+                return Pass();
+            }
+
+            return tree is null && outcome.Tree is null && outcome.Values is null
+                ? Skip("the result is not well-formed XML, so an XPath assertion cannot be put to it")
+                : Fail($"assertion is false: {Flat(assertion.Value)}");
+        }
+
+        /// <summary>
+        /// Puts an assertion to the result as the items the stylesheet produced, which is the rendering a
+        /// test naming a <c>result-var</c> is written against and the only one a result that is not a
+        /// document has.
+        /// </summary>
+        private static bool AskTheResultItems(Expr compiled, XPathStaticContext staticContext, Transformation outcome)
+        {
+            return outcome.Values?.Invoke() is IReadOnlyList<XPathValue> items
+                && Holds(compiled, staticContext, items);
+        }
+
+
+        /// <summary>
+        /// Answers an assertion about the result as a sequence of items: what it is equal to, what type it
+        /// has, how many items it holds, or whether it holds none.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// These cannot be answered from the serialized result, which is the reason they were skipped for
+        /// as long as they were. <c>assert-eq</c> is a comparison with <c>eq</c>, which is type-aware: the
+        /// integer 144 and the string "144" serialize to the same three characters and are not equal to
+        /// each other, so a driver comparing text would report a pass the test did not ask for.
+        /// <c>assert-type</c> is a sequence type, and nothing parsed back out of XML has a type to match
+        /// beyond <c>xs:untyped</c>. <c>assert-count</c> and <c>assert-empty</c> count items, and the
+        /// serialized form of two items and of one is often the same characters. So the transformation is
+        /// run again for its items, which is what <see cref="Transformation.Values"/> offers.
+        /// </para>
+        /// <para>
+        /// The result is asked twice, because there are two renderings of it and the catalog does not
+        /// always say which it means. The items are one; the document a <c>build-tree="yes"</c> run wraps
+        /// them in is the other, and a test declaring neither <c>tree="no"</c> nor a <c>result-var</c> may
+        /// mean either — <c>current-output-uri-011</c> asserts the result is empty of a run whose
+        /// document node is not, and <c>seqtor-043b</c> asserts a <c>document-node()</c> of a run whose
+        /// items are what went into one. Asking both and taking a yes from either reads the catalog as it
+        /// is written rather than guessing at what it left out.
+        /// </para>
+        /// </remarks>
+        private static TestResult CheckItems(XElement assertion, Transformation outcome, string question)
+        {
+            if (outcome.Error is not null)
+            {
+                return Fail($"error raised: {outcome.Error}");
+            }
+
+            if (outcome.Values is null)
+            {
+                return Skip("the result cannot be presented as a sequence of items");
+            }
+
+            XPathStaticContext staticContext = ContextForAssertion(assertion, outcome);
+
+            Expr compiled;
+
+            try
+            {
+                compiled = XPathParser.Parse(question, staticContext);
+            }
+            catch (XsltException exception)
+            {
+                return Skip($"the assertion expression could not be read: {Flat(exception.Message)}");
+            }
+
+            if (Holds(compiled, staticContext, outcome.Values.Invoke()))
+            {
+                return Pass();
+            }
+
+            // The other rendering: the document a build-tree="yes" run makes of the same items.
+            if (outcome.Tree?.Invoke() is XdmTree built)
+            {
+                built.DocumentUri = outcome.ResultUri;
+
+                if (Holds(compiled, staticContext, new[] { XPathValue.FromNode(built, XdmTree.RootNode) }))
+                {
+                    return Pass();
+                }
+            }
+
+            return Fail($"assertion is false: {Flat(question)}");
+        }
+
+        /// <summary>
+        /// Evaluates a question with <c>$result</c> bound to the items given, answering false where it
+        /// raises rather than letting the error out: an assertion that cannot be answered of these items
+        /// has not been answered yes.
+        /// </summary>
+        /// <remarks>
+        /// <c>eq</c> between an integer and a string is <c>XPTY0004</c> rather than false, and that is
+        /// exactly the case <c>assert-eq</c> exists to catch. A raise here is the assertion not holding.
+        /// </remarks>
+        private static bool Holds(Expr compiled, XPathStaticContext staticContext, IReadOnlyList<XPathValue>? items)
+        {
+            if (items is null)
+            {
+                return false;
+            }
+
+            // A tree for the names to be numbered against: the tree of the first node among the items, so
+            // that a question naming an element of the result reads the same names it was built with, and
+            // an empty one where there is no node to take names from.
+            XdmTree tree = items.FirstOrDefault(item => item.Kind == XPathValueKind.Node) is XPathValue node
+                ? node.NodeTree
+                : XdmTreeBuilder.Empty();
+
+            try
+            {
+                DynamicContext context = new DynamicContext(
+                    tree, XdmTree.RootNode, staticContext.Names.BuildFingerprintMap(tree), staticContext.Names)
+                {
+                    Globals = new[] { XdmSequence.Concatenate(items) },
+                };
+
+                return compiled.Evaluate(ref context).ToBoolean();
+            }
+            catch (XsltException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// The static context an assertion expression is read in: 3.0, the prefixes in scope where the
+        /// assertion is written, the environment's schemas, and <c>$result</c>.
+        /// </summary>
+        private static XPathStaticContext ContextForAssertion(XElement assertion, Transformation outcome)
+        {
             // The catalog states 3.0 whichever subset is being run: the assertion is the suite's language,
             // not the stylesheet's, and reading it should not depend on which tests were selected.
             // The environment's schemas, where the run has any: an assertion may name a declaration out
@@ -289,39 +522,8 @@ namespace CodeDeeds.Xslt.Conformance
 
             // The catalog lets an assertion name the result as $result as well as stand on it.
             staticContext.DeclareGlobalVariable("result", 0);
-
-            try
-            {
-                Expr compiled = XPathParser.Parse(assertion.Value, staticContext);
-                DynamicContext context = new DynamicContext(
-                    tree, XdmTree.RootNode, staticContext.Names.BuildFingerprintMap(tree), staticContext.Names)
-                {
-                    Globals = new[] { XPathValue.FromNode(tree, XdmTree.RootNode) },
-                };
-
-                if (compiled.Evaluate(ref context).ToBoolean())
-                {
-                    return Pass();
-                }
-
-                // The text is the result after a serializer has been over it, and an XPath assertion is
-                // about the result. Type annotations do not survive the round trip, and indentation is
-                // added by it: whitespace between elements that the result tree never held, which an
-                // assertion reading a string value sees. So the question is put again to the tree the
-                // transformation produced. The two are one result in two renderings, and an assertion the
-                // engine satisfies in either it satisfies.
-                return AskTheResultTree(compiled, staticContext, outcome)
-                    ? Pass()
-                    : Fail($"assertion is false: {Flat(assertion.Value)}");
-            }
-            catch (XsltException exception)
-            {
-                // The assertion is the driver's instrument. One this engine cannot read measures the
-                // instrument rather than the test, so it is skipped and named.
-                return Skip($"the assertion expression could not be evaluated: {Flat(exception.Message)}");
-            }
+            return staticContext;
         }
-
 
         /// <summary>
         /// Puts an assertion that the serialized result answered no to the result as a tree, which is

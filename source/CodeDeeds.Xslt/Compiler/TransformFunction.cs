@@ -315,6 +315,7 @@ namespace CodeDeeds.Xslt.Compiler
                 hasSourceDocument: source is not null)
             {
                 MessageWriter = inner.MessageWriter,
+                WarningWriter = inner.WarningWriter,
                 Results = results,
                 InitialSelection = selection,
                 InitialParameters = TemplateParameters(),
@@ -604,6 +605,7 @@ namespace CodeDeeds.Xslt.Compiler
                 Schemas = m_host.Schemas,
                 InputValidation = m_host.InputValidation,
                 MessageWriter = messages ? m_host.MessageWriter : TextWriter.Null,
+                WarningWriter = messages ? m_host.WarningWriter : TextWriter.Null,
                 BaseUri = BaseUriOption() ?? uri,
                 Parameters = Parameters(),
                 InitialTemplate = EntryPoint("initial-template"),

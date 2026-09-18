@@ -6659,10 +6659,11 @@ across `decl/accept` and `decl/expose` on 5 March 2023 while these two files wer
 Applied to a clone of the suite, both tests raise the `XTSE3050` they were written for. A third
 correction came a round later, for `accumulator-038` — see *What an accumulator's declared type is checked
 as* — and two more the round after that, for `validation-0006` and `validation-1702` — see *What
-validation settles about a constructed node*. With all seventeen the 3.0 run reads **7,931 of 7,938**,
-the 2.0 run **5,618 of 5,629** and the schema-aware run **8,531 of 8,540**. The patch is not applied here, and the figures in these notes do not
-include it. A measurement is worth something because of what it is taken against, and a patch kept in the
-repository and offered upstream is worth more than seventeen tests counted differently at home.
+validation settles about a constructed node*. With all seventeen the 3.0 run reads **7,964 of 7,971**,
+the 2.0 run **5,623 of 5,634** and the schema-aware run **8,565 of 8,573**. The patch is not applied here,
+and the figures in these notes do not include it. A measurement is worth something because of what it is
+taken against, and a patch kept in the repository and offered upstream is worth more than seventeen tests
+counted differently at home.
 
 `package-200` is deliberately not in it. It asks for `XTSE3000` where `use-package-291` to `294` ask for
 `XTSE0020` on the same shape, so one of the five is wrong about a rule rather than about a character — see
@@ -7440,6 +7441,79 @@ rather than copying them. So nothing moves, and nothing was expected to. The sch
 8,527 of 8,540 and the 3.0 run at 7,928 of 7,938, both on both backends; the 2.0 run at 5,616 of 5,639;
 the XPath runs at 18,268 and 14,553. Every failure set is identical test for test. Two new unit tests,
 2,823 in all.
+
+### The last of the assertions, and the two things the engine had nowhere to put
+
+Every round this list has been read, it has been shorter afterwards, and this round emptied it. Thirty-three
+test cases were being skipped on the 3.0 run for an assertion the driver would not present: twenty-two
+between `assert-eq`, `assert-deep-eq`, `assert-type`, `assert-count` and `assert-empty`; five
+`assert-warning`; five whose result was not well-formed XML; and one naming a `result-var`, which the
+runner turned away before an assertion saw it. None of the thirty-three was about anything the engine could
+not do. All thirty-three were about something the engine had no way to say.
+
+**A result that is not a document.** The reason `assert-eq` and `assert-type` had been skipped from the
+start was written down each time: a transformation here writes a document, and a sequence of items is gone
+by the time anything can look at it. That was true of `Xslt` and it was not true of the engine. A
+transformation's result is a sequence, and what `build-tree="yes"` does — the default, and what every
+method on `Xslt` did — is wrap it in a document node. `build-tree="no"` says not to, and so does
+starting at an `initial-function`, whose result is whatever the function returns; there was no way to ask
+for that. `TransformToSequence()`, `TransformXmlToSequence(string)` and `TransformToSequence(XdmTree)`
+mirror the three tree methods and hand back the items, built on the same `SequenceCaptureTarget` an
+`xsl:variable`'s content is captured into. The type is the point: `initial-function-101a` asks whether the
+result is `eq` to 144, and the integer 144 and the string "144" are the same three characters written down
+and are not equal to each other, so a driver comparing text would have reported a pass the test did not
+ask for.
+
+That made `assert-eq`, `assert-deep-eq`, `assert-type`, `assert-count` and `assert-empty` one question
+each, written out and put to the evaluator the plain `assert` already uses: `($result) eq (E)`,
+`deep-equal(($result), (E))`, `($result) instance of T`, `count($result) eq N`, `empty($result)`. An error
+while evaluating one is the assertion not holding rather than a skip, which is the whole of what
+`assert-eq` is for: `eq` between an integer and a string is `XPTY0004`, and that is the case the test
+exists to catch.
+
+**Which rendering the catalog means.** A result has two renderings and the catalog does not always say
+which it is written against. `current-output-uri-011` starts at an initial function, declares no
+`tree="no"`, and asserts the result is empty — which is true of the items and false of the document a
+`build-tree="yes"` run wraps them in, that document node being one item. `seqtor-043b` asserts
+`document-node()` of a run whose items are what went into one. So the driver asks both and takes a yes from
+either, which is the same thing it already did with the serialized text and the result tree. Putting the
+three renderings in one line closed the five *result is not well-formed XML* skips as well: `maps-017`
+writes an `<out>` element under `method="json"`, `select-6201` and `bug-2401` write HTML, and the result no
+XML parser will read is a result all the same. `initial-template-004`, the one `result-var` test, was
+skipped by the runner before an assertion saw it; its `deep-equal($result, (123.5, -18, …))` is answered by
+the items like any other.
+
+**A warning is not a message.** `assert-warning` asserts that the run warned, and nothing about what the
+warning said — which is all it could assert, XSLT 3.0 §6.6.1 leaving the form of a warning and where it
+goes to the processor. The engine warned in one place, `warning-on-no-match`, and wrote it to
+`XsltOptions.MessageWriter`, where the driver could not tell it from an `xsl:message`. That matters here
+and not only in principle: `mode-1427` writes the message `** Expect no-matching-template warnings **` and
+then asserts both the message and the warning, so a driver counting either as both would have reported
+that test passed without measuring the half it exists for. `XsltOptions.WarningWriter` is the channel, and
+warnings fall back to `MessageWriter` where a caller has named no other, so nothing that was being seen
+stops being seen.
+
+`warning-on-multiple-match` was read for its form and then dropped. It warns now, from the same two places
+that raise `XTDE0540` for `on-multiple-match="fail"`, and `TemplateIndex.HasRivalOfEqualRank` was already
+there to answer it. The two attributes are separate questions — tell me, and stop — and a mode
+may ask either or both. §6.6.1 leaves the default value of both to the processor, and the default here is
+*no* for both: a stylesheet that has not asked is not told, which is also what keeps the second search of
+the rules that the multiple-match question costs off every transformation that would throw the answer away.
+`mode-0803` and `mode-1441` arrange for exactly these conditions with the attribute set to `no` and assert
+nothing, so a processor warning regardless would pass them without being measured by them.
+
+The 3.0 run goes from 7,928 of 7,938 to **7,961 of 7,971** — thirty-three tests that were not being
+run, and thirty-three of them pass. The schema-aware run goes from 8,527 of 8,540 to **8,560 of 8,573**,
+and the 2.0 run from 5,616 of 5,639 to **5,621 of 5,644**, five of the thirty-three being tests the 2.0
+subset holds as well. Both XPath runs are unmoved, which is what a change nothing outside `xsl:mode` and
+the way a result is handed back should do to them. The failure sets are identical test for test on both
+backends and in every run: not one of the thirty-three failed, and nothing that was passing stopped.
+Twelve unit tests, five for the sequence methods and seven for the warnings; 2,835 in all, the
+last round having reported 2,821 from a run that had reused a stale build of the test project.
+
+The driver's list of assertions it cannot present is now empty. What is left in the catalog is
+`assert-posture-and-sweep`, which appears 919 times and only on tests that carry a `streaming` dependency,
+and so is never reached.
 
 ### Which results the suite asks for and does not get
 

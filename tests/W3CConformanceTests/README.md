@@ -214,6 +214,20 @@ result's place. That found the messages themselves being flattened: a message is
 the instruction's content, and an `xsl:message` writing an element means the element. They are serialized
 now, as every other processor presents them.
 
+**The rest of the assertion list** was 33 on the 3.0 run, and emptied it: twenty-two between `assert-eq`,
+`assert-deep-eq`, `assert-type`, `assert-count` and `assert-empty`, five `assert-warning`, five results
+that were not well-formed XML, and one test naming a `result-var`. Two engine gaps were behind
+them, both of them the engine having nowhere to put something rather than not doing it. A transformation's
+result is a sequence of items, which `build-tree="yes"` — the default — wraps in a document node,
+and there was no way to ask for the items: `TransformToSequence` and its two siblings are that way, and
+`assert-eq`, `assert-deep-eq`, `assert-type`, `assert-count` and `assert-empty` are each one XPath question
+put to them with `$result` bound. The type is the point, `initial-function-101a` asking whether the result
+is `eq` to 144 and not to `"144"`. And a warning had nowhere to go but `XsltOptions.MessageWriter`, where
+nothing could tell it from an `xsl:message`; `WarningWriter` is the channel now, and
+`warning-on-multiple-match`, which had been read for its form and dropped, warns as well. All 33 pass. The
+catalog's one remaining assertion is `assert-posture-and-sweep`, which appears only on tests carrying a
+`streaming` dependency and so is never reached.
+
 ## Where the suite is wrong
 
 Five tests cannot pass, and not for anything this engine does.
@@ -254,8 +268,8 @@ two are marked for 2.0 and nothing later, and are genuinely 2.0 tests, so the st
 corrected. None of this is visible to a harness that only ever runs as 3.0.
 
 The corrections are kept here as [`suite-corrections.patch`](suite-corrections.patch), which `git apply`
-takes from the root of a clone of the suite. With it the 3.0 run goes from 7,928 to **7,931**, the 2.0
-run from 5,616 of 5,639 to **5,618 of 5,629**, and the schema-aware run from 8,526 to **8,531**. It is
+takes from the root of a clone of the suite. With it the 3.0 run goes from 7,961 to **7,964**, the 2.0
+run from 5,621 of 5,644 to **5,623 of 5,634**, and the schema-aware run from 8,560 to **8,565**. It is
 checked in rather than applied: every figure in this document is measured against the suite as
 published, and the patch is there to be offered upstream rather than kept as a local advantage.
 
@@ -525,19 +539,28 @@ rather than the test. The same goes for `serialization-matches`, whose pattern i
 `matches()` rather than by .NET's regular expressions directly: the two languages disagree on enough that
 reading the suite's pattern with the wrong one would decide tests by the driver's mistake.
 
-What the driver checks: `assert`, `assert-xml`, `assert-string-value`, `assert-serialization`,
-`serialization-matches`, `error`, `assert-result-document`, and `all-of` / `any-of` / `not` over any of them.
+What the driver checks: every assertion the XSLT catalog uses except one — `assert`, `assert-xml`,
+`assert-string-value`, `assert-serialization`, `serialization-matches`, `assert-serialization-error`,
+`assert-message`, `assert-warning`, `assert-eq`, `assert-deep-eq`, `assert-type`, `assert-count`,
+`assert-empty`, `error`, `assert-result-document`, and `all-of` / `any-of` / `not` over any of them.
 
-What it skips, and why:
+The one it does not is `assert-posture-and-sweep`, which the catalog writes 919 times and only on tests
+that carry a `streaming` dependency, so no run reaches it.
 
-- **Every assertion about a result as a typed sequence** — `assert-type`, `assert-eq`, `assert-count`,
-  `assert-empty`, `assert-deep-eq`. A transformation here writes a document rather than handing back a value,
-  so the sequence those ask about is gone by the time the driver can see anything.
-- **`assert-message` and `assert-warning`.** Messages arrive through `XsltOptions.MessageWriter` as text, one
-  line each, which is not enough to put an assertion to a message *as a document*.
-- **A result that is not well-formed XML** cannot carry an XPath assertion. Serialization is the only way out
-  of a transformation, so the result is parsed again to be asked about — as a fragment, so several top-level
-  nodes are fine and text alone is fine, but HTML deliberately is not.
+A result is asked about in three renderings, and an assertion it satisfies in any of them it satisfies.
+The serialized text, parsed back, is the first: it is what most assertions are written against and the only
+one that shows what the serializer did, and it is also the one that loses the most — type annotations
+do not survive the round trip, `indent="yes"` adds whitespace the result tree never held, an `html` or
+`json` method writes text no XML parser will read, and a `build-tree="no"` run has no document to write at
+all. Where it does not answer yes, the result tree is asked, and then the items the stylesheet produced.
+Each of the last two costs a second run of the transformation, which is why they are asked in that order
+and only when the one before has said no.
+
+`assert-eq`, `assert-deep-eq`, `assert-type`, `assert-count` and `assert-empty` are answered by evaluating
+one XPath question with `$result` bound to the items — `($result) eq (E)`, `($result) instance of T`,
+`count($result) eq N`, `empty($result)`. An error raised while evaluating one is the assertion not holding
+rather than a skip: `eq` between an integer and a string is `XPTY0004`, and that is the case `assert-eq`
+exists to catch.
 
 `assert-xml` compares two canonical forms rather than two strings. Attribute order, namespace declaration
 order, the empty-element form and the choice of which characters to escape are all free to a serializer, so a
@@ -699,7 +722,7 @@ The largest skip left is not a failure either: **6,518 are XSLT 3.0 tests**, rea
 
 ## What the 3.0 run says
 
-That opt-in run measures the XSLT 3.0 half at **7,928 of 7,938, 99.9%**, from 4,994 of 6,427 when it was first
+That opt-in run measures the XSLT 3.0 half at **7,961 of 7,971, 99.9%**, from 4,994 of 6,427 when it was first
 taken. It reads more tests than it did as well as passing more of them, which is the part worth reading twice:
 opening a feature the suite writes *around* stops whole files being skipped, so the denominator moves too — and
 the percentage can fall while the work goes forward, which is why the two numbers are always given together.

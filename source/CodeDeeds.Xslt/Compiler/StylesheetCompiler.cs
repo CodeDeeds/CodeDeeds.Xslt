@@ -11779,6 +11779,10 @@ namespace CodeDeeds.Xslt.Compiler
                 ? null
                 : ReadDeclarationFlag(element, "warning-on-no-match");
 
+            bool? warnOnMultipleMatch = GetAttribute(element, "warning-on-multiple-match") is null
+                ? null
+                : ReadDeclarationFlag(element, "warning-on-multiple-match");
+
             string? onMultipleMatch = GetAttribute(element, "on-multiple-match")?.Trim();
 
             if (onMultipleMatch is not (null or "use-last" or "fail"))
@@ -11855,7 +11859,8 @@ namespace CodeDeeds.Xslt.Compiler
                     onMultipleMatch,
                     visibility,
                     typed,
-                    typedSaid == "strict"));
+                    typedSaid == "strict",
+                    warnOnMultipleMatch));
         }
 
         /// <summary>
@@ -11949,6 +11954,13 @@ namespace CodeDeeds.Xslt.Compiler
                     declaration => declaration.OnMultipleMatch is not null,
                     (one, other) => one.OnMultipleMatch == other.OnMultipleMatch);
 
+                int warnedTwice = Settled(
+                    stated,
+                    declarations,
+                    "warning-on-multiple-match",
+                    declaration => declaration.WarnOnMultipleMatch is not null,
+                    (one, other) => one.WarnOnMultipleMatch == other.WarnOnMultipleMatch);
+
                 // Settled like the rest, so that two declarations at one precedence disagreeing about a
                 // mode's visibility are the error they are (XTSE0545) rather than two components.
                 _ = Settled(
@@ -11982,7 +11994,8 @@ namespace CodeDeeds.Xslt.Compiler
                     warned >= 0 && declarations[warned].WarnOnNoMatch!.Value,
                     multiple >= 0 && declarations[multiple].OnMultipleMatch == "fail",
                     typed >= 0 ? declarations[typed].Typed : null,
-                    typed >= 0 && declarations[typed].StrictlyTyped);
+                    typed >= 0 && declarations[typed].StrictlyTyped,
+                    warnedTwice >= 0 && declarations[warnedTwice].WarnOnMultipleMatch!.Value);
                 m_modeAccumulators[mode] = used < 0
                     ? AccumulatorSet.None
                     : AccumulatorsOf(declarations[used].Written);
@@ -12314,6 +12327,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="Precedence">The import precedence it was written at.</param>
         /// <param name="OnNoMatch">Its on-no-match, where written.</param>
         /// <param name="WarnOnNoMatch">Its warning-on-no-match, where written.</param>
+        /// <param name="WarnOnMultipleMatch">Its warning-on-multiple-match, where written.</param>
         /// <param name="Written">The element, for the attributes read later.</param>
         private readonly record struct ModeAttributes(
             int Precedence,
@@ -12323,7 +12337,8 @@ namespace CodeDeeds.Xslt.Compiler
             string? OnMultipleMatch = null,
             string? Visibility = null,
             bool? Typed = null,
-            bool StrictlyTyped = false);
+            bool StrictlyTyped = false,
+            bool? WarnOnMultipleMatch = null);
 
         private int ResolveMode(int element, string? mode)
         {

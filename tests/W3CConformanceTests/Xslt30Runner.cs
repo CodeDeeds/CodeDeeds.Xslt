@@ -59,10 +59,36 @@ namespace CodeDeeds.Xslt.Conformance
         public Func<string?>? AsXml { get; init; }
 
         /// <summary>
+        /// The principal result as the sequence of items the stylesheet produced, for an assertion that
+        /// asks what those items are rather than what they look like written down.
+        /// </summary>
+        /// <remarks>
+        /// A test that declares <c>&lt;output tree="no" serialize="no"/&gt;</c>, or that starts at an
+        /// <c>initial-function</c>, has a result that is not a document: <c>assert-eq</c> compares it with
+        /// an XPath value and <c>assert-type</c> matches it against a sequence type, and both of those are
+        /// questions about items. Serialized, the integer 144 and the string "144" are the same three
+        /// characters, and the comparison the test asked for would not be the one made. Asked for only by
+        /// those assertions, and it costs a second run, which is why it is offered rather than kept.
+        /// </remarks>
+        public Func<IReadOnlyList<XPath.XPathValue>?>? Values { get; init; }
+
+        /// <summary>
         /// The schemas the environment declared, for an assertion that names one of their declarations:
         /// schema-element(E) in an assertion is a question the assertion cannot ask without them.
         /// </summary>
         public System.Xml.Schema.XmlSchemaSet? Schemas { get; init; }
+
+        /// <summary>
+        /// What the run warned about, one entry per warning, for an assert-warning.
+        /// </summary>
+        /// <remarks>
+        /// Kept apart from the messages because the assertion is about a warning and not about a message.
+        /// A stylesheet declaring warning-on-no-match="yes" usually writes an xsl:message saying so as
+        /// well — mode-1427 writes "** Expect no-matching-template warnings **" and then asserts both
+        /// — and a driver that could not tell the two apart would report that test passed without
+        /// having measured the half it exists for.
+        /// </remarks>
+        public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
 
         /// <summary>
         /// What each xsl:message wrote, one entry per message, for an assert-message.
@@ -246,17 +272,6 @@ namespace CodeDeeds.Xslt.Conformance
                 return new TestResult(Outcome.Skipped, "the test supplies no source document and names no entry point");
             }
 
-            // A test whose assertion is written against the result as a value — an output element naming a
-            // result-var — asks for what this driver cannot present, for the reason every assertion about a
-            // typed sequence is skipped: a transformation here writes a document, and the items are text by
-            // the time anything can look at them. A bare tree="no" says only that the result is not a
-            // document node, which is presentable exactly as it stands.
-            if (test.Element(Xslt30Catalog.Ns + "output")?.Attribute("result-var") is not null)
-            {
-                return new TestResult(
-                    Outcome.Skipped, "the test asks for the result as a value rather than as a document");
-            }
-
             // A test expecting an error is run rather than only compiled: with nothing to start at, the error
             // it expects may be the engine's refusal to start, which compiling alone never reaches.
             bool compileOnly = source is null && !named && !startsItself && !expectsError;
@@ -330,6 +345,7 @@ namespace CodeDeeds.Xslt.Conformance
             ResultCollector results = new ResultCollector();
             StringWriter output = new StringWriter();
             MessageCollector messages = new MessageCollector();
+            MessageCollector warnings = new MessageCollector();
             Xslt? stylesheet = null;
 
             try
@@ -434,6 +450,7 @@ namespace CodeDeeds.Xslt.Conformance
                     BaseUri = new Uri(stylesheetPath).AbsoluteUri,
                     ResultResolver = results,
                     MessageWriter = messages,
+                    WarningWriter = warnings,
                     Parameters = parameters,
                     TemplateParameters = template,
                     TunnelParameters = tunnel,
@@ -534,8 +551,10 @@ namespace CodeDeeds.Xslt.Conformance
                 Directory = directory,
                 Tree = compileOnly ? null : () => RunAgainIntoATree(compiled, source),
                 AsXml = compileOnly ? null : () => RunAgainAsXml(compiled, source),
+                Values = compileOnly ? null : () => RunAgainIntoASequence(compiled, source),
                 Schemas = m_schemaAware ? EnvironmentSchemas(environment, directory) : null,
                 Messages = messages.Written,
+                Warnings = warnings.Written,
             };
         }
 
@@ -588,6 +607,26 @@ namespace CodeDeeds.Xslt.Conformance
             {
                 // The first run produced a result, so this one should too; where it does not, the
                 // assertion falls back to the serialized text rather than the test failing on the driver.
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Runs the transformation a second time into a sequence, for an assertion that asks about the
+        /// items of the result rather than about a document or about text.
+        /// </summary>
+        private static IReadOnlyList<XPath.XPathValue>? RunAgainIntoASequence(Xslt stylesheet, string? source)
+        {
+            try
+            {
+                return source is null
+                    ? stylesheet.TransformToSequence()
+                    : stylesheet.TransformXmlToSequence(source);
+            }
+            catch (Exception)
+            {
+                // The first run produced a result, so this one should too; where it does not, the
+                // assertion says so rather than the test failing on the driver.
                 return null;
             }
         }
@@ -769,7 +808,7 @@ namespace CodeDeeds.Xslt.Conformance
         }
 
 
-        /// <summary>Keeps each xsl:message the run wrote, in order.</summary>
+        /// <summary>Keeps each xsl:message, or each warning, the run wrote, in order.</summary>
         /// <remarks>
         /// The engine writes one message per WriteLine, so a line is a message. Buffering the characters
         /// and splitting afterwards would cut a message that has a newline inside it in two.

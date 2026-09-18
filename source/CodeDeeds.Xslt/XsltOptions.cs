@@ -162,6 +162,31 @@ namespace CodeDeeds.Xslt
         public TextWriter? MessageWriter { get; init; }
 
         /// <summary>
+        /// Gets the writer that receives warnings. Where this is <see langword="null"/> they go to
+        /// <see cref="MessageWriter"/> instead, and where that is null too they are discarded.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A warning is what a mode declared <c>warning-on-no-match="yes"</c> or
+        /// <c>warning-on-multiple-match="yes"</c> asks for: the stylesheet saying it wants to be told about
+        /// a node no rule matched, or about two rules of one precedence and priority matching a node and
+        /// the later one winning. Neither is an error and neither changes what the transformation
+        /// produces; both are the sort of thing an author wants to see while a stylesheet is being written
+        /// and not afterwards, which is why the stylesheet asks for them rather than the processor
+        /// deciding.
+        /// </para>
+        /// <para>
+        /// Their form and destination are left to the processor by XSLT 3.0 §6.6.1, and so are the default
+        /// values of both attributes — which here are <em>no</em>: a stylesheet that has not asked is
+        /// not told, so the checking a warning costs is not paid by a transformation that would throw the
+        /// answer away. Warnings fall back to <see cref="MessageWriter"/> so that a caller who has set one
+        /// sink and not the other sees them rather than losing them; set this to
+        /// <see cref="TextWriter.Null"/> to have them written nowhere while messages still are.
+        /// </para>
+        /// </remarks>
+        public TextWriter? WarningWriter { get; init; }
+
+        /// <summary>
         /// Gets the resolver that locates stylesheets named by <c>xsl:include</c> and <c>xsl:import</c>.
         /// </summary>
         /// <remarks>
@@ -565,6 +590,7 @@ namespace CodeDeeds.Xslt
                 Backend = Backend,
                 OmitXmlDeclaration = omitXmlDeclaration,
                 MessageWriter = MessageWriter,
+                WarningWriter = WarningWriter,
                 StylesheetResolver = StylesheetResolver,
                 DocumentResolver = DocumentResolver,
                 CollectionResolver = CollectionResolver,
