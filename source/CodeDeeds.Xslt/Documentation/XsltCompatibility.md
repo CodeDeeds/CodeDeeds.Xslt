@@ -9,11 +9,12 @@ implemented. The reasoning behind each decision, and the history of the conforma
 | Area| Notes |
 | --- | --- |
 | XSLT | XSLT Version 3.0, claimed by default. `XsltOptions.Version = XsltVersion.V20` gives a 2.0 processor: `system-property('xsl:version')` answers `2.0`, the vocabulary is 2.0's, and a `version="3.0"` stylesheet is read forwards-compatibly. A `version="1.0"` stylesheet runs with 1.0's semantics on either. |
+| Backwards compatibility | `version="1.0"` is XSLT 2.0's backwards-compatible mode rather than a 1.0 processor: XPath 2.0's grammar and function library, with 1.0's conversions and its first-item rule. Where the two differ the reading is 2.0's. In a comparison, an operand compared with a number — and both operands of `<`, `<=`, `>`, `>=` — is read as `xs:double`, whether it arrives as a node or as a string, so `1e1`, `+10` and `INF` are numbers where an XSLT 1.0 processor reads NaN. `number()`, arithmetic and `sum()` still read XPath 1.0's grammar, where those three are NaN. |
 | XPath | XPath version 3.1, including maps, arrays, function items, higher-order functions and the JSON functions. |
 | Conformance level | Basic: not schema-aware, not streaming. |
 | Backends | Interpreted (default) and compiled to IL (`XsltOptions.Backend`), which produce the same results. |
 
-Conformance as last measured, on 18 September 2026, against the W3C suites (see `tests/W3CConformanceTests`):
+Conformance as last measured, on 19 September 2026, against the W3C suites (see `tests/W3CConformanceTests`):
 
 | Suite | Result |
 | --- | --- |

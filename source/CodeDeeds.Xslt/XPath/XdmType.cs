@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 
 namespace CodeDeeds.Xslt.XPath
 {
@@ -1290,6 +1291,8 @@ namespace CodeDeeds.Xslt.XPath
         /// every number a document holds is written in it. So the scanner built for that grammar is asked
         /// first, and only what it cannot read goes to the cast, which knows about the exponent, the
         /// leading plus, <c>INF</c> and <c>NaN</c>, and raises <c>FORG0001</c> for what is none of them.
+        /// <see cref="TextAsDoubleOrNaN"/> is the same reading where that failure is answered rather than
+        /// raised, which is what backwards compatibility asks for.
         /// </remarks>
         /// <param name="text">The text, as a node's string value gives it.</param>
         /// <exception cref="XsltException">The text is not in <c>xs:double</c>'s lexical space.</exception>
@@ -1348,6 +1351,15 @@ namespace CodeDeeds.Xslt.XPath
                 return double.NaN;
             }
 
+            // Text is the only thing the cast can fail on, and it is read here without the cast being
+            // made: text that is not a number is ordinary data to this function, and an exception raised
+            // and caught for every such value is what a predicate over a column of names would pay.
+            if (value.TypeCode is XdmTypeCode.String or XdmTypeCode.UntypedAtomic
+                || value.Kind is XPathValueKind.NodeSet or XPathValueKind.Node)
+            {
+                return TextAsDoubleOrNaN(value.ToStringValue());
+            }
+
             try
             {
                 return CastToDouble(value, "xs:double");
@@ -1356,6 +1368,82 @@ namespace CodeDeeds.Xslt.XPath
             {
                 return double.NaN;
             }
+        }
+
+        /// <summary>
+        /// Reads text as an <c>xs:double</c>, answering NaN where it is not in the type's lexical space.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The reading <c>fn:number()</c> gives an untyped value from XPath 2.0 on, and so the one a
+        /// backwards-compatible comparison gives a node: XPath 2.0 §3.5.2 atomizes the node and converts
+        /// what it gets with <c>fn:number</c>, where XPath 1.0 read the string-value by its own grammar
+        /// for a number. The difference is the exponent, the leading plus, and <c>INF</c>, <c>-INF</c> and
+        /// <c>NaN</c> being the values they name.
+        /// </para>
+        /// <para>
+        /// XPath 1.0's grammar is a subset of the type's lexical space and reads the same value wherever
+        /// it reads one, and nearly all real data is within it. So its scanner goes first, reading the
+        /// digits as it checks them, and only text it answers NaN for is looked at again.
+        /// </para>
+        /// </remarks>
+        /// <param name="text">The text to read, which may have whitespace around it.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static double TextAsDoubleOrNaN(string text)
+        {
+            double value = XPathValue.ParseNumber(text);
+
+            return double.IsNaN(value) ? WiderTextAsDoubleOrNaN(text) : value;
+        }
+
+        /// <summary>The part of <see cref="TextAsDoubleOrNaN"/> kept out of line, being the rare one.</summary>
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static double WiderTextAsDoubleOrNaN(string text)
+        {
+            // Most text that is not a number is a word, and of the letters only these two begin anything
+            // in the lexical space. So a name or a category is settled here on its first character,
+            // which is what a predicate comparing a column of them with a number pays for each.
+            if (text.Length == 0 || (char.IsAsciiLetter(text[0]) && text[0] is not ('I' or 'N')))
+            {
+                return double.NaN;
+            }
+
+            return TryReadDouble(text, out double value) ? value : double.NaN;
+        }
+
+        /// <summary>Reads text in the lexical space of <c>xs:double</c>, if it is in it.</summary>
+        /// <param name="text">The text, which may have whitespace around it.</param>
+        /// <param name="value">The value read, or NaN where there was none.</param>
+        /// <returns>Whether the text is in the lexical space — which <c>NaN</c> is, as the value NaN.</returns>
+        private static bool TryReadDouble(string text, out double value)
+        {
+            text = text.Trim();
+
+            // XPath 1.0's number() has no INF or NaN in its lexical space; a cast to xs:double does. The
+            // spellings are exactly these — 'nan' and 'Infinity' are not among them, however readily
+            // .NET would read them, and neither is '+INF', which XML Schema 1.1 added and this
+            // engine does not implement.
+            switch (text)
+            {
+                case "INF":
+                    value = double.PositiveInfinity;
+                    return true;
+                case "-INF":
+                    value = double.NegativeInfinity;
+                    return true;
+                case "NaN":
+                    value = double.NaN;
+                    return true;
+            }
+
+            if (IsDecimalLexical(text, allowExponent: true)
+                && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value))
+            {
+                return true;
+            }
+
+            value = double.NaN;
+            return false;
         }
 
         private static double CastToDouble(XPathValue value, string typeName)
@@ -1368,24 +1456,7 @@ namespace CodeDeeds.Xslt.XPath
             if (value.TypeCode is XdmTypeCode.String or XdmTypeCode.UntypedAtomic
                 || value.Kind is XPathValueKind.NodeSet or XPathValueKind.Node)
             {
-                string text = value.ToStringValue().Trim();
-
-                // XPath 1.0's number() has no INF or NaN in its lexical space; a cast to xs:double does. The
-                // spellings are exactly these — 'nan' and 'Infinity' are not among them, however readily
-                // .NET would read them, and neither is '+INF', which XML Schema 1.1 added and this
-                // engine does not implement.
-                switch (text)
-                {
-                    case "INF":
-                        return double.PositiveInfinity;
-                    case "-INF":
-                        return double.NegativeInfinity;
-                    case "NaN":
-                        return double.NaN;
-                }
-
-                if (!IsDecimalLexical(text, allowExponent: true)
-                    || !double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed))
+                if (!TryReadDouble(value.ToStringValue(), out double parsed))
                 {
                     throw XsltErrors.Error(XsltErrorCode.FORG0001, $"'{value.ToStringValue()}' is not a valid {typeName}.");
                 }

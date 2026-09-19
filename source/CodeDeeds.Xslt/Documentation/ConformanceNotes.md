@@ -1448,7 +1448,9 @@ it asked for.
 Left as it is: `number('5.00e0')` is `NaN` here, XPath 1.0's lexical form for a number having no exponent.
 XPath 2.0's `fn:number` does accept one, and a 1.0 stylesheet on a 2.0 processor is entitled to that reading —
 but the conversion is reached from a hundred places that do not carry a version, and threading one through
-them all would cost more than the two tests it earns.
+them all would cost more than the two tests it earns. **A comparison is not one of those places**: it knows
+its version, and it reads an operand it compares with a number as `xs:double`, exponent and all, whether
+the operand arrives as a string or as a node — see *A node, and the same text as a string*.
 
 **A built-in template rule passes on the parameters it was given**, tunnel and ordinary alike. An element the
 stylesheet wrote no rule for is not a reason for a parameter to stop: what the caller meant was for the
@@ -7882,6 +7884,84 @@ the schema-aware run at 8,668 of 8,727, each on both backends, and the XPath run
 14,553 of 14,577. Every failure set is identical test for test. Fifteen new unit tests, 2,883 in all,
 each asking the comparison as a value and as a test on both backends and requiring one answer; thirteen
 of the fifteen fail against the engine as it was.
+
+### A node, and the same text as a string
+
+Under `version="1.0"`, over `<r><a>1e1</a></r>`, on both backends:
+
+| | was | is |
+|---|---|---|
+| `a = 10` | false | true |
+| `string(a) = 10` | true | true |
+| `$v = 10`, where `$v` is `a` | false | true |
+| `a < '1e2'` over `<a>10</a>` | false | true |
+
+The engine's position on a backwards-compatible comparison was already written down, under *What backwards
+compatibility is, and what it is not* and on `XPathComparison.AsDouble`: an operand compared with a number is
+converted to `xs:double`, whose lexical space has an exponent, so `1 = '1.0e0'` is true. Every path that
+compares a **node** under 1.0's rules read it by `XPathValue.ParseNumber` instead — XPath 1.0's own grammar
+for a number, which has no exponent, no leading plus and no `INF` — so the same text was a number or NaN
+depending on whether it arrived as a string or as a node. That is `NodesVersusValue`, `NodesVersusNodes`,
+`NodeSetMatchesScalar` and the node-set branches of `Relational`, which between them are every comparison
+written against a path or a variable holding nodes; and the scalar a node was ordered against was read the
+narrow way too, which is the last row.
+
+**The specification does not have two readings to choose between.** XPath 2.0 §3.5.2, with compatibility
+mode on, atomizes each operand and only then converts: both sides with `fn:number` for an ordering, and
+both where either is numeric for an equality. By the time there is anything to convert there is no node,
+only the `xs:untypedAtomic` it atomized to, and `fn:number` from 2.0 on is the cast to `xs:double`.
+Appendix I.1 — the incompatibilities that remain *with* compatibility mode on — says as much outright:
+text that was NaN under 1.0 for its leading plus, its exponent, or for being `INF`, converts to a number
+now, implicitly as well as through `number()`. So the general path was right and the node paths agree with
+it. What cannot be read is still NaN and never `FORG0001`, which is the half of 1.0 the mode keeps.
+
+**`System.Xml.Xsl.XslCompiledTransform` answers the other way**, being a real 1.0 processor: `1e1` is NaN
+there whichever way it arrives. The differential tests against it are the authority on 1.0 behaviour and
+every one of them passes unchanged, which says none of them writes a number with an exponent into a
+source document and compares it. That is the right outcome rather than a gap: where XSLT 2.0's imitation
+of 1.0 and 1.0 itself differ, this engine is the former, and a differential test asserting the latter here
+would be asserting a processor this is not. `number()`, arithmetic and `sum()` do still read the older
+grammar at 1.0, as the section above records, so `number(a) = 10` is false where `a = 10` is now true —
+Appendix I.1 names `number()` with the rest, and that remains the larger piece of work it was.
+
+**The scanner for 1.0's grammar still goes first.** It lies wholly inside `xs:double`'s lexical space,
+reads the same value wherever it reads one, and takes nearly all real data; only what it answers NaN for
+is looked at again, out of line, and a word is settled there on its first letter — of the letters only
+`I` and `N` begin anything in the lexical space. `XdmType.TextAsDoubleOrNaN` is that reading, the sibling
+of `UntypedTextAsDouble` that answers a failure rather than raising it, and `AsDoubleOrNaN` — `fn:number`
+from 2.0 on, and the string operand of a 1.0 comparison — now reads text through it as well, where it had
+been making the cast and catching `FORG0001`: an exception raised and caught for every value that was not
+a number.
+
+Looking at what the second look costs found something that cost more. `NodesVersusValue` is large enough
+that the JIT leaves `List<int>.Enumerator.MoveNext` as a call rather than inlining it, so a predicate with
+one child to compare paid for an enumerator, two calls and two version checks to reach it. The list is a
+pooled one nothing else touches during the comparison, and is read as a span now. With the fallback alone
+the worst case below — every node text that is no number — was 99 microseconds against 108 compiled; with
+both it is level.
+
+In microseconds a transformation over the thousand-product benchmark document at `version="1.0"`, each
+figure the mean of three runs in fresh processes taken turn about with the engine as it was, each warmed
+for at least eight seconds and until time and bytes a call had stopped moving:
+
+| | interpreted, was | is | compiled, was | is |
+|---|---|---|---|---|
+| `count(//product[price > 100])` | 161 | 166 | 113 | 111 |
+| `count(//product[name > 100])`, no node a number | 151 | 153 | 101 | 98 |
+
+Single runs of one binary differ by more than any of these pairs do — 157 to 187 for the first cell over
+the session, on a machine doing other work — so what the table says is that nothing moved. Bytes allocated are the same to the byte:
+3,568 a call in the first row and 3,496 in the second.
+
+Nothing moves on any run either, no test in either suite putting an exponent in a source document under
+1.0: the 3.0 run stands at 8,061 of 8,071, the 2.0 run at 5,678 of 5,701 and the schema-aware run at 8,668
+of 8,727, each on both backends, and the XPath runs at 18,268 of 18,285 and 14,553 of 14,577, every
+failure set identical test for test. Eight new unit tests, 2,891 in all, each asking a comparison of a node
+beside the same comparison of its text, in a `select` and in an `xsl:if`, on both backends, and requiring
+one answer from all of them; five of the eight fail against the engine as it was. The other three hold
+what was right already: text that is no number is NaN and not an error, two nodes are compared as text
+with `number()` reading the older grammar beside them, and a node against a sequence, which always went
+the general way.
 
 ### Which results the suite asks for and does not get
 

@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using CodeDeeds.Xslt.Model;
 
 namespace CodeDeeds.Xslt.XPath
@@ -29,6 +31,12 @@ namespace CodeDeeds.Xslt.XPath
             bool nodesOnLeft,
             BinaryOperator op)
         {
+            // Read as a span, the list being a pooled one nothing else touches while it is compared. A
+            // List's enumerator checks at each step that the list has not changed, and this method is
+            // large enough that the JIT leaves MoveNext as a call rather than inlining it — two calls,
+            // each with its check, to reach the one node a predicate such as price > 100 usually has.
+            ReadOnlySpan<int> list = CollectionsMarshal.AsSpan(nodes);
+
             if (op is BinaryOperator.Equal or BinaryOperator.NotEqual)
             {
                 bool equal = op == BinaryOperator.Equal;
@@ -43,9 +51,9 @@ namespace CodeDeeds.Xslt.XPath
                 if (other.Kind == XPathValueKind.Number)
                 {
                     double target = other.ToNumber();
-                    foreach (int node in nodes)
+                    foreach (int node in list)
                     {
-                        double value = XPathValue.ParseNumber(tree.StringValueOf(node));
+                        double value = NodeAsDouble(tree, node);
                         if (equal ? value == target : value != target)
                         {
                             return true;
@@ -56,7 +64,7 @@ namespace CodeDeeds.Xslt.XPath
                 }
 
                 string text = other.ToStringValue();
-                foreach (int node in nodes)
+                foreach (int node in list)
                 {
                     bool same = string.Equals(tree.StringValueOf(node), text, StringComparison.Ordinal);
                     if (equal ? same : !same)
@@ -68,10 +76,10 @@ namespace CodeDeeds.Xslt.XPath
                 return false;
             }
 
-            double scalar = other.ToNumber();
-            foreach (int node in nodes)
+            double scalar = AsDouble(other);
+            foreach (int node in list)
             {
-                double value = XPathValue.ParseNumber(tree.StringValueOf(node));
+                double value = NodeAsDouble(tree, node);
                 if (nodesOnLeft ? Compare(value, scalar, op) : Compare(scalar, value, op))
                 {
                     return true;
@@ -136,10 +144,10 @@ namespace CodeDeeds.Xslt.XPath
 
             foreach (int leftNode in left)
             {
-                double a = XPathValue.ParseNumber(leftTree.StringValueOf(leftNode));
+                double a = NodeAsDouble(leftTree, leftNode);
                 foreach (int rightNode in right)
                 {
-                    if (Compare(a, XPathValue.ParseNumber(rightTree.StringValueOf(rightNode)), op))
+                    if (Compare(a, NodeAsDouble(rightTree, rightNode), op))
                     {
                         return true;
                     }
@@ -392,6 +400,7 @@ namespace CodeDeeds.Xslt.XPath
         /// within 2.0's data model rather than 1.0 itself, and the conversion it names is 2.0's;
         /// <c>number()</c> called in the same stylesheet still reads 1.0's grammar, that being the function
         /// the stylesheet asked for rather than a conversion the language is making on its behalf.
+        /// A node is read the same way — see <see cref="NodeAsDouble"/>.
         /// </remarks>
         /// <param name="value">The operand.</param>
         private static double AsDouble(XPathValue value)
@@ -399,6 +408,25 @@ namespace CodeDeeds.Xslt.XPath
             return value.TypeCode is XdmTypeCode.String or XdmTypeCode.UntypedAtomic
                 ? XdmType.AsDoubleOrNaN(value)
                 : value.ToNumber();
+        }
+
+        /// <summary>
+        /// A node as the number a backwards-compatible comparison reads it as.
+        /// </summary>
+        /// <remarks>
+        /// The same number <see cref="AsDouble"/> reads from the node's text, and it has to be: XPath 2.0
+        /// §3.5.2 atomizes a node operand before it converts anything, so by the time there is a number to
+        /// read there is no node left to read it differently from. <c>price = 10</c> and
+        /// <c>string(price) = 10</c> are one question, and over <c>&lt;price&gt;1e1&lt;/price&gt;</c> both
+        /// are true. The paths that take nodes directly had been reading them by XPath 1.0's grammar, which
+        /// has no exponent, so the answer depended on which of the two ways the text arrived.
+        /// </remarks>
+        /// <param name="tree">The tree the node belongs to.</param>
+        /// <param name="node">The node.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static double NodeAsDouble(XdmTree tree, int node)
+        {
+            return XdmType.TextAsDoubleOrNaN(tree.StringValueOf(node));
         }
 
         private static bool ScalarEqual(XPathValue left, XPathValue right)
@@ -471,10 +499,10 @@ namespace CodeDeeds.Xslt.XPath
                 NodeSet rightNodes = right.AsNodeSet();
                 for (int i = 0; i < leftNodes.Count; i++)
                 {
-                    double a = XPathValue.ParseNumber(leftNodes.TreeAt(i).StringValueOf(leftNodes[i]));
+                    double a = NodeAsDouble(leftNodes.TreeAt(i), leftNodes[i]);
                     for (int j = 0; j < rightNodes.Count; j++)
                     {
-                        double b = XPathValue.ParseNumber(rightNodes.TreeAt(j).StringValueOf(rightNodes[j]));
+                        double b = NodeAsDouble(rightNodes.TreeAt(j), rightNodes[j]);
                         if (Compare(a, b, op))
                         {
                             return true;
@@ -488,11 +516,11 @@ namespace CodeDeeds.Xslt.XPath
             if (leftIsNodeSet || rightIsNodeSet)
             {
                 NodeSet nodes = leftIsNodeSet ? left.AsNodeSet() : right.AsNodeSet();
-                double scalar = leftIsNodeSet ? right.ToNumber() : left.ToNumber();
+                double scalar = AsDouble(leftIsNodeSet ? right : left);
 
                 for (int i = 0; i < nodes.Count; i++)
                 {
-                    double value = XPathValue.ParseNumber(nodes.TreeAt(i).StringValueOf(nodes[i]));
+                    double value = NodeAsDouble(nodes.TreeAt(i), nodes[i]);
 
                     // The node-set supplies whichever side it originally occupied.
                     bool matched = leftIsNodeSet
@@ -592,7 +620,7 @@ namespace CodeDeeds.Xslt.XPath
                 double target = other.ToNumber();
                 for (int i = 0; i < nodes.Count; i++)
                 {
-                    double value = XPathValue.ParseNumber(nodes.TreeAt(i).StringValueOf(nodes[i]));
+                    double value = NodeAsDouble(nodes.TreeAt(i), nodes[i]);
                     if (equal ? value == target : value != target)
                     {
                         return true;
