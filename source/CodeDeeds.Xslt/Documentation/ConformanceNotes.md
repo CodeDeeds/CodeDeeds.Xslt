@@ -8068,6 +8068,122 @@ must not change, and the four were checked the other way: with the tree left out
 one of them fails, and with the anchor left out three of them do. The seventh asks the positions spelt
 as references and fails against the engine as it was.
 
+### What `and` asks of its operands
+
+`BinaryExpr.Evaluate` took the value of each operand of an `and` or an `or` and then its effective boolean
+value, where `EvaluateAsBoolean` asked each operand for a boolean outright. A predicate is evaluated as a
+value, so in `//product[@id and price > 100]` the `@id` was a node-set built for every candidate only to
+be asked whether it was empty, where `PathExpr.EvaluateAsBoolean` answers from the list the steps filled
+and builds nothing. The change is two lines. What it rests on is not: it makes every `EvaluateAsBoolean`
+an expression has written for itself reachable from every `select`, and each of those is a second
+statement of what the expression means that nothing held to the first. One of them — the comparison's
+own — had been wrong until *One comparison, and three ways into it*, above.
+
+**So they were read first, all thirteen, against `Evaluate(...).ToBoolean()`, errors included. Two
+disagreed.**
+
+| asked for a boolean | was | is |
+|---|---|---|
+| `current()` where an atomic value is being walked — `xsl:for-each select="(0, 1)"` | `XTDE1360`, *there is no current item* | the value's own: `false`, then `true` |
+| a call to a stylesheet function that reads `current-output-uri()` | the URI, so `true` | nothing, so `false`: a function is in temporary output state wherever it is called from |
+
+`CurrentExpr.EvaluateAsBoolean` knew of a current node and of the substring an `xsl:analyze-string`
+branch is given and not of the third thing `Evaluate` knows of, an atomic item being walked.
+`UserFunctionCallExpr.Evaluate` entered temporary output state around the call, and `EvaluateAsBoolean`
+and `EvaluateNodes` made the call without it; the three go through one method now. Both were wrong in a
+`test` as things stood — `<xsl:if test="current()">` over a sequence of numbers was refused — and the
+change would have carried both into every `select` with an `and` in it.
+
+The rest agree, and why is worth having written down once. A path, asked for a boolean, evaluates its
+start and walks every step as it does for a value, so it raises what the value raises — `XPTY0020` from
+an atomic context item, `XPDY0002` from none, `XPTY0019` from a start that is not nodes — and differs
+only in not wrapping the list. It never answers by stopping early. The worry that an existence check
+would answer `true` where a sequence of two strings has no effective boolean value does not arise,
+because a path whose last step is a call — `price/string()` — is not a `PathExpr` but a `StepMapExpr`,
+which has no boolean route of its own and takes the default: the value, then `FORG0006`. `/` and `.`
+make the same checks either way; `if`, `let`, `some` and `every` pass the question down to the branch
+or body that answers it, and `if` and the quantifiers already evaluated their conditions this way in a
+`select`; `instance of` and the empty sequence have nothing to get wrong. A call in the tail position of
+a function body is handed back for the caller to make and the value it returns then is a placeholder,
+which would be a fault if an operand were ever one — but `and` does not pass the news of being last down
+to its operands, and a call asked for a boolean is always made where it stands.
+
+**Two more places asked for a value they did not want.** `PredicateFilter.ApplyInPlace` took the
+boolean route only for a predicate that is statically a node-set, and `Apply` — a filter expression,
+and a pattern re-counting between predicates — for none. Both now take it for a predicate that is
+statically a boolean as well, decided once for each predicate and not once for each candidate. Such a
+predicate may still read its position, as `position() > 1 and @id` does; what it cannot do is answer
+with a number, which is the only thing the value was being looked at for. The compiled form of a
+predicate does not say it is a boolean, so it goes on being run as the code it was emitted as. And the
+emitted `and`, `or`, `not()` and `boolean()` asked a path operand for its value by the default
+`EmitAsBoolean`, which is the same node-set by another road: `PathExpr.EmitAsBoolean` answers from the
+inline child walk where there is one and hands any other path to `EvaluateAsBoolean`.
+
+What it comes to, in microseconds a transformation over the thousand-product benchmark document at
+`version="3.0"`, a tree already parsed, on .NET 10.0 with the JIT and the collector at their defaults.
+Every figure is from fresh processes, one case and one build to a process, the builds taken turn
+about, each warmed until three 400 ms windows in a row agreed within 3% on time and 0.5% on bytes a
+call. Other sessions were working on the machine and lifted a median here and there by a third, so
+what is quoted is the quickest of a process's twelve windows, averaged over two processes, or three
+for the rows marked so. Bytes a call are the same to the byte in every process of a build.
+
+| interpreted | was | `and` alone | with the predicate route | bytes a call, was | is |
+|---|---|---|---|---|---|
+| `count(//product[name and category and rating])` | 386 | 290 | 260 | 243,872 | 3,872 |
+| `count(//product[name and price > 100])` | 322 | 266 | 263 | 83,864 | 3,864 |
+| `count(//product[discount or price > 100])` | 282 | 239 | 240 | 51,864 | 3,864 |
+| `count((//product)[name and price > 100])` | 287 | 246 | 248 | 97,520 | 17,520 |
+| `count(//price[@currency and . > 100])` | 410 | 369 | 371 | 579,864 | 499,864 |
+| `xsl:variable select="name and price > 100"` for each product | 390 | 330 | 324 | 168,648 | 88,648 |
+| `count(//product[price > 100 and rating > 4])`, three processes | 241 | 227 | 224 | 3,864 | 3,864 |
+| `count(//product[price > 100])`, three processes | 170 | 171 | 166 | 3,864 | 3,864 |
+| `count(//product[not(price > 100)])` | 188 | 175 | 177 | 3,864 | 3,864 |
+| `xsl:if test="price > 100 and rating > 4"`, three processes | 228 | 234 | 237 | 8,600 | 8,600 |
+| `xsl:if test="name and price > 100"`, three processes | 277 | 261 | 263 | 8,600 | 8,600 |
+
+| compiled | was | `and` alone | with the emitted path | bytes a call, was | is |
+|---|---|---|---|---|---|
+| `count(//product[name and category and rating])` | 221 | 220 | 148 | 243,872 | 3,872 |
+| `count(//product[name and price > 100])` | 181 | 183 | 149 | 83,864 | 3,864 |
+| `count(//product[discount or price > 100])` | 167 | 174 | 153 | 51,864 | 3,864 |
+| `count((//product)[name and price > 100])` | 194 | 194 | 167 | 97,520 | 17,520 |
+| `count(//price[@currency and . > 100])` | 376 | 380 | 368 | 579,864 | 499,864 |
+| `xsl:variable select="name and price > 100"` for each product | 277 | 262 | 251 | 168,648 | 88,648 |
+| `count(//product[price > 100 and rating > 4])`, three processes | 137 | 143 | 135 | 3,864 | 3,864 |
+| `count(//product[price > 100])`, three processes | 112 | 115 | 114 | 3,864 | 3,864 |
+| `xsl:if test="price > 100 and rating > 4"`, three processes | 227 | 222 | 226 | 8,600 | 8,600 |
+
+The expression the note that prompted this measured, `price > 100 and rating > 4`, is the one that
+gains least: about six percent interpreted, which is little more than one process differs from the next
+by, and nothing compiled, because neither operand is a path and a comparison was already answering
+without building anything — all it is spared is a boolean wrapped and unwrapped. **The gain is where an
+operand is a path**, a tenth to a third of the time interpreted and up to a third compiled, and up to
+eighty bytes for every candidate and every such operand: a node-set and its array. Two `xsl:if` rows
+are there as controls, a `test` having asked for a boolean all along and none of this being on its
+way; they move by what one process differs from the next, in both directions. The rule the figures
+were read by is that a large cut in what is allocated is worth a small cost in time. Nothing here had
+to invoke it: no row that allocates less is slower.
+
+A template rule `match="product[name and price > 100]"` lost the same eighty thousand bytes and none
+of its seven milliseconds, which were not the predicate's: as the tables were taken `PredicatesHold`
+enumerated the candidate's siblings and found it among them before asking whether any predicate could
+read a position, so a thousand siblings were a million visits. That was another piece of work, and is
+the section above, which landed while this one was being measured.
+
+One more was found by the audit and left, being no part of the boolean route and costing a fast path to
+put right: in a `version="1.0"` stylesheet `current() = 3` inside `xsl:for-each select="(3, 0)"` is
+`XTDE1360` on both backends. `CurrentExpr.ReturnsNodeSet` promises a node under 1.0 behaviour, the
+comparison reads its nodes directly on the strength of it, and an atomic current item breaks the
+promise — what `ContextItemExpr` stopped promising for the same reason.
+
+Nothing moves on any run: the 3.0 run stands at 8,061 of 8,071, the 2.0 run at 5,678 of 5,701 and the
+schema-aware run at 8,668 of 8,727, each on both backends, and the XPath runs at 18,268 of 18,285 and
+14,553 of 14,577. Every failure set is identical test for test and message for message, taken before
+and after with the suites checked for having stood still under each run. Eleven new unit tests, 2,894
+in all, each asking its expression as a value, in an `xsl:when` and in an `xsl:if`, on both backends,
+and requiring one answer or one error code; the two about `current()` and the function call fail
+against the engine as it was.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error

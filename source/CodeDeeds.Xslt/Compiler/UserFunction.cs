@@ -145,24 +145,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// <inheritdoc/>
         public override XPathValue Evaluate(ref DynamicContext context)
         {
-            // A function is evaluated in temporary output state (§2.3.2), whatever its body writes to.
-            XsltRuntime? runtime = context.Runtime;
-
-            if (runtime is null)
-            {
-                return Invoke(ref context, inPlace: m_last);
-            }
-
-            runtime.TemporaryDepth++;
-
-            try
-            {
-                return Invoke(ref context, inPlace: m_last);
-            }
-            finally
-            {
-                runtime.TemporaryDepth--;
-            }
+            return InvokeInTemporaryState(ref context, inPlace: m_last);
         }
 
         /// <inheritdoc/>
@@ -170,19 +153,50 @@ namespace CodeDeeds.Xslt.Compiler
         {
             // Asked for as a boolean, the value is about to be read, so the call has to be made here: only
             // a value handed on untouched can stand in for the function body's own.
-            return Invoke(ref context, inPlace: false).ToBoolean();
+            return InvokeInTemporaryState(ref context, inPlace: false).ToBoolean();
         }
 
         /// <inheritdoc/>
         public override XdmTree EvaluateNodes(ref DynamicContext context, List<int> output)
         {
-            NodeSet nodes = Invoke(ref context, inPlace: false).AsNodeSet();
+            NodeSet nodes = InvokeInTemporaryState(ref context, inPlace: false).AsNodeSet();
             for (int i = 0; i < nodes.Count; i++)
             {
                 output.Add(nodes[i]);
             }
 
             return nodes.Tree;
+        }
+
+        /// <summary>
+        /// Makes the call in temporary output state, which is where a function is evaluated whatever its
+        /// body writes to (§2.3.2).
+        /// </summary>
+        /// <remarks>
+        /// One place for it, because the call has three ways in and the state is not the caller's to
+        /// forget: asked for as a boolean or as nodes the call was made without it, so a function reading
+        /// <c>current-output-uri()</c> answered with the URI in an <c>xsl:if</c> and with nothing in a
+        /// <c>select</c>.
+        /// </remarks>
+        private XPathValue InvokeInTemporaryState(ref DynamicContext context, bool inPlace)
+        {
+            XsltRuntime? runtime = context.Runtime;
+
+            if (runtime is null)
+            {
+                return Invoke(ref context, inPlace);
+            }
+
+            runtime.TemporaryDepth++;
+
+            try
+            {
+                return Invoke(ref context, inPlace);
+            }
+            finally
+            {
+                runtime.TemporaryDepth--;
+            }
         }
 
         /// <inheritdoc/>

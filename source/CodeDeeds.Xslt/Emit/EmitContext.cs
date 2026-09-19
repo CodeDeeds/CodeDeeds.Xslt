@@ -32,6 +32,10 @@ namespace CodeDeeds.Xslt.Emit
             typeof(Expr).GetMethod(nameof(Expr.Evaluate))
             ?? throw new InvalidOperationException("Expr.Evaluate could not be located.");
 
+        private static readonly MethodInfo s_evaluateAsBoolean =
+            typeof(Expr).GetMethod(nameof(Expr.EvaluateAsBoolean))
+            ?? throw new InvalidOperationException("Expr.EvaluateAsBoolean could not be located.");
+
         private readonly List<object> m_constants = new();
 
         /// <summary>Initializes a compilation context.</summary>
@@ -99,6 +103,23 @@ namespace CodeDeeds.Xslt.Emit
             LoadConstant(expression, typeof(Expr));
             LoadContext();
             IL.Call(s_evaluate, virtualCall: true);
+        }
+
+        /// <summary>
+        /// Emits a call back into an expression's interpreted implementation for its effective boolean
+        /// value, leaving a raw <see cref="bool"/> on the stack.
+        /// </summary>
+        /// <remarks>
+        /// For an expression whose <see cref="Expr.EvaluateAsBoolean"/> does less than evaluating it and
+        /// converting the result — a path, which answers by existence. An expression with no such route
+        /// gains nothing here over <see cref="EmitInterpreterFallback"/> and the conversion after it.
+        /// </remarks>
+        /// <param name="expression">The node to defer to.</param>
+        public void EmitInterpreterBooleanFallback(Expr expression)
+        {
+            LoadConstant(expression, typeof(Expr));
+            LoadContext();
+            IL.Call(s_evaluateAsBoolean, virtualCall: true);
         }
     }
 }

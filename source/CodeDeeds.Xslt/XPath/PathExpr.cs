@@ -515,6 +515,34 @@ namespace CodeDeeds.Xslt.XPath
             context.IL.Call(EmitHelpers.Method(nameof(EmitHelpers.ReturnList)));
         }
 
+        /// <inheritdoc/>
+        /// <remarks>
+        /// What an emitted <c>and</c>, <c>or</c>, <c>not()</c> or <c>boolean()</c> asks of an operand that
+        /// is a path. Left to the default it was the path's value with its effective boolean value taken
+        /// after: a node-set built for every candidate of a predicate such as <c>[@id and price &gt; 100]</c>
+        /// only to be asked whether it was empty. The inline walk answers from the list it filled, and any
+        /// other path is handed to <see cref="EvaluateAsBoolean"/>, which builds nothing either.
+        /// </remarks>
+        internal override void EmitAsBoolean(EmitContext context)
+        {
+            if (!TryGetSimpleChildNameStep(out int nameSlot))
+            {
+                context.EmitInterpreterBooleanFallback(this);
+                return;
+            }
+
+            LocalBuilder tree = context.IL.DeclareLocal(typeof(XdmTree));
+            LocalBuilder list = context.IL.DeclareLocal(typeof(List<int>));
+
+            context.IL.Call(EmitHelpers.Method(nameof(EmitHelpers.RentList)));
+            context.IL.StoreLocal(list);
+
+            EmitChildNameLoop(context, nameSlot, tree, list);
+
+            context.IL.LoadLocal(list);
+            context.IL.Call(EmitHelpers.Method(nameof(EmitHelpers.AnyThenReturnList)));
+        }
+
         /// <summary>
         /// Emits a walk of the context node's children, appending those matching the step's name to a list.
         /// </summary>

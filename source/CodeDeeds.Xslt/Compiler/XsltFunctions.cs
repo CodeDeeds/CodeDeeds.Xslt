@@ -1918,7 +1918,17 @@ namespace CodeDeeds.Xslt.Compiler
         /// <inheritdoc/>
         public override bool EvaluateAsBoolean(ref DynamicContext context)
         {
-            return context.CurrentNode >= 0 || RequireASubstring(ref context).Length != 0;
+            if (context.CurrentNode >= 0)
+            {
+                return true;
+            }
+
+            // The same three answers Evaluate gives, in the same order. An atomic value being walked was
+            // left out here, so 'test="current()"' inside 'xsl:for-each select="(0, 1)"' was refused as
+            // having no current item where the select beside it read the number.
+            return context.Runtime?.CurrentAtomicItem is XPathValue atomic
+                ? atomic.ToBoolean()
+                : RequireASubstring(ref context).Length != 0;
         }
 
         /// <summary>

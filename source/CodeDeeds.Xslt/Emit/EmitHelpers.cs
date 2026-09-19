@@ -74,6 +74,18 @@ namespace CodeDeeds.Xslt.Emit
         }
 
         /// <summary>
+        /// Says whether a walk found any node and hands its list back to the pool, for an emitted path that
+        /// was asked only whether it selects anything.
+        /// </summary>
+        /// <param name="nodes">The rented list the walk filled.</param>
+        public static bool AnyThenReturnList(List<int> nodes)
+        {
+            bool any = nodes.Count != 0;
+            NodeListPool.Return(nodes);
+            return any;
+        }
+
+        /// <summary>
         /// Refuses a step where the context item is not a node for it to start from, for emitted code that
         /// is about to walk that node's children.
         /// </summary>

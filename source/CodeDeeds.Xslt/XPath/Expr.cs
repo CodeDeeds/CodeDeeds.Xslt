@@ -674,13 +674,18 @@ namespace CodeDeeds.Xslt.XPath
         {
             switch (m_operator)
             {
+                // Each operand is asked for a boolean rather than for a value to take one from, which is
+                // what a test asks of the whole expression: a path answers whether it found a node without
+                // building the node-set, and a comparison without wrapping what it answered. Every
+                // EvaluateAsBoolean has to be Evaluate().ToBoolean() for that to be the same expression,
+                // errors included, which is what BooleanRouteTests holds each of them to.
                 case BinaryOperator.Or:
                     return XPathValue.FromBoolean(
-                        m_left.Evaluate(ref context).ToBoolean() || m_right.Evaluate(ref context).ToBoolean());
+                        m_left.EvaluateAsBoolean(ref context) || m_right.EvaluateAsBoolean(ref context));
 
                 case BinaryOperator.And:
                     return XPathValue.FromBoolean(
-                        m_left.Evaluate(ref context).ToBoolean() && m_right.Evaluate(ref context).ToBoolean());
+                        m_left.EvaluateAsBoolean(ref context) && m_right.EvaluateAsBoolean(ref context));
             }
 
             // Comparisons where an operand is statically a node-set are the hottest expressions in most
@@ -1616,6 +1621,7 @@ namespace CodeDeeds.Xslt.XPath
         {
             List<int> survivors = new List<int>(candidates.Count);
             int size = candidates.Count;
+            bool booleanOnly = IsNeverPositional(predicate);
 
             for (int i = 0; i < candidates.Count; i++)
             {
@@ -1624,13 +1630,31 @@ namespace CodeDeeds.Xslt.XPath
                 inner.Position = i + 1;
                 inner.Size = size;
 
-                if (Holds(predicate, ref inner))
+                if (booleanOnly ? predicate.EvaluateAsBoolean(ref inner) : Holds(predicate, ref inner))
                 {
                     survivors.Add(candidates[i]);
                 }
             }
 
             return survivors;
+        }
+
+        /// <summary>
+        /// Whether a predicate can be asked for a boolean outright, its value being known never to be the
+        /// number that would select by position.
+        /// </summary>
+        /// <remarks>
+        /// True of a predicate that is statically a node-set, which keeps a candidate by finding a node,
+        /// and of one that is statically a boolean — a comparison, <c>and</c>, <c>or</c>, <c>not()</c>.
+        /// Either may still <em>read</em> the position, as <c>position() &gt; 1 and @id</c> does: what it
+        /// cannot do is answer with one. Asked once for each predicate and not once for each candidate,
+        /// so that what is saved is a value built and taken apart again for every node and what is spent
+        /// is two virtual calls. The compiled form of a predicate does not say it is a boolean, so it is
+        /// evaluated as the code it was emitted as rather than handed back to the interpreter for being one.
+        /// </remarks>
+        private static bool IsNeverPositional(Expr predicate)
+        {
+            return predicate.ReturnsNodeSet || predicate.IsBooleanValued;
         }
 
         /// <summary>
@@ -1694,9 +1718,7 @@ namespace CodeDeeds.Xslt.XPath
                     return;
                 }
 
-                // A predicate that is statically a node-set can never be a positional one, so it can take the
-                // boolean route and skip building a value at all.
-                bool booleanOnly = predicate.ReturnsNodeSet;
+                bool booleanOnly = IsNeverPositional(predicate);
 
                 int write = start;
                 for (int i = 0; i < size; i++)
