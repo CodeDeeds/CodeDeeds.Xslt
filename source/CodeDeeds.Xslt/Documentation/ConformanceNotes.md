@@ -7795,6 +7795,94 @@ claim. The 3.0 run stands at 8,061 of 8,071 and the schema-aware run at 8,668 of
 backends; the 2.0 run at 5,678 of 5,701; the XPath runs at 18,268 and 14,553. Every failure set is
 identical test for test. Two new unit tests, 2,868 in all.
 
+### One comparison, and three ways into it
+
+`price < '5'` over a price of 10 is the comparison that tells the versions apart. XPath 1.0 turns both
+sides into numbers, and 10 is not less than 5. From 2.0 the node atomizes to `xs:untypedAtomic`, which
+is read as whatever it is compared with — here a string — and `"10" < "5"` by code point is true. Under
+2.0 and 3.0 `<xsl:value-of select="price &lt; '5'"/>` wrote `true` and `<xsl:when test="price &lt; '5'">`
+took the other branch, on both backends.
+
+A comparison with a node-set on one side is the hottest expression in most stylesheets, so it has routes
+that avoid building the node-set: one that reads the node list by 1.0's rules, and one that atomizes each
+node against the other operand by 2.0's. `BinaryExpr.Evaluate` chose between them by version.
+**`EvaluateAsBoolean` sent every such comparison down the 1.0 route and never asked.** That is the way in
+for `xsl:if` and `xsl:when`, for `not()`, `boolean()`, the condition of an `if` and the `satisfies` of a
+quantifier, and for both operands of an `and` or an `or` reached from any of those — and the compiled
+backend hands a `test` to the interpreter, so it was the same there. What the 1.0 reading gets wrong under
+2.0 is more than the string:
+
+| written in a `test` under 2.0 or 3.0 | was | is |
+|---|---|---|
+| `price < '5'`, `price < limit` | numeric | by code point, or by the collation |
+| `name = 'WIDGET'` under a case-blind `default-collation` | false, the collation never consulted | true |
+| `price > 5` where the price is `abc` | false, by way of NaN | `FORG0001`, as the cast is |
+| `n = 10` where the text is `1e1`, `+10` or `INF` | false, those being outside 1.0's grammar for a number | the `xs:double` they spell |
+| a node a schema typed | its text | its typed value |
+
+**The emitted code had the same fault by a road of its own.** `EmitAsBoolean` — which `and`, `or`,
+`not()` and `boolean()` emit their operands through — wrote the inline child walk and the 1.0 comparison
+after it for any comparison with a simple child step on one side, where `Emit` asked the version first.
+So `price < '5' and true()` in a `select` was `true` interpreted and `false` compiled: the disagreement
+`--compiled` exists to find, in a shape no test in the suite has. Reading it found two more. It did not
+ask either whether the other operand could span documents, which `Emit` also asks, so
+`not(v = (document('a.xml') | document('b.xml'))//v)` read the second document's node out of the first
+document's tree — silently, where the two are one shape and the identifier is a valid one in both. And
+the inline walk indexes the tree by the context node without asking whether there is one, so
+`price > 5 and true()` inside `xsl:for-each select="(1, 2)"` was an `IndexOutOfRangeException` where the
+interpreter raises `XPTY0020`. That one was reachable under 1.0 as it stood, and would have been under
+every version once the walk was emitted for 2.0.
+
+**The route is settled once now, where the expression is built**, and every way in reads the one answer:
+as a value, as a boolean, as emitted code. Nothing it depends on can change afterwards — the operands,
+the operator and the version are fixed, and so is whether an operand is statically a node-set — and it
+had been four virtual calls for every candidate node of a predicate. The emitted walk asks for a context
+node first, through the same error the interpreter raises.
+
+**Being right cost speed, and the cost was in the 2.0 route itself.** The note that prompted this
+expected the fix to be the faster as well, reasoning that the compiled form of
+`count(//product[price > 100 and rating > 4])` was quick because it reached the typed route. It was the
+other way about: the compiled form was quick because it was the emitted 1.0 comparison, the fault above,
+and the interpreted form was slow because a predicate is evaluated as a value and already went the typed
+way. The typed route asked `XdmComparison.Pair` about each node, which decides afresh for every pair how
+the untyped half is to be read — wrapping the text, casting it through the general cast with its lexical
+check and `double.TryParse`, classifying the pair, wrapping the result. With only the routing corrected,
+`xsl:if test="price > 100"` over a thousand products went from 184 to 284 microseconds and the compiled
+predicate from 133 to 362. So where the tree is untyped and the other operand is one number or one
+string, the reading is settled once for all the nodes: against a number each node is an `xs:double` and
+the comparison IEEE's, which is what the numeric branch of `Pair` comes to, NaN included; against a
+string each node is a string and the collation compares them, or for `=` and `!=` by code point,
+`string.Equals`. The number is read by the scanner written for 1.0's grammar, which lies wholly inside
+`xs:double`'s lexical space and means the same number there; only what it cannot read goes to the cast,
+which knows the exponent, the plus sign, `INF` and `NaN`, and raises `FORG0001` for the rest. And the
+compiled backend emits the inline walk for the typed route too, handing the nodes to the comparing half
+of the very method the interpreter uses, so the rules exist once.
+
+What it comes to, in microseconds a transformation over the thousand-product benchmark document at
+`version="3.0"`, each figure the mean of two runs in fresh processes taken turn about with the engine as
+it was, and each warmed until time and bytes a call had both stopped moving:
+
+| | interpreted, was | is | compiled, was | is |
+|---|---|---|---|---|
+| `count(//product[price > 100 and rating > 4])` | 338 | 237 | 132, by 1.0's rules | 131 |
+| `count(//product[price > 100])` | 255 | 166 | 265 | 108 |
+| `count(//product[not(price > 100)])` | 173, by 1.0's rules | 177 | 106, by 1.0's rules | 112 |
+| `xsl:if test="price > 100"` for each product | 171, by 1.0's rules | 176 | 173, by 1.0's rules | 186 |
+| `xsl:if test="category = 'Electronics'"` | 161, by 1.0's rules | 163 | 171, by 1.0's rules | 176 |
+
+A predicate that was already right is a third faster interpreted, and the compiled one that fell back to
+the interpreter for its comparison is two and a half times faster for walking its own children. Where the
+answer came by the wrong rules, the right ones cost between nothing and a few percent: one more call and a
+test for NaN in every comparison, against a route that had neither because it had nothing to decide.
+Bytes allocated are the same to the byte in every row.
+
+Nothing moves on any run, which says the suite asks about comparisons in a `select` and in an `assert`
+and hardly at all in a `test`: the 3.0 run stands at 8,061 of 8,071, the 2.0 run at 5,678 of 5,701 and
+the schema-aware run at 8,668 of 8,727, each on both backends, and the XPath runs at 18,268 of 18,285 and
+14,553 of 14,577. Every failure set is identical test for test. Fifteen new unit tests, 2,883 in all,
+each asking the comparison as a value and as a test on both backends and requiring one answer; thirteen
+of the fifteen fail against the engine as it was.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error

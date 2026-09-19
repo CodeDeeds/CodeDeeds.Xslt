@@ -580,9 +580,64 @@ namespace CodeDeeds.Xslt.XPath
             m_left = left;
             m_right = right;
             m_version = version;
+            m_route = RouteFor(op, left, right, version);
         }
 
+        private static readonly System.Reflection.MethodInfo s_compareTypedNodes =
+            typeof(BinaryExpr).GetMethod(
+                nameof(CompareTypedNodes),
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("BinaryExpr.CompareTypedNodes could not be located.");
+
         private readonly XsltVersion m_version;
+        private readonly ComparisonRoute m_route;
+
+        /// <summary>How a comparison reads an operand that is statically a node-set.</summary>
+        private enum ComparisonRoute : byte
+        {
+            /// <summary>Both operands are evaluated to values, and the version's rules applied to the pair.</summary>
+            General,
+
+            /// <summary>
+            /// Under 1.0 rules, either operand's nodes are read from a pooled list, without building a node-set.
+            /// </summary>
+            NodesDirectly,
+
+            /// <summary>
+            /// Under 2.0 rules, one operand is statically a node-set and the other is not, so the nodes are
+            /// atomized one at a time against the other value rather than collected first.
+            /// </summary>
+            NodesTyped,
+        }
+
+        /// <summary>
+        /// Settles which way a comparison reads its operands, from what the operands are and the version
+        /// they were written under.
+        /// </summary>
+        /// <remarks>
+        /// Asked once, where the expression is built, and not where it is evaluated: none of what it reads
+        /// can change afterwards, and it is four virtual calls that a predicate would otherwise repeat for
+        /// every candidate node. Every way into the comparison — as a value, as a boolean, as emitted code —
+        /// reads the one answer, so no two of them can take it by different rules.
+        /// </remarks>
+        private static ComparisonRoute RouteFor(BinaryOperator op, Expr left, Expr right, XsltVersion version)
+        {
+            if (!IsComparison(op) || left.MaySpanDocuments || right.MaySpanDocuments)
+            {
+                return ComparisonRoute.General;
+            }
+
+            if (version.IsBackwardsCompatible)
+            {
+                return left.ReturnsNodeSet || right.ReturnsNodeSet
+                    ? ComparisonRoute.NodesDirectly
+                    : ComparisonRoute.General;
+            }
+
+            return left.ReturnsNodeSet != right.ReturnsNodeSet
+                ? ComparisonRoute.NodesTyped
+                : ComparisonRoute.General;
+        }
 
         /// <summary>
         /// What the comparison was written among: the collation and the namespaces.
@@ -590,28 +645,10 @@ namespace CodeDeeds.Xslt.XPath
         /// <remarks>
         /// Null where the expression was built without a static context to ask, which is every expression
         /// this engine builds for itself. The emitted form needs nothing of it: a comparison under XPath 2.0
-        /// rules already falls back to the interpreter, and one under 1.0 rules has no collation to read.
+        /// rules is handed back to this expression to make, whether whole or with its nodes already walked,
+        /// and one under 1.0 rules has no collation to read.
         /// </remarks>
         internal ComparisonContext? Comparing { get; init; }
-
-        /// <summary>
-        /// Whether this comparison may read one operand's nodes directly, without building a node-set.
-        /// </summary>
-        private bool CanTakeNodesDirectly =>
-            m_version.IsBackwardsCompatible
-            && IsComparison(m_operator)
-            && (m_left.ReturnsNodeSet || m_right.ReturnsNodeSet)
-            && !m_left.MaySpanDocuments && !m_right.MaySpanDocuments;
-
-        /// <summary>
-        /// Whether, under 2.0 rules, one operand is statically a node-set and the other is not, so that the
-        /// nodes can be atomized one at a time against the other value rather than collected first.
-        /// </summary>
-        private bool CanTakeNodesTyped =>
-            !m_version.IsBackwardsCompatible
-            && IsComparison(m_operator)
-            && m_left.ReturnsNodeSet != m_right.ReturnsNodeSet
-            && !m_left.MaySpanDocuments && !m_right.MaySpanDocuments;
 
         /// <inheritdoc/>
         internal override IEnumerable<Expr> Children => new[] { m_left, m_right };
@@ -648,17 +685,16 @@ namespace CodeDeeds.Xslt.XPath
 
             // Comparisons where an operand is statically a node-set are the hottest expressions in most
             // stylesheets, because they appear in predicates evaluated once per candidate node. Taking the
-            // node list directly avoids allocating a NodeSet for every one of those evaluations. It reads the
-            // nodes under 1.0 rules, so 2.0 goes the general way instead — the conversions there depend on
-            // what is on the other side, which these paths have already decided.
-            if (CanTakeNodesDirectly)
+            // node list directly avoids allocating a NodeSet for every one of those evaluations. There is a
+            // route for each set of rules, because how the nodes are read is what differs: under 1.0 by what
+            // the operator is, under 2.0 by what is on the other side. EvaluateAsBoolean takes the same one.
+            switch (m_route)
             {
-                return XPathValue.FromBoolean(CompareWithNodeOperand(ref context));
-            }
+                case ComparisonRoute.NodesDirectly:
+                    return XPathValue.FromBoolean(CompareWithNodeOperand(ref context));
 
-            if (CanTakeNodesTyped)
-            {
-                return XPathValue.FromBoolean(CompareTypedWithNodeOperand(ref context));
+                case ComparisonRoute.NodesTyped:
+                    return XPathValue.FromBoolean(CompareTypedWithNodeOperand(ref context));
             }
 
             XPathValue left = m_left.Evaluate(ref context);
@@ -712,15 +748,28 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <inheritdoc/>
+        /// <remarks>
+        /// What an <c>xsl:if</c> or an <c>xsl:when</c> asks, and what <c>not()</c>, <c>boolean()</c> and the
+        /// condition of an <c>if</c> ask of their operand. A comparison goes the way
+        /// <see cref="Evaluate"/> sends it, by the route settled when it was built: the node list read
+        /// directly is a reading under 1.0 rules, and taking it under 2.0 made <c>price &lt; '5'</c> one
+        /// thing in a <c>test</c> and another in a <c>select</c>.
+        /// </remarks>
         public override bool EvaluateAsBoolean(ref DynamicContext context)
         {
-            return m_operator switch
+            switch (m_operator)
             {
-                BinaryOperator.Or => m_left.EvaluateAsBoolean(ref context) || m_right.EvaluateAsBoolean(ref context),
-                BinaryOperator.And => m_left.EvaluateAsBoolean(ref context) && m_right.EvaluateAsBoolean(ref context),
-                _ when IsComparison(m_operator) && (m_left.ReturnsNodeSet || m_right.ReturnsNodeSet)
-                    && !m_left.MaySpanDocuments && !m_right.MaySpanDocuments =>
-                    CompareWithNodeOperand(ref context),
+                case BinaryOperator.Or:
+                    return m_left.EvaluateAsBoolean(ref context) || m_right.EvaluateAsBoolean(ref context);
+
+                case BinaryOperator.And:
+                    return m_left.EvaluateAsBoolean(ref context) && m_right.EvaluateAsBoolean(ref context);
+            }
+
+            return m_route switch
+            {
+                ComparisonRoute.NodesDirectly => CompareWithNodeOperand(ref context),
+                ComparisonRoute.NodesTyped => CompareTypedWithNodeOperand(ref context),
                 _ => Evaluate(ref context).ToBoolean(),
             };
         }
@@ -816,52 +865,76 @@ namespace CodeDeeds.Xslt.XPath
                     tree = m_right.EvaluateNodes(ref context, nodes);
                 }
 
-                if (other.Kind is not (XPathValueKind.Boolean or XPathValueKind.Number or XPathValueKind.String))
-                {
-                    XPathValue set = XPathValue.FromNodeSet(NodeSet.FromOrderedNodes(tree, nodes));
-
-                    return nodesOnLeft
-                        ? XPathComparison.General(set, other, m_operator, m_version, Comparing)
-                        : XPathComparison.General(other, set, m_operator, m_version, Comparing);
-                }
-
-                bool typed = tree.HasTypeAnnotations;
-
-                for (int i = 0; i < nodes.Count; i++)
-                {
-                    // In a validated tree a node's typed value is what its type says, and may be several
-                    // values, each of which is asked; in any other it is the text, untyped.
-                    XPathValue atom = typed
-                        ? XdmSequence.TypedValueOf(tree, nodes[i])
-                        : XPathValue.FromUntypedAtomic(tree.StringValueOf(nodes[i]));
-
-                    if (atom.Kind == XPathValueKind.Sequence)
-                    {
-                        XdmSequence several = atom.AsSequence();
-
-                        for (int j = 0; j < several.Count; j++)
-                        {
-                            if (Holds(several[j], other, nodesOnLeft))
-                            {
-                                return true;
-                            }
-                        }
-
-                        continue;
-                    }
-
-                    if (Holds(atom, other, nodesOnLeft))
-                    {
-                        return true;
-                    }
-                }
-
-                return false;
+                return CompareTypedNodes(tree, nodes, other, nodesOnLeft);
             }
             finally
             {
                 NodeListPool.Return(nodes);
             }
+        }
+
+        /// <summary>
+        /// The comparing half of <see cref="CompareTypedWithNodeOperand"/>: the nodes already collected,
+        /// against the value the other operand gave.
+        /// </summary>
+        /// <remarks>
+        /// Apart so that emitted code, which walks a child step inline and has the nodes in a list of its
+        /// own, compares them by the same rules the interpreter does rather than by a copy of them.
+        /// </remarks>
+        /// <param name="tree">The tree the nodes belong to.</param>
+        /// <param name="nodes">The nodes forming one operand, in document order.</param>
+        /// <param name="other">The other operand's value, whatever it turned out to be.</param>
+        /// <param name="nodesOnLeft">Whether the nodes were written on the left of the operator.</param>
+        internal bool CompareTypedNodes(XdmTree tree, List<int> nodes, XPathValue other, bool nodesOnLeft)
+        {
+            if (other.Kind is not (XPathValueKind.Boolean or XPathValueKind.Number or XPathValueKind.String))
+            {
+                XPathValue set = XPathValue.FromNodeSet(NodeSet.FromOrderedNodes(tree, nodes));
+
+                return nodesOnLeft
+                    ? XPathComparison.General(set, other, m_operator, m_version, Comparing)
+                    : XPathComparison.General(other, set, m_operator, m_version, Comparing);
+            }
+
+            bool typed = tree.HasTypeAnnotations;
+
+            // Untyped text against a number or a string is one reading for every node, settled once.
+            if (!typed && XdmComparison.TryUntypedNodesVersusValue(
+                tree, nodes, other, nodesOnLeft, m_operator, Comparing, out bool holds))
+            {
+                return holds;
+            }
+
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                // In a validated tree a node's typed value is what its type says, and may be several
+                // values, each of which is asked; in any other it is the text, untyped.
+                XPathValue atom = typed
+                    ? XdmSequence.TypedValueOf(tree, nodes[i])
+                    : XPathValue.FromUntypedAtomic(tree.StringValueOf(nodes[i]));
+
+                if (atom.Kind == XPathValueKind.Sequence)
+                {
+                    XdmSequence several = atom.AsSequence();
+
+                    for (int j = 0; j < several.Count; j++)
+                    {
+                        if (Holds(several[j], other, nodesOnLeft))
+                        {
+                            return true;
+                        }
+                    }
+
+                    continue;
+                }
+
+                if (Holds(atom, other, nodesOnLeft))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>Whether one atomized node compares as asked against the other operand.</summary>
@@ -874,7 +947,7 @@ namespace CodeDeeds.Xslt.XPath
 
         internal override void Emit(EmitContext context)
         {
-            if (CanTakeNodesDirectly)
+            if (m_route != ComparisonRoute.General)
             {
                 if (TryEmitNodeComparison(context))
                 {
@@ -990,7 +1063,11 @@ namespace CodeDeeds.Xslt.XPath
             {
                 if (IsComparison(m_operator))
                 {
-                    if (!m_left.ReturnsNodeSet && !m_right.ReturnsNodeSet)
+                    // The inline walk is for the routes that read a node list, and compares by the rules of
+                    // the one it was written for. Emitted here for any comparison with a path on one side,
+                    // and always with the 1.0 comparison after it, it answered 'price < "5" and true()'
+                    // numerically under 2.0, where the interpreter compared two strings.
+                    if (m_route == ComparisonRoute.General)
                     {
                         EmitComparison(context);
                         return;
@@ -1056,12 +1133,28 @@ namespace CodeDeeds.Xslt.XPath
 
             PathExpr.EmitChildNameLoop(context, nameSlot, tree, list);
 
-            context.IL.LoadLocal(tree);
-            context.IL.LoadLocal(list);
-            other.Emit(context);
-            context.IL.LoadInt(nodesOnLeft ? 1 : 0);
-            context.IL.LoadInt((int)m_operator);
-            context.IL.Call(EmitHelpers.Method(nameof(EmitHelpers.CompareNodes)));
+            if (m_route == ComparisonRoute.NodesTyped)
+            {
+                // Under 2.0 rules the comparison is this expression's own: what an untyped node is read as
+                // depends on the other operand, and on the collation and the namespaces this was written
+                // among. So the nodes walked inline are handed to the very method the interpreter compares
+                // with, and the two backends cannot come to differ over it.
+                context.LoadConstant(this, typeof(BinaryExpr));
+                context.IL.LoadLocal(tree);
+                context.IL.LoadLocal(list);
+                other.Emit(context);
+                context.IL.LoadInt(nodesOnLeft ? 1 : 0);
+                context.IL.Call(s_compareTypedNodes);
+            }
+            else
+            {
+                context.IL.LoadLocal(tree);
+                context.IL.LoadLocal(list);
+                other.Emit(context);
+                context.IL.LoadInt(nodesOnLeft ? 1 : 0);
+                context.IL.LoadInt((int)m_operator);
+                context.IL.Call(EmitHelpers.Method(nameof(EmitHelpers.CompareNodes)));
+            }
 
             context.IL.LoadLocal(list);
             context.IL.Call(EmitHelpers.Method(nameof(EmitHelpers.ReturnList)));

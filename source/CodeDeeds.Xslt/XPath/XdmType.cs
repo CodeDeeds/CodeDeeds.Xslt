@@ -1280,6 +1280,28 @@ namespace CodeDeeds.Xslt.XPath
                 : value;
         }
 
+        /// <summary>
+        /// Reads untyped text as an <c>xs:double</c>: the cast <see cref="UntypedAsDouble"/> makes, for a
+        /// caller that has the text of a node in hand and wants the number and nothing wrapped around it.
+        /// </summary>
+        /// <remarks>
+        /// XPath 1.0's grammar for a number — digits, with a minus sign and a decimal point if wanted — lies
+        /// wholly inside the lexical space of <c>xs:double</c> and means the same number there, and nearly
+        /// every number a document holds is written in it. So the scanner built for that grammar is asked
+        /// first, and only what it cannot read goes to the cast, which knows about the exponent, the
+        /// leading plus, <c>INF</c> and <c>NaN</c>, and raises <c>FORG0001</c> for what is none of them.
+        /// </remarks>
+        /// <param name="text">The text, as a node's string value gives it.</param>
+        /// <exception cref="XsltException">The text is not in <c>xs:double</c>'s lexical space.</exception>
+        internal static double UntypedTextAsDouble(string text)
+        {
+            double plain = XPathValue.ParseNumber(text);
+
+            return double.IsNaN(plain)
+                ? CastToDouble(XPathValue.FromUntypedAtomic(text), "xs:double")
+                : plain;
+        }
+
         private static bool CastToBoolean(XPathValue value)
         {
             if (value.Kind == XPathValueKind.Boolean)

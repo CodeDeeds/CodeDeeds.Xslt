@@ -100,6 +100,111 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
+        /// Applies a general comparison between the nodes of an untyped tree and one atomic value, where
+        /// the value's type settles a single reading for every node.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <see cref="Pair"/> decides afresh for each pair how the untyped half is to be read, which it must
+        /// where either half could be anything. Here one half is the same value throughout and the other is
+        /// always untyped text, so the decision is made once: against a number every node is cast to
+        /// <c>xs:double</c> and the two compared as doubles, and against a string, an untyped value or a
+        /// URI every node is a string and the two compared by the collation. Those are the comparisons a
+        /// stylesheet makes once per candidate node — <c>price &gt; 100</c>, <c>@type = 'book'</c> — and
+        /// the answers are <see cref="Pair"/>'s, errors included.
+        /// </para>
+        /// <para>
+        /// IEEE comparison of two doubles is already what the numeric branch of <see cref="Pair"/> comes
+        /// to: NaN stands in no relation to anything, so every operator is false against it but <c>!=</c>.
+        /// </para>
+        /// </remarks>
+        /// <param name="tree">The tree the nodes belong to, which carries no type annotations.</param>
+        /// <param name="nodes">The nodes forming one operand.</param>
+        /// <param name="other">The other operand, a single atomic value.</param>
+        /// <param name="nodesOnLeft">Whether the nodes were written on the left of the operator.</param>
+        /// <param name="op">The operator.</param>
+        /// <param name="where">The static context the comparison was written in, or null for the default.</param>
+        /// <param name="holds">Whether some node stands in the relation asked for.</param>
+        /// <returns>
+        /// False where the value's type is one this does not cover — a boolean, a date, a name — and the
+        /// caller is to ask <see cref="Pair"/> about each node instead.
+        /// </returns>
+        /// <exception cref="XsltException">A node compared with a number does not hold one.</exception>
+        public static bool TryUntypedNodesVersusValue(
+            Model.XdmTree tree,
+            List<int> nodes,
+            XPathValue other,
+            bool nodesOnLeft,
+            BinaryOperator op,
+            ComparisonContext? where,
+            out bool holds)
+        {
+            holds = false;
+
+            if (IsNumeric(other.TypeCode))
+            {
+                double scalar = other.ToNumber();
+
+                for (int i = 0; i < nodes.Count; i++)
+                {
+                    double value = XdmType.UntypedTextAsDouble(tree.StringValueOf(nodes[i]));
+
+                    if (nodesOnLeft ? Holds(value, scalar, op) : Holds(scalar, value, op))
+                    {
+                        holds = true;
+                        break;
+                    }
+                }
+
+                return true;
+            }
+
+            if (!IsText(other.TypeCode))
+            {
+                return false;
+            }
+
+            string text = other.ToStringValue();
+            Collation? collation = where?.Collation;
+
+            // Two strings are the same by code point exactly when they are the same string, which is all
+            // that '=' and '!=' ask and is a good deal less than putting them in order.
+            bool sameOrNot = collation is null && op is BinaryOperator.Equal or BinaryOperator.NotEqual;
+            collation ??= Collation.Codepoint;
+
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                string value = tree.StringValueOf(nodes[i]);
+
+                int sign = sameOrNot
+                    ? (string.Equals(value, text, StringComparison.Ordinal) ? 0 : 1)
+                    : nodesOnLeft ? collation.Compare(value, text) : collation.Compare(text, value);
+
+                if (Apply(sign, op))
+                {
+                    holds = true;
+                    break;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>Applies an operator to two doubles, as IEEE 754 defines it for them.</summary>
+        private static bool Holds(double left, double right, BinaryOperator op)
+        {
+            return op switch
+            {
+                BinaryOperator.Equal => left == right,
+                BinaryOperator.NotEqual => left != right,
+                BinaryOperator.LessThan => left < right,
+                BinaryOperator.LessThanOrEqual => left <= right,
+                BinaryOperator.GreaterThan => left > right,
+                _ => left >= right,
+            };
+        }
+
+        /// <summary>
         /// Puts two atomic values in the order the XPath comparison rules give them, and says when there is
         /// no such order.
         /// </summary>

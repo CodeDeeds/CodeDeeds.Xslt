@@ -73,6 +73,22 @@ namespace CodeDeeds.Xslt.Emit
             return XPathValue.FromNodeSet(NodeSet.FromOrderedNodes(tree, nodes));
         }
 
+        /// <summary>
+        /// Refuses a step where the context item is not a node for it to start from, for emitted code that
+        /// is about to walk that node's children.
+        /// </summary>
+        /// <param name="context">The evaluation context.</param>
+        /// <exception cref="XsltException">
+        /// The context item is an atomic value — <c>XPTY0020</c> — or there is none — <c>XPDY0002</c>.
+        /// </exception>
+        public static void RequireContextNode(ref Runtime.DynamicContext context)
+        {
+            if (context.Node < 0)
+            {
+                throw PathExpr.NoContextNode(ref context);
+            }
+        }
+
         /// <summary>Compares collected nodes against a value, for emitted comparison code.</summary>
         /// <param name="tree">The tree the nodes belong to.</param>
         /// <param name="nodes">The nodes forming one operand.</param>

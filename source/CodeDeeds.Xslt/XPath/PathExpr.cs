@@ -539,6 +539,12 @@ namespace CodeDeeds.Xslt.XPath
             LocalBuilder wanted = il.DeclareLocal(typeof(int));
             LocalBuilder child = il.DeclareLocal(typeof(int));
 
+            // The walk indexes the tree by the context node, so it asks first whether there is one, as the
+            // interpreter's does: inside 'for-each select="(1, 2)"' there is not, and the step is an error
+            // to be reported rather than an index to run off the end of an array with.
+            context.LoadContext();
+            il.Call(EmitHelpers.Method(nameof(EmitHelpers.RequireContextNode)));
+
             // wanted = context.FingerprintMap[nameSlot]
             context.LoadContextField(nameof(DynamicContext.FingerprintMap));
             il.LoadInt(nameSlot);
@@ -651,6 +657,27 @@ namespace CodeDeeds.Xslt.XPath
             return result;
         }
 
+        /// <summary>
+        /// The error a relative path raises where the context item is not a node for its first step to
+        /// start from: <c>XPTY0020</c> where it is an atomic value, <c>XPDY0002</c> where there is none.
+        /// </summary>
+        /// <remarks>
+        /// One place for it, because a step is walked from two: here, and by the code the compiled backend
+        /// emits inline, which indexes the tree by the context node and has to have asked first.
+        /// </remarks>
+        internal static XsltException NoContextNode(ref DynamicContext context)
+        {
+            return context.HasAtomicItem
+                ? XsltErrors.Error(
+                    XsltErrorCode.XPTY0020,
+                    "A step starts from the context item, and here that item is an atomic value "
+                    + "rather than a node.")
+                : XsltErrors.Error(
+                    XsltErrorCode.XPDY0002,
+                    "A relative path starts at the context item, and there is none here — this "
+                    + "expression was evaluated outside any focus.");
+        }
+
         private XdmTree EvaluateSteps(
             ref DynamicContext context,
             ref DynamicContext walk,
@@ -665,15 +692,7 @@ namespace CodeDeeds.Xslt.XPath
                 // for 'foo' to be a child of — and there is no item at all outside a focus.
                 if (context.Node < 0)
                 {
-                    throw context.HasAtomicItem
-                        ? XsltErrors.Error(
-                            XsltErrorCode.XPTY0020,
-                            "A step starts from the context item, and here that item is an atomic value "
-                            + "rather than a node.")
-                        : XsltErrors.Error(
-                            XsltErrorCode.XPDY0002,
-                            "A relative path starts at the context item, and there is none here — this "
-                            + "expression was evaluated outside any focus.");
+                    throw NoContextNode(ref context);
                 }
 
                 current.Add(context.Node);
