@@ -300,6 +300,91 @@ namespace CodeDeeds.Xslt.Runtime
 
             return copy;
         }
+
+        /// <summary>
+        /// Copies this context to the heap, for the one place a context has to leave the stack it is on.
+        /// </summary>
+        /// <remarks>
+        /// A <see langword="ref"/> <see langword="struct"/> cannot be handed to another thread, and
+        /// <see cref="FreshStack"/> continues a deep recursion on one. See <see cref="Held"/>.
+        /// </remarks>
+        internal readonly Held Hold()
+        {
+            return new Held
+            {
+                Tree = Tree,
+                FingerprintMap = FingerprintMap,
+                Node = Node,
+                AtomicItem = AtomicItem,
+                CurrentNode = CurrentNode,
+                CurrentTree = CurrentTree,
+                Position = Position,
+                Size = Size,
+                Locals = Locals,
+                FrameBase = FrameBase,
+                Globals = Globals,
+                RangeVariables = RangeVariables,
+                Runtime = Runtime,
+                DocumentLoader = DocumentLoader,
+                TextLoader = TextLoader,
+                Collations = Collations,
+                Names = Names,
+                Clock = Clock,
+            };
+        }
+
+        /// <summary>
+        /// A context copied to the heap, field for field.
+        /// </summary>
+        /// <remarks>
+        /// Every field of <see cref="DynamicContext"/> has one here of the same name, and a field added
+        /// there is added here and to <see cref="Hold"/> and <see cref="Restore"/>: one left out would be
+        /// silently absent from a context only where a recursion ran deep, which nothing but a test looking
+        /// for exactly that would notice. The unit tests compare the two lists of names.
+        /// </remarks>
+        internal sealed class Held
+        {
+            public XdmTree Tree = null!;
+            public int[] FingerprintMap = null!;
+            public int Node;
+            public XPathValue AtomicItem;
+            public int CurrentNode;
+            public XdmTree CurrentTree = null!;
+            public int Position;
+            public int Size;
+            public XPathValue[] Locals = null!;
+            public int FrameBase;
+            public XPathValue[] Globals = null!;
+            public XPathValue[]? RangeVariables;
+            public XsltRuntime? Runtime;
+            public Func<string, string?, Model.XdmTree>? DocumentLoader;
+            public Func<string, string?, string>? TextLoader;
+            public IXsltCollationResolver? Collations;
+            public XPath.NameSlotTable? Names;
+            public Clock? Clock;
+
+            /// <summary>Rebuilds the context this was copied from.</summary>
+            public DynamicContext Restore()
+            {
+                return new DynamicContext(Tree, Node, FingerprintMap, Names)
+                {
+                    AtomicItem = AtomicItem,
+                    CurrentNode = CurrentNode,
+                    CurrentTree = CurrentTree,
+                    Position = Position,
+                    Size = Size,
+                    Locals = Locals,
+                    FrameBase = FrameBase,
+                    Globals = Globals,
+                    RangeVariables = RangeVariables,
+                    Runtime = Runtime,
+                    DocumentLoader = DocumentLoader,
+                    TextLoader = TextLoader,
+                    Collations = Collations,
+                    Clock = Clock,
+                };
+            }
+        }
     }
 
     /// <summary>

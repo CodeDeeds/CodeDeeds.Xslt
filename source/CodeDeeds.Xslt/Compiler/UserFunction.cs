@@ -218,13 +218,7 @@ namespace CodeDeeds.Xslt.Compiler
                 ?? throw new XsltException(
                     $"'{m_function.Name.LocalName}()' can only be called during a transformation.");
 
-            // Arguments are evaluated in the caller's context, before the frame is switched: they mean what
-            // they mean where they were written, not inside the function.
-            XPathValue[] values = new XPathValue[m_arguments.Length];
-            for (int i = 0; i < m_arguments.Length; i++)
-            {
-                values[i] = m_arguments[i].Evaluate(ref context);
-            }
+            XPathValue[] values = EvaluateArguments(ref context);
 
             if (inPlace)
             {
@@ -233,6 +227,35 @@ namespace CodeDeeds.Xslt.Compiler
             }
 
             return runtime.InvokeFunction(m_function, values, ref context);
+        }
+
+        /// <summary>Evaluates the arguments of the call.</summary>
+        /// <remarks>
+        /// <para>
+        /// In the caller's context, before the frame is switched: they mean what they mean where they were
+        /// written, not inside the function.
+        /// </para>
+        /// <para>
+        /// Never inlined. This has returned before the call is made, but the frame it would be inlined into
+        /// stays on the stack for as long as the function runs, and would hold the room for every temporary
+        /// of the argument expressions for all that time. Profile-guided compilation did that, twice over
+        /// — once for each place the call is made from, with and without a transformation to tell that
+        /// it is in temporary output state — and the frame came to a kilobyte
+        /// for each level of a recursive function.
+        /// </para>
+        /// </remarks>
+        /// <param name="context">The caller's context.</param>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private XPathValue[] EvaluateArguments(ref DynamicContext context)
+        {
+            XPathValue[] values = new XPathValue[m_arguments.Length];
+            for (int i = 0; i < m_arguments.Length; i++)
+            {
+                values[i] = m_arguments[i].Evaluate(ref context);
+            }
+
+            return values;
         }
     }
 }

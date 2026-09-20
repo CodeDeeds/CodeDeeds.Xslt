@@ -79,22 +79,24 @@ namespace CodeDeeds.Xslt.XPath
         /// The previous occupants of the slots are put back afterwards, for the reason <c>for</c> does the
         /// same: one closure can be re-entered while it is running, which is exactly what happens when its
         /// body folds over a sequence with itself.
+        /// <para>
+        /// Never inlined, so that a level of a recursion has this frame in it once. Inlined into each of the
+        /// two places a dynamic call reaches it from, it was in the caller's frame twice over.
+        /// </para>
         /// </remarks>
         /// <param name="arguments">The argument values, one per parameter.</param>
         /// <param name="captured">The context the closure was created in.</param>
         /// <param name="caller">The context of the call, which supplies only the runtime.</param>
+        [MethodImpl(MethodImplOptions.NoInlining)]
         internal XPathValue Run(
             XPathValue[] arguments,
             CapturedContext captured,
             ref DynamicContext caller)
         {
-            // A closure recurses through the higher-order functions rather than by naming itself, so nothing
-            // counts the depth. The stack still runs out, and this is what turns that into a message.
+            // The stack running out is not an error: the call is made on a new one. See FreshStack.
             if (!RuntimeHelpers.TryEnsureSufficientExecutionStack())
             {
-                throw new XsltException(
-                    "Calls nested too deeply inside an inline function. A function that folds over its own "
-                    + "result with no terminating case will do this.");
+                return RunOnFreshStack(arguments, captured, ref caller);
             }
 
             DynamicContext inner = captured.Restore(ref caller);
@@ -103,22 +105,91 @@ namespace CodeDeeds.Xslt.XPath
                 ? Array.Empty<XPathValue>()
                 : new XPathValue[arguments.Length];
 
-            for (int i = 0; i < arguments.Length; i++)
-            {
-                saved[i] = slots[m_parameterBase + i];
-                slots[m_parameterBase + i] = XdmTypeConversion.Apply(arguments[i], m_parameterTypes[i]);
-            }
+            // A closure recurses through the higher-order functions rather than by naming itself, so it is
+            // counted here, among the templates and functions in progress: that count is what ends a
+            // recursion with no terminating case, now that the stack does not.
+            XsltRuntime? runtime = inner.Runtime;
+            runtime?.EnterInlineCall();
+            int bound = 0;
 
             try
             {
+                for (; bound < arguments.Length; bound++)
+                {
+                    saved[bound] = slots[m_parameterBase + bound];
+                    slots[m_parameterBase + bound] =
+                        XdmTypeConversion.Apply(arguments[bound], m_parameterTypes[bound]);
+                }
+
                 return XdmTypeConversion.Apply(m_body.Evaluate(ref inner), m_resultType);
             }
             finally
             {
-                for (int i = 0; i < saved.Length; i++)
+                for (int i = 0; i < bound; i++)
                 {
                     slots[m_parameterBase + i] = saved[i];
                 }
+
+                runtime?.LeaveInlineCall();
+            }
+        }
+
+        /// <summary>
+        /// Makes the call on a new stack, the current one being nearly used up.
+        /// </summary>
+        /// <param name="arguments">The argument values.</param>
+        /// <param name="captured">The context the closure was created in.</param>
+        /// <param name="caller">The context of the call.</param>
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private XPathValue RunOnFreshStack(
+            XPathValue[] arguments,
+            CapturedContext captured,
+            ref DynamicContext caller)
+        {
+            const string TooDeep =
+                "Calls nested too deeply inside an inline function. A function that folds over its own "
+                + "result with no terminating case will do this.";
+
+            // Outside a transformation nothing counts the calls in progress, so nothing but the stack would
+            // ever stop a closure that has no terminating case. There the stack stays the limit.
+            if (captured.Restore(ref caller).Runtime is null)
+            {
+                throw new XsltException(TooDeep);
+            }
+
+            OnFreshStack call = new OnFreshStack(this, arguments, captured, caller.Hold());
+            call.RunToCompletion(TooDeep + " No further stack could be had to continue on.");
+            return call.Result;
+        }
+
+        /// <summary>A call of an inline function waiting to be made on a new stack.</summary>
+        private sealed class OnFreshStack : FreshStack
+        {
+            private readonly InlineFunctionExpr m_function;
+            private readonly XPathValue[] m_arguments;
+            private readonly CapturedContext m_captured;
+            private readonly DynamicContext.Held m_caller;
+
+            public OnFreshStack(
+                InlineFunctionExpr function,
+                XPathValue[] arguments,
+                CapturedContext captured,
+                DynamicContext.Held caller)
+            {
+                m_function = function;
+                m_arguments = arguments;
+                m_captured = captured;
+                m_caller = caller;
+            }
+
+            /// <summary>What the call returned.</summary>
+            public XPathValue Result { get; private set; }
+
+            /// <inheritdoc/>
+            protected override void Run()
+            {
+                DynamicContext caller = m_caller.Restore();
+                Result = m_function.Run(m_arguments, m_captured, ref caller);
             }
         }
 
@@ -172,10 +243,26 @@ namespace CodeDeeds.Xslt.XPath
         /// <inheritdoc/>
         public override XPathValue Evaluate(ref DynamicContext context)
         {
+            XPathValue[] values = EvaluateCall(ref context, out XdmFunction function);
+
+            return function.Call(values, ref context);
+        }
+
+        /// <summary>Evaluates the function to call and the arguments to call it with.</summary>
+        /// <remarks>
+        /// Never inlined: <see cref="Evaluate"/>'s frame stays on the stack for as long as the function
+        /// called runs, and should not be holding the temporaries of expressions that have finished. See
+        /// the same note on <c>WithParameter.EvaluateAll</c>.
+        /// </remarks>
+        /// <param name="context">The caller's context.</param>
+        /// <param name="function">The function to call.</param>
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private XPathValue[] EvaluateCall(ref DynamicContext context, out XdmFunction function)
+        {
             XPathValue target = XdmSequence.RequireSingleItem(
                 m_target.Evaluate(ref context), "the function to call");
 
-            XdmFunction function = target.AsFunction();
+            function = target.AsFunction();
 
             // The arguments are evaluated in the caller's context, before anything is bound: they mean what
             // they mean where they are written, which for a closure is a different place entirely.
@@ -188,7 +275,7 @@ namespace CodeDeeds.Xslt.XPath
                 values[i] = m_arguments[i].Evaluate(ref context);
             }
 
-            return function.Call(values, ref context);
+            return values;
         }
     }
 

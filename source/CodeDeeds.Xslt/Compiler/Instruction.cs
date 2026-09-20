@@ -1716,10 +1716,20 @@ namespace CodeDeeds.Xslt.Compiler
         /// <c>xsl:apply-templates</c> evaluates each <c>xsl:with-param</c> exactly once however many nodes are
         /// selected, so <c>select="position()"</c> there means the position of the node the instruction was
         /// written for. Evaluating per selected node would be wrong as well as slower.
+        /// <para>
+        /// Never inlined, because of who calls it: <c>xsl:call-template</c> and <c>xsl:apply-templates</c>,
+        /// whose frames stay on the stack for as long as the templates they invoke run. This has returned
+        /// by then, but inlined, the room for its temporaries — and for those of the expression evaluation
+        /// inlined into it in turn — is part of the caller's frame, held for the whole of the call.
+        /// Profile-guided compilation did exactly that and took <c>xsl:call-template</c>'s frame from 176
+        /// bytes to 1,264, a third of what a level of recursion then cost.
+        /// </para>
         /// </remarks>
         /// <param name="parameters">The parameters written on the call site.</param>
         /// <param name="context">The calling instruction's context.</param>
         /// <param name="runtime">The transformation in progress.</param>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
         public static ParameterValue[] EvaluateAll(
             WithParameter[] parameters,
             ref DynamicContext context,
@@ -1836,6 +1846,34 @@ namespace CodeDeeds.Xslt.Compiler
 
             int mode = m_mode == CompiledStylesheet.CurrentMode ? runtime.CurrentMode : m_mode;
 
+            // The plain case is made from here and everything else from a method of its own, because this
+            // frame is on the stack for as long as the templates applied are running — once per level of a
+            // recursion down a document — and a frame holds room for every path through its method. The
+            // other paths need copies of the context, at 150 bytes each; together they made this frame 832
+            // bytes, which a stylesheet that only ever wrote <xsl:apply-templates/> paid at every level.
+            if (m_select is null && m_sortKeys.Length == 0 && context.Node >= 0)
+            {
+                // With no select, the children of the context node are processed in document order.
+                runtime.ApplyTemplatesToChildren(context.Node, mode, parameters, ref context);
+                return;
+            }
+
+            ApplyToSelection(parameters, mode, ref context, runtime);
+        }
+
+        /// <summary>
+        /// Everything <see cref="Execute"/> does other than apply templates to the context node's children
+        /// as they stand: a selection, a sort, or the error of there being no node to take children from.
+        /// </summary>
+        /// <param name="parameters">The parameters, already evaluated.</param>
+        /// <param name="mode">The mode to apply templates in.</param>
+        /// <param name="context">The instruction's context.</param>
+        /// <param name="runtime">The transformation in progress.</param>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private void ApplyToSelection(
+            ParameterValue[] parameters, int mode, ref DynamicContext context, XsltRuntime runtime)
+        {
             DynamicContext iteration = context;
             NodeSet? selected = null;
 
@@ -1937,6 +1975,30 @@ namespace CodeDeeds.Xslt.Compiler
                 return;
             }
 
+            ApplySorted(selected, parameters, mode, ref context, ref iteration, runtime);
+        }
+
+        /// <summary>
+        /// Applies templates to what was selected in the order its <c>xsl:sort</c> keys give.
+        /// </summary>
+        /// <remarks>Apart from <see cref="ApplyToSelection"/> for the reason that is apart from
+        /// <see cref="Execute"/>: each loop here has a context of its own to position.</remarks>
+        /// <param name="selected">What was selected, or null where it is the context node's children.</param>
+        /// <param name="parameters">The parameters, already evaluated.</param>
+        /// <param name="mode">The mode to apply templates in.</param>
+        /// <param name="context">The instruction's context.</param>
+        /// <param name="iteration">That context, over the tree the selection is in.</param>
+        /// <param name="runtime">The transformation in progress.</param>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private void ApplySorted(
+            NodeSet? selected,
+            ParameterValue[] parameters,
+            int mode,
+            ref DynamicContext context,
+            ref DynamicContext iteration,
+            XsltRuntime runtime)
+        {
             if (selected is not null && selected.SpansDocuments)
             {
                 int count = selected.Count;

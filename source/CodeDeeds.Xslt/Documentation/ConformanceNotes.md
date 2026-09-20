@@ -38,7 +38,7 @@ Everything not listed below is implemented and verified against `System.Xml.Xsl.
 | A character mapped twice | The specification settles this only halfway: where a character is substituted more than once after `use-character-maps` has been expanded, the last mapping wins — but it does not say whether a map's own `xsl:output-character` children come before or after the maps it draws in, and published readings differ. This engine reads the children last, so a map overrides what it draws in, which is how every other override in XSLT works and the only reading under which drawing a map in and adjusting it is possible. |
 | Character maps and unescaped output | The map applies to text written with `disable-output-escaping`, and inside a CDATA section, because it applies to every text node and attribute value. In a CDATA section the replacement cannot be written as it stands, so the section is closed around it and opened again after — which leaves what a parser reads back unchanged. |
 | Result tree fragments | Represented as real trees, so they can be navigated with XPath. XSLT 1.0 only permits converting them to a string; this accepts more than the specification requires and rejects nothing it allows. |
-| Recursion depth | A template or function invocation is refused, and reported as an error, once it is either 2000 levels deep or close to exhausting the stack — whichever comes first. The stack check is the one that matters: a depth limit is calibrated against a frame size that every feature added to the engine changes, and being wrong about it is not survivable, because a stack overflow cannot be caught and takes the process with it. A call that is the last thing a template or function does is not a level: an `xsl:call-template` that ends a template's body, directly or as the last instruction of an `xsl:if` or `xsl:choose` branch, and a call that is the whole value of a function whose body is one `xsl:sequence` — directly, or as a branch of `if` or the return of `let` — is made in the caller's own place once the caller has returned. A template or function that recurses that way is a loop, and runs for as many iterations as it likes; one that does so with no terminating case runs forever rather than being refused, as it would under any processor that treats the idiom this way. |
+| Recursion depth | A template invocation, a function call or a call of an inline function is refused, and reported as an error, once 20,000 of them are in progress. That count is the whole of the limit. The stack is still asked about at every call, because being wrong about it is not survivable — a stack overflow cannot be caught and takes the process with it — but running short of it is not an error: the call is made on a new thread's stack, with the calling thread waiting for it, so how deep a stylesheet may recurse does not depend on the thread it was started on or on what the just-in-time compiler has made of the engine. See *How deep a recursion may go*. A call that is the last thing a template or function does is not a level: an `xsl:call-template` that ends a template's body, directly or as the last instruction of an `xsl:if` or `xsl:choose` branch, and a call that is the whole value of a function whose body is one `xsl:sequence` — directly, or as a branch of `if` or the return of `let` — is made in the caller's own place once the caller has returned. A template or function that recurses that way is a loop, and runs for as many iterations as it likes; one that does so with no terminating case runs forever rather than being refused, as it would under any processor that treats the idiom this way. |
 | Error timing | Errors are reported when the stylesheet is compiled wherever that is possible: a reference to a template that does not exist, an attribute set that draws in itself, an unknown unprefixed function, an element in the XSLT namespace that XSLT 1.0 does not define in a stylesheet declaring `version="1.0"`. What the fallback mechanism covers is deliberately left to run time — an unimplemented instruction under forwards-compatible processing, a designated extension element, a call to an extension function — because a stylesheet may contain those quite legitimately and never reach them. |
 | `function-available('id')` | Reports `true`, since `id()` is there and answers for `xml:id` and for what a document type declaration types. It reported `false` while the function was absent altogether, which was what let a stylesheet fall back to `key()`. |
 | `element-available('xsl:result-document')` | Reports `true` even when no result resolver is configured, so a stylesheet that guards the instruction still writes one and is told plainly what to set if the caller permitted nothing: a destination is the caller's decision, taken after the stylesheet was compiled and changeable through `Xslt.With` without compiling it again. |
@@ -8466,17 +8466,16 @@ in an `XsltException` that `xsl:try` catches like any other. The depth that happ
 and not a number to document, some thousands of levels, which would be a poor rule for a recursion a
 stylesheet is written to and is a fair one for a value no JSON could have held. `xml-to-json` is the one
 walk over elements handled this way, because it holds the keys of each map while it writes the members.
-Should `FreshStack` reach this branch, any of these can carry on upon another stack instead of refusing.
+`FreshStack` has since arrived, and any of these could carry on upon another stack instead of refusing;
+none does yet.
 
 **Found and not fixed.**
 
-- *The built-in template rules* descend a level of stack per level of the document and ask nothing. With
-  no rule matching its elements a document overflows between 2,000 and 5,000 deep, and between 1,000 and
-  2,000 in a mode declared `on-no-match="shallow-copy"`: an empty stylesheet is enough. The branch that
-  carries a deep recursion on to another stack (`FreshStack`) guards them; this one leaves `XsltRuntime`
-  alone there so as not to collide with it. Whichever of the two is merged second has a sentence to
-  take out: that branch's notes say `deep-equal` is not fixed, and these and the *Nesting depth* row of
-  `XsltCompatibility.md` say the built-in rules are not.
+- *The built-in template rules* descended a level of stack per level of the document and asked nothing.
+  With no rule matching its elements a document overflowed between 2,000 and 5,000 deep, and between
+  1,000 and 2,000 in a mode declared `on-no-match="shallow-copy"`: an empty stylesheet was enough. Found
+  here and fixed by the work that carries a deep recursion on to another stack, which was merged after
+  this; see *How deep a recursion may go*.
 - *The shape of a stylesheet.* `1+1+…+1` overflows in `BinaryExpr.Evaluate` between 2,000 and 5,000
   terms, and an `or` chain between 10,000 and 20,000. Literal result elements nested 2,000 deep overflow
   the compiler in `SettleUseWhenIn`. `xsl:if` nested 1,000 to 5,000 deep is refused by the XPath parser's
@@ -8835,6 +8834,186 @@ gain, is 215.3 to 215.3 and 217.2 to 216.0, so the one percent it was charged ab
 the processes differing, and `product` alone is 120 to 117 and 119 to 118. With the flag taken from
 `ReturnsNodeSet || IsBooleanValued` one test fails now and not two, the 1.0 filter, `current()` no
 longer promising what the second had to be held against. 2,963 unit tests in all.
+
+### How deep a recursion may go
+
+`call-template-1001` calls a named template five hundred deep, not in tail position, and has been written
+down here three times as *the recursion-depth test that lands either side of the limit from run to run*.
+It failed once in ten full 2.0 runs on 19 September 2026, and again on the unchanged engine in the first
+run taken to look into it, with `Template invocations nested too deeply`. Run on its own it passed every
+time. The limit it was landing either side of was not the count of calls, which stood at 2,000 and was
+never reached by anything. It was the stack.
+
+**What a level cost, and why it moved.** Measured by recursing until the guard tripped, on threads of
+512 KB and 1 MB, and taking the difference. In bytes of stack a level:
+
+| | tiering off | tier 0, a fresh process | tier 1 with dynamic PGO |
+|---|---|---|---|
+| `xsl:call-template`, the call not last | 2,001 | 2,702 | 2,621 to 3,675 |
+| `xsl:apply-templates` down a nested document | 3,031 | 3,913 | 3,772 |
+| an `xsl:function` whose body is one `xsl:sequence` | 1,088 | | |
+| an `xsl:function` whose body is a sequence constructor | 1,429 | 2,945 | 2,979 |
+
+The main thread of a .NET process on Windows has 1.5 MB, not the 1 MB usually quoted — the host's PE
+header reserves 1,536 KB — and `TryEnsureSufficientExecutionStack` keeps the last 128 KB of it. On that
+thread the same recursion reached 530 levels in a fresh process and **402** a few hundred milliseconds
+later, once the chain had been recompiled: the optimised code used *more* stack, not less. Five hundred
+fits under 2,883 bytes a level and not over it, so whether the test passed depended on which tier each
+method of the chain had reached when the test's turn came, and on what the profile gathered by then had
+led the compiler to inline. A full run gets there; the test set on its own finishes first.
+
+The frames say where it went. With tiering off, a level of recursive `xsl:call-template` is
+`InvokeTemplate` 1,680, `ExecuteAll` 96, `xsl:if` 64, `ExecuteAll` 96 and `xsl:call-template` 128: 2,064
+bytes, four fifths of it one method. Under tier 1 with PGO the last of those grew from 176 bytes to
+**1,264**, because `WithParameter.EvaluateAll` had been inlined into it, and the expression evaluation
+into that. `EvaluateAll` has returned before the template is invoked — but a frame holds room for every
+temporary of everything inlined into its method, for as long as the method is on the stack, and this
+method is on the stack for the whole of the call. `UserFunctionCallExpr.Evaluate` went from 96 bytes to
+1,008 the same way, with its argument evaluation inlined at both of the places it makes the call.
+`DynamicContext` is about 150 bytes and a copy of it is the usual temporary: `InvokeTemplate` had room for
+several, most of them for a path — a rule handed back by an `xsl:apply-templates` in tail position, moved
+to its node by a method that takes a context and returns one — that most invocations never take.
+
+**The stack is no longer the limit.** Where the runtime says too little of it is left, the call is made
+on a new thread with a 16 MB stack, the calling thread waiting for it (`Runtime/FreshStack.cs`). The
+question asked is the one that was always asked, at the same three places — a template invocation, a call
+of a stylesheet function, a call of an inline function — so what it guaranteed is still guaranteed: there
+is no real stack overflow, which cannot be caught. Only the answer to running short has changed, from an
+error to another stack. `System.Linq.Expressions` does the same for a deep expression tree. A context is
+a `ref struct` and cannot cross to another thread, so it is copied to the heap field by field and rebuilt
+on the other side (`DynamicContext.Held`); the invocation only ever read its caller's context, so nothing
+has to come back. An error raised on the new stack is raised again on the caller's as itself, so an
+`xsl:try` round a deep recursion catches what it would have. Exactly one thread runs at a time and the
+transformation's state is all in the runtime, so nothing else had to change — but it does mean that a
+resolver, a message writer or an output stream the caller supplied may be called on a thread other than
+the one `Transform` was called on, where the recursion is deep. Where no thread can be had the old error
+is raised, as before.
+
+**The count is the whole of the limit**, and is the same on every machine, every thread and every run:
+**20,000** template invocations, function calls and calls of inline functions in progress between them.
+Inline functions were not counted at all before — the stack running out was what stopped one with no
+terminating case — and have to be now that it does not; they are counted apart from the other two and
+added for the comparison, because `current-merge-group()` reads the count of the other two to tell an
+`xsl:merge-action`'s own sequence constructor from what it invokes. Outside a transformation, where
+nothing counts, a closure is still stopped by the stack.
+
+Twenty thousand is what reporting a runaway recursion costs. Every level holds its stack until the count
+stops it, and each garbage collection on the way walks all of it, so the time grows faster than the
+depth:
+
+| depth reached | `xsl:call-template` | `xsl:apply-templates` | `xsl:function` |
+|---|---|---|---|
+| 2,000 | 5 ms, 36 MB | 7 ms, 37 MB | 6 ms, 38 MB |
+| 10,000 | 53 ms, 49 MB | 39 ms, 61 MB | 90 ms, 59 MB |
+| 20,000 | 153 ms, 64 MB | 378 ms, 101 MB | 136 ms, 83 MB |
+| 50,000 | 570 ms, 98 MB | 431 ms, 182 MB | 789 ms, 198 MB |
+| 100,000 | 2.4 s, 171 MB | 1.0 s, 343 MB | 5.9 s, 427 MB |
+
+Time, and the peak working set of a process that starts at 35 MB. A stylesheet with no terminating case
+is told so in a fifth of a second at 20,000 and in several seconds and some hundreds of megabytes at
+100,000, and that is a price everyone pays for a depth few stylesheets want. libxslt stops at 3,000 by
+default and the others at whatever their stack holds, which is some thousands.
+
+**The frames were cut as well**, because each level is cheaper for it and a deep recursion needs fewer
+threads, not because the limit depends on them any longer. The rule is one the engine had already written
+down twice, beside `AbstractTemplate` and under `stackalloc` in the performance record: a frame's cost
+belongs to the whole method and not to the branch it is written in. Here it is applied to the methods
+that are on the stack *across* a call. What they do before the call and after it — binding parameters,
+converting a result, evaluating `xsl:with-param`, moving the focus for a handed-back rule — is done in
+methods marked never to be inlined, so that the temporaries are on the stack while that work runs and
+not while the body does:
+
+| bytes of frame | tiering off, was | is | tier 1 with PGO, was | is |
+|---|---|---|---|---|
+| `InvokeTemplate` | 1,680 | 320 | 1,888 | 320 |
+| `xsl:call-template` | 128 | 128 | 1,264 | 368 |
+| `xsl:apply-templates` | 832 | 80 | | 736 |
+| `UserFunctionCallExpr.Evaluate` | 96 | 96 | 1,008 | 144 |
+| a level of recursive `xsl:call-template` | 2,064 | 704 | 3,520 | 1,312 |
+| a level of `xsl:apply-templates` | 3,040 | 928 | about 3,770 | about 1,500 |
+
+`xsl:apply-templates` makes the plain case — no `select`, no sort, a context node — straight from
+`Execute` and everything else from methods of their own, since the other paths are the ones that need
+copies of the context to position.
+
+**The built-in rules had no guard at all**, which looking for this one found. A node with no template
+rule never reaches `InvokeTemplate`: the built-in rule for an element applies templates to its children,
+and where they have no rule either, theirs does the same, a level of the document at a time with nothing
+asking about the stack. A stylesheet with no rule for the elements of a document 5,000 deep ended the
+process with a stack overflow — not an error, the end of the process — and in a mode declared
+`on-no-match="shallow-copy"`, where each level has an element open in the output as well, 2,000 deep was
+enough. `ApplyBuiltInRule` now asks what `InvokeTemplate` asks and answers the same way, and both go down
+a document 100,000 deep. Nothing is counted there, because nothing there can fail to end: what is being
+descended is a tree, and a template reached on the way down is counted where it is invoked.
+
+The same look found `fn:deep-equal` overflowing on a document some 20,000 deep, which is none of these
+three calls and was handed on rather than fixed here; it is a loop now, and what else a deep tree or a
+deep value reaches was tried with it, under *A tree as deep as it likes*. That work found the built-in
+rules overflowing as well, on its own, and left them to this.
+
+**What it costs.** Nothing, or less than nothing. The products benchmarks, BenchmarkDotNet, the mean of
+three runs of each build in fresh processes taken turn about, in microseconds, against the engine this
+was merged onto:
+
+| | was | is |
+|---|---|---|
+| 100 products to a string | 583.3 | 585.0 |
+| 100 products to a `TextWriter` | 592.7 | 590.5 |
+| 100 products to a `Stream` | 681.6 | 680.0 |
+| 1,000 products to a string | 6,020 | 5,995 |
+| 1,000 products to a `TextWriter` | 6,288 | 6,238 |
+| 1,000 products to a `Stream` | 6,993 | 6,912 |
+
+No row moves by more than one process differs from the next by, so what the table says is that nothing
+moved. Six rounds taken earlier against the engine as it was when the work began — three before the
+built-in rules were given their guard and three after — said the same, every row a few per cent lower
+there (556 to 550, 5,549 to 5,517, 6,363 to 6,262 in the first, fourth and last rows) and all of it
+inside the noise. Those stylesheets hardly invoke a template, though, so they are not where a change to
+invoking templates would show. Over a document of a thousand products, stylesheets that do little else,
+timed once time and bytes a call had both stopped moving, three fresh processes of each build turn
+about, in microseconds a transformation, against the engine as it was when the work began:
+
+| | was | is |
+|---|---|---|
+| the identity transformation, a rule for every node, through a `select` | 5,942 | 5,706 |
+| the same on the compiled backend | 5,893 | 5,652 |
+| `<xsl:apply-templates/>` down every element | 3,415 | 3,242 |
+| rules with an ordinary and a tunnel parameter | 2,608 | 2,528 |
+| a named template of three parameters, called per product | 2,256 | 2,259 |
+| the same on the compiled backend | 2,172 | 2,147 |
+| a stylesheet function of two arguments, called per product | 2,048 | 1,979 |
+| a named template recursing sixty deep, per product | 24,061 | 21,874 |
+
+The first row leaves out one baseline run of 7,100 that nothing else came near. A method that is not
+inlined costs a call, and there are now more of them in a template invocation. What pays for them, and
+more, was not measured apart; the likely payer is that a frame holding references is cleared on entry,
+and `InvokeTemplate` was clearing 1,680 bytes every time to use a fifth of them. Bytes allocated are the
+same but for eight a transformation, the runtime having one more field to count inline calls in. The
+same eight cases were taken again on the merge base, and came back unreadable: another session's own
+turn-about timing ran throughout, holding the machine at its limit, and three rounds of one build
+differed by up to eighty per cent with no case keeping one sign. That is no measurement in either
+direction, and the earlier one is the one quoted, base and all.
+
+**What the runs say.** Nothing moves: the 2.0 run stands at 5,678 of 5,701, the 3.0 run at 8,061 of 8,071
+and the schema-aware run at 8,668 of 8,727, each on both backends, and the XPath runs at 14,553 of 14,577
+and 18,268 of 18,285, every failure set identical test for test with the engine as it was and the same
+numbers skipped, over two rounds of all eight taken turn about with neither suite checkout moving —
+twice over, against the engine as it was when the work began and again, after the work under *A tree as
+deep as it likes* and the rest of a busy weekend had gone in ahead of it, against the engine it was
+merged onto. The engine as it was failed `call-template-1001` in two of the twenty-five runs taken of it
+that include the test, once in a 2.0 run the first night and once in a 3.0 run of the second sweep; the
+engine as it is passed it in all thirty-four of its. Thirty-four clean runs are not what says it is fixed
+— a test that fails one run in ten comes up clean thirty-four times running three times in a hundred,
+and it was one in ten on one configuration of six. What says so is that the error it failed with can no
+longer come of a stack running short while a thread can be had, and a unit test that recurses 19,000
+deep on a thread given 256 KB and is refused at 21,000 on one given 16 MB. Seventeen new unit tests,
+2,980 in all, in `DeepRecursionTests`: each kind of recursion five
+thousand deep, in tail position and out of it, on both backends; the focus, the mode, a tunnel parameter
+and `current()` read five thousand levels down; an error raised down there caught by an `xsl:try` up
+here, reading as it does raised three levels down; each kind of runaway recursion stopped by the count;
+the built-in rules of both kinds down a document 20,000 deep; and the fields of `DynamicContext.Held`
+compared by name with the fields of the context it copies, since a field left out would be missing only
+where a recursion ran deep.
 
 ### Which results the suite asks for and does not get
 

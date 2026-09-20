@@ -15,10 +15,17 @@ namespace CodeDeeds.Xslt.Runtime
     public sealed class XsltRuntime
     {
         /// <summary>
-        /// The deepest chain of template invocations allowed before the transformation is abandoned. A
-        /// recursive template with no terminating case would otherwise exhaust the stack.
+        /// How many template invocations and function calls may be in progress at once before the
+        /// transformation is abandoned, which is what ends a recursion that has no terminating case.
         /// </summary>
-        private const int MaximumCallDepth = 2000;
+        /// <remarks>
+        /// The whole of the limit, and the same on every machine and every run. The stack is not part of
+        /// it: a recursion that uses one up carries on upon another, see <see cref="FreshStack"/>. What
+        /// the number weighs is a legitimate recursion against a runaway one — a named template summing a
+        /// list by calling itself goes as deep as the list is long, and a runaway one holds a level's worth
+        /// of stack for every call until this stops it.
+        /// </remarks>
+        private const int MaximumCallDepth = 20_000;
 
         private readonly CompiledStylesheet m_stylesheet;
         private readonly Dictionary<XdmTree, int[]> m_fingerprintMaps = new();
@@ -96,6 +103,9 @@ namespace CodeDeeds.Xslt.Runtime
         /// <summary>What the input was validated against, where the caller asked for validation.</summary>
         internal TreeValidation? InputValidation => m_inputValidation;
         private int m_callDepth;
+
+        /// <summary>How many calls of inline functions are in progress; see <see cref="EnterInlineCall"/>.</summary>
+        private int m_inlineCallDepth;
 
         /// <summary>Whether the processor claims XSLT 3.0, which decides the codes a later specification renamed.</summary>
         private bool Implements30 => m_options.Version.CompareTo(XsltVersion.V30) >= 0;
@@ -2155,36 +2165,25 @@ namespace CodeDeeds.Xslt.Runtime
             Dictionary<string, XPathValue>? remembered = null;
             string memoKey = string.Empty;
 
-            if (function.Deterministic && TryKeyArguments(arguments, out memoKey))
+            if (function.Deterministic
+                && TryRecall(function, arguments, out remembered, out memoKey, out XPathValue already))
             {
-                if (!m_functionResults.TryGetValue(function, out remembered))
-                {
-                    remembered = new Dictionary<string, XPathValue>(StringComparer.Ordinal);
-                    m_functionResults.Add(function, remembered);
-                }
-
-                if (remembered.TryGetValue(memoKey, out XPathValue already))
-                {
-                    return already;
-                }
+                return already;
             }
 
-            // The same guard as InvokeTemplate, and needed here first: a function call goes through more stack
-            // per level — the expression evaluating the call, the call itself, the body's expression — so the
-            // stack runs out well before any depth counter notices.
+            // The same guard as InvokeTemplate, and answered the same way: the call is made on a new stack
+            // rather than refused, and the count below is what ends a function with no terminating case.
+            // An expression can nest deeply between one call and the next, so how many levels a stack
+            // holds is even less a number to rely on here than it is there.
             if (!System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
             {
-                throw new XsltException(
-                    $"Calls nested too deeply while calling '{function.Name.LocalName}()'. A function with "
-                    + "no terminating case will do this.");
+                return InvokeFunctionOnFreshStack(function, arguments, ref context);
             }
 
-            if (++m_callDepth > MaximumCallDepth)
+            if (++m_callDepth + m_inlineCallDepth > MaximumCallDepth)
             {
                 m_callDepth--;
-                throw new XsltException(
-                    $"Calls nested more than {MaximumCallDepth} deep while calling "
-                    + $"'{function.Name.LocalName}()'. A function with no terminating case will do this.");
+                throw TooManyCalls(function.Name.LocalName + "()");
             }
 
             ParameterValue[] callerTunnel = m_tunnel;
@@ -2230,23 +2229,12 @@ namespace CodeDeeds.Xslt.Runtime
                 XdmSequenceType? promised = function.ResultType;
                 XPathValue answer;
 
+                // As in InvokeTemplate, and for the reason given there: what is done before the body runs and
+                // after it is done in methods that are not inlined, so that this frame — on the stack once
+                // for every level of a recursive function — holds nothing but what outlasts the body.
                 while (true)
                 {
-                    inner.Locals = function.FrameSize == 0
-                        ? Array.Empty<XPathValue>()
-                        : new XPathValue[function.FrameSize];
-                    inner.FrameBase = 0;
-
-                    for (int i = 0; i < arguments.Length; i++)
-                    {
-                        // An argument the parameter's type cannot take: XSLT 2.0's own code for it, or XPath's
-                        // from 3.0, which dropped the XSLT one. The processor's version decides, as it does
-                        // for every code a later specification renamed.
-                        inner.Locals[function.ParameterSlots[i]] = XdmTypeConversion.Apply(
-                            arguments[i],
-                            i < function.ParameterTypes.Length ? function.ParameterTypes[i] : null,
-                            Implements30 ? XsltErrorCode.XPTY0004 : XsltErrorCode.XTTE0790);
-                    }
+                    BindArguments(function, arguments, ref inner);
 
                     // A body that is one xsl:sequence yields its value untouched, which is how a function
                     // returns something other than text. A declared return type also makes the body a
@@ -2273,20 +2261,7 @@ namespace CodeDeeds.Xslt.Runtime
                     // invocation's place, with the frame the body has finished with given up — which is what
                     // lets a function recurse for as long as it likes, provided that is the last thing it
                     // does. The stack guard above is not repeated because the stack does not grow.
-                    function = m_tailFunction;
-                    arguments = m_tailArguments!;
-                    m_tailFunction = null;
-                    m_tailArguments = null;
-
-                    if (function.IsAbstract)
-                    {
-                        throw AbstractComponent("function", function.Name.LocalName + "()");
-                    }
-
-                    if (function.Deterministic
-                        && TryKeyArguments(arguments, out string key)
-                        && m_functionResults.TryGetValue(function, out Dictionary<string, XPathValue>? known)
-                        && known.TryGetValue(key, out answer))
+                    if (TakeOverTailCall(ref function, ref arguments, out answer))
                     {
                         break;
                     }
@@ -2315,6 +2290,187 @@ namespace CodeDeeds.Xslt.Runtime
                 m_tunnel = callerTunnel;
                 m_callDepth--;
             }
+        }
+
+        /// <summary>
+        /// Looks up what a function that gives the same answer every time gave for these arguments before.
+        /// </summary>
+        /// <param name="function">The function, which is declared to be deterministic.</param>
+        /// <param name="arguments">The arguments of the call.</param>
+        /// <param name="remembered">
+        /// Where the function's answers are kept, for this one to be added to, or null where these
+        /// arguments cannot be made a key of.
+        /// </param>
+        /// <param name="memoKey">The key these arguments make.</param>
+        /// <param name="already">The answer given before, where there was one.</param>
+        /// <returns>Whether the call has been made before.</returns>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private bool TryRecall(
+            UserFunction function,
+            XPathValue[] arguments,
+            out Dictionary<string, XPathValue>? remembered,
+            out string memoKey,
+            out XPathValue already)
+        {
+            remembered = null;
+            already = default;
+
+            if (!TryKeyArguments(arguments, out memoKey))
+            {
+                return false;
+            }
+
+            if (!m_functionResults.TryGetValue(function, out remembered))
+            {
+                remembered = new Dictionary<string, XPathValue>(StringComparer.Ordinal);
+                m_functionResults.Add(function, remembered);
+            }
+
+            return remembered.TryGetValue(memoKey, out already);
+        }
+
+        /// <summary>Gives a function call its variable frame and binds the arguments in it.</summary>
+        /// <param name="function">The function being called.</param>
+        /// <param name="arguments">The arguments, already evaluated.</param>
+        /// <param name="inner">The call's context, which is given the frame.</param>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private void BindArguments(UserFunction function, XPathValue[] arguments, ref DynamicContext inner)
+        {
+            inner.Locals = function.FrameSize == 0
+                ? Array.Empty<XPathValue>()
+                : new XPathValue[function.FrameSize];
+            inner.FrameBase = 0;
+
+            for (int i = 0; i < arguments.Length; i++)
+            {
+                // An argument the parameter's type cannot take: XSLT 2.0's own code for it, or XPath's
+                // from 3.0, which dropped the XSLT one. The processor's version decides, as it does
+                // for every code a later specification renamed.
+                inner.Locals[function.ParameterSlots[i]] = XdmTypeConversion.Apply(
+                    arguments[i],
+                    i < function.ParameterTypes.Length ? function.ParameterTypes[i] : null,
+                    Implements30 ? XsltErrorCode.XPTY0004 : XsltErrorCode.XTTE0790);
+            }
+        }
+
+        /// <summary>
+        /// Turns the running call into the one its body ended in, which the body handed back rather than
+        /// made.
+        /// </summary>
+        /// <param name="function">The function running, replaced by the one to run next.</param>
+        /// <param name="arguments">Its arguments, replaced likewise.</param>
+        /// <param name="answer">The answer, where the call to run next has been made before.</param>
+        /// <returns>Whether <paramref name="answer"/> is the answer, there being nothing left to run.</returns>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private bool TakeOverTailCall(ref UserFunction function, ref XPathValue[] arguments, out XPathValue answer)
+        {
+            function = m_tailFunction!;
+            arguments = m_tailArguments!;
+            m_tailFunction = null;
+            m_tailArguments = null;
+            answer = default;
+
+            if (function.IsAbstract)
+            {
+                throw AbstractComponent("function", function.Name.LocalName + "()");
+            }
+
+            return function.Deterministic
+                && TryKeyArguments(arguments, out string key)
+                && m_functionResults.TryGetValue(function, out Dictionary<string, XPathValue>? known)
+                && known.TryGetValue(key, out answer);
+        }
+
+        /// <summary>Builds the error for more calls in progress than are allowed.</summary>
+        /// <remarks>Its own method for the reason <see cref="AbstractTemplate"/> is.</remarks>
+        /// <param name="what">What was being called, for the message.</param>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static XsltException TooManyCalls(string what)
+        {
+            return new XsltException(
+                $"Calls nested more than {MaximumCallDepth} deep while calling '{what}'. A function with no "
+                + "terminating case will do this.");
+        }
+
+        /// <summary>
+        /// Makes a function call on a new stack, the current one being nearly used up.
+        /// </summary>
+        /// <param name="function">The function to call.</param>
+        /// <param name="arguments">Its arguments, already evaluated.</param>
+        /// <param name="context">The caller's context, which the call only reads.</param>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private XPathValue InvokeFunctionOnFreshStack(
+            UserFunction function, XPathValue[] arguments, ref DynamicContext context)
+        {
+            FunctionOnFreshStack call = new FunctionOnFreshStack(this, function, arguments, context.Hold());
+            call.RunToCompletion(
+                $"Calls nested too deeply while calling '{function.Name.LocalName}()', and no further stack "
+                + "could be had to continue on. A function with no terminating case will do this.");
+            return call.Result;
+        }
+
+        /// <summary>A function call waiting to be made on a new stack.</summary>
+        private sealed class FunctionOnFreshStack : FreshStack
+        {
+            private readonly XsltRuntime m_runtime;
+            private readonly UserFunction m_function;
+            private readonly XPathValue[] m_arguments;
+            private readonly DynamicContext.Held m_context;
+
+            public FunctionOnFreshStack(
+                XsltRuntime runtime, UserFunction function, XPathValue[] arguments, DynamicContext.Held context)
+            {
+                m_runtime = runtime;
+                m_function = function;
+                m_arguments = arguments;
+                m_context = context;
+            }
+
+            /// <summary>What the call returned.</summary>
+            public XPathValue Result { get; private set; }
+
+            /// <inheritdoc/>
+            protected override void Run()
+            {
+                DynamicContext context = m_context.Restore();
+                Result = m_runtime.InvokeFunction(m_function, m_arguments, ref context);
+            }
+        }
+
+        /// <summary>
+        /// Counts a call of an inline function among the calls in progress, refusing it where there are
+        /// already as many as are allowed.
+        /// </summary>
+        /// <remarks>
+        /// A closure recurses through the higher-order functions rather than by naming itself, and nothing
+        /// used to count it: the stack running out was what stopped one with no terminating case. The stack
+        /// no longer runs out — see <see cref="FreshStack"/> — so this is what does. Paired with
+        /// <see cref="LeaveInlineCall"/>.
+        /// <para>
+        /// Counted apart from the templates and functions, and added to them only for the comparison:
+        /// <see cref="CallDepth"/> is how <c>current-merge-group()</c> tells the sequence constructor of an
+        /// <c>xsl:merge-action</c> from what it invokes, and a closure called there is not something it
+        /// invokes in that sense — it read the merge group before this count existed and still does.
+        /// </para>
+        /// </remarks>
+        internal void EnterInlineCall()
+        {
+            if (++m_inlineCallDepth + m_callDepth > MaximumCallDepth)
+            {
+                m_inlineCallDepth--;
+                throw TooManyCalls("an inline function");
+            }
+        }
+
+        /// <summary>Ends what <see cref="EnterInlineCall"/> began.</summary>
+        internal void LeaveInlineCall()
+        {
+            m_inlineCallDepth--;
         }
 
         /// <summary>
@@ -2557,19 +2713,21 @@ namespace CodeDeeds.Xslt.Runtime
             // added here changes, and being wrong about it is not survivable: a stack overflow cannot be
             // caught and takes the process with it. Asking the runtime how much stack is left trips before
             // that happens and is not a guess about frame sizes.
+            //
+            // Nor is running short of stack an error. How many levels a stack holds depends on what the
+            // just-in-time compiler has done to this method and the ones between it and itself, which is
+            // nothing a stylesheet can be written to; so the invocation is made on a new stack instead, and
+            // what ends a recursion with no terminating case is the count below. See FreshStack.
             if (!System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
             {
-                throw new XsltException(
-                    "Template invocations nested too deeply; the stylesheet is probably recursing without a "
-                    + "terminating case.");
+                InvokeTemplateOnFreshStack(template, parameters, mode, ref context, asRule);
+                return;
             }
 
-            if (++m_callDepth > MaximumCallDepth)
+            if (++m_callDepth + m_inlineCallDepth > MaximumCallDepth)
             {
                 m_callDepth--;
-                throw new XsltException(
-                    $"Template invocations nested more than {MaximumCallDepth} deep; the stylesheet is probably "
-                    + "recursing without a terminating case.");
+                throw TooManyTemplateInvocations();
             }
 
             // xsl:apply-imports needs to know which module the running template came from, and which mode it
@@ -2593,118 +2751,25 @@ namespace CodeDeeds.Xslt.Runtime
             {
                 DynamicContext inner = context;
 
+                // What follows is kept to calls, and the reason is the stack. This method's frame is on the
+                // stack once for every level of a recursion, so everything in it is paid for that many
+                // times over — and a frame holds room for every local and every temporary of the whole
+                // method, including those of whatever the compiler inlines into it, whichever branch runs.
+                // Written out in line, the three steps below made a frame of 1,680 bytes, four fifths of
+                // what a level of recursive xsl:call-template cost. Each is a method of its own that is not
+                // inlined, so that its temporaries are on the stack while it runs and not while the body
+                // does.
                 while (true)
                 {
-                    inner.Locals = template.FrameSize == 0
-                        ? Array.Empty<XPathValue>()
-                        : new XPathValue[template.FrameSize];
-                    inner.FrameBase = 0;
+                    BindParameters(template, parameters, ref inner);
 
-                    if (template.ContextItem.Says)
+                    if (template.ResultType is null)
                     {
-                        ApplyContextItemDeclaration(template, ref inner);
-                    }
-
-                    foreach (TemplateParameter parameter in template.Parameters)
-                    {
-                        // A tunnel parameter is matched against the tunnel set and an ordinary one against the
-                        // call site. The two are separate namespaces, so one template may declare both under the
-                        // same name and see two different values.
-                        ParameterValue[] source = parameter.Tunnel ? m_tunnel : parameters;
-                        int supplied = FindParameter(source, parameter.Name, parameter.Tunnel);
-
-                        if (supplied < 0 && parameter.Required)
-                        {
-                            string kind = parameter.Tunnel ? "tunnel " : string.Empty;
-                            string owner = template.Name is ExpandedName named
-                                ? $"template '{named.LocalName}'"
-                                : "the template that matched";
-
-                            throw XsltErrors.Error(
-                                XsltErrorCode.XTDE0700,
-                                $"No value was supplied for the required {kind}parameter "
-                                + $"'{parameter.Name.LocalName}' of {owner}. A required parameter has no default "
-                                + "to fall back on.");
-                        }
-
-                        // A supplied value was evaluated in the caller's context; a default is evaluated here, in
-                        // the callee's, so that it can refer to parameters bound before it. Either way the
-                        // declared type applies: what the caller passed is checked as much as what the default
-                        // produced, and the code says which of the two was wrong.
-                        inner.Locals[parameter.Slot] = supplied >= 0
-                            ? XdmTypeConversion.Apply(source[supplied].Value, parameter.Type, XsltErrorCode.XTTE0590)
-                            : VariableInstruction.Evaluate(
-                                parameter.Select,
-                                parameter.Body,
-                                ref inner,
-                                this,
-                                parameter.Type,
-                                DefaultValueCode(parameter.Select, parameter.Body),
-                                parameter.BaseUri);
-                    }
-
-                    if (template.ResultType is XdmSequenceType wanted)
-                    {
-                        // A template declaring its result type produces a sequence, checked against the
-                        // type — XTTE0505 — and written as a sequence is. A call the body ends in is made
-                        // here, inside the capture, so that the whole of what the template produced is what
-                        // the type is checked against.
-                        //
-                        // The capture stands for the output it replaces. Declaring a result type does not
-                        // put the transformation into temporary output state — it is a check on what the
-                        // body produced, not a variable to produce it into — so an xsl:result-document
-                        // inside such a template is writing a document of the transformation's own, exactly
-                        // as it would be without the type.
-                        SequenceCaptureTarget capture = new SequenceCaptureTarget
-                        {
-                            StandsForFinalOutput = Output.IsFinalOutput,
-                        };
-                        OutputTarget previous = Output;
-                        Output = capture;
-
-                        try
-                        {
-                            Instruction.ExecuteAll(template.Body, ref inner, this);
-
-                            while (m_tailTemplate is not null || m_tailRule is not null)
-                            {
-                                if (m_tailTemplate is Template next)
-                                {
-                                    ParameterValue[] nextParameters = m_tailParameters;
-                                    m_tailTemplate = null;
-                                    m_tailParameters = Array.Empty<ParameterValue>();
-                                    InvokeTemplate(next, nextParameters, mode, ref inner);
-                                    continue;
-                                }
-
-                                // Inside the capture the call is made rather than handed on: what the
-                                // type is checked against is the whole of what this template produced,
-                                // so the call has to happen where the capture can see it.
-                                TakeDeferredApply(
-                                    out TemplateRule applied,
-                                    out ParameterValue[] applyParameters,
-                                    out int applyMode,
-                                    out XdmTree applyTree,
-                                    out int applyNode,
-                                    out int applyPosition,
-                                    out int applySize);
-
-                                DynamicContext moved =
-                                    OnOneNode(inner, applyTree, applyNode, applyPosition, applySize);
-                                InvokeRule(applied, applyParameters, applyMode, ref moved);
-                            }
-                        }
-                        finally
-                        {
-                            Output = previous;
-                        }
-
-                        SequenceWriter.Write(
-                            XdmTypeConversion.Apply(capture.Finish(), wanted, XsltErrorCode.XTTE0505), this);
+                        Instruction.ExecuteAll(template.Body, ref inner, this);
                     }
                     else
                     {
-                        Instruction.ExecuteAll(template.Body, ref inner, this);
+                        ExecuteTypedBody(template, mode, ref inner);
                     }
 
                     if (m_tailTemplate is null && m_tailRule is not null)
@@ -2713,30 +2778,7 @@ namespace CodeDeeds.Xslt.Runtime
                         // matched is run here, in this invocation's place, with the focus moved to the
                         // node it applies to: a template that walks a sequence one sibling at a time is
                         // then a loop rather than a stack, however long the sequence is.
-                        TakeDeferredApply(
-                            out TemplateRule applied,
-                            out ParameterValue[] applyParameters,
-                            out int applyMode,
-                            out XdmTree applyTree,
-                            out int applyNode,
-                            out int applyPosition,
-                            out int applySize);
-
-                        template = applied.Template;
-
-                        if (template.Visibility == Visibility.Abstract)
-                        {
-                            throw AbstractTemplate(template);
-                        }
-
-                        parameters = applyParameters;
-                        mode = applyMode;
-                        inner = OnOneNode(inner, applyTree, applyNode, applyPosition, applySize);
-                        m_currentMode = mode;
-                        m_currentPrecedence = template.ImportPrecedence;
-                        m_currentFloor = template.ImportFloor;
-                        m_currentRule = applied;
-                        m_tunnel = ExtendTunnel(parameters);
+                        template = TakeOverDeferredApply(ref parameters, ref mode, ref inner);
                         continue;
                     }
 
@@ -2774,6 +2816,263 @@ namespace CodeDeeds.Xslt.Runtime
                 m_currentRule = callerRule;
                 m_tunnel = callerTunnel;
                 m_callDepth--;
+            }
+        }
+
+        /// <summary>
+        /// Gives an invocation its variable frame and binds the template's parameters in it.
+        /// </summary>
+        /// <remarks>
+        /// Not inlined, for the reason given in <see cref="InvokeTemplate"/>: converting a value and
+        /// evaluating a default both bring temporaries, and the message for a missing parameter brings
+        /// more, none of which a nested invocation should be paying for.
+        /// </remarks>
+        /// <param name="template">The template being invoked.</param>
+        /// <param name="parameters">What the call site supplied.</param>
+        /// <param name="inner">The invocation's context, which is given the frame.</param>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private void BindParameters(Template template, ParameterValue[] parameters, ref DynamicContext inner)
+        {
+            inner.Locals = template.FrameSize == 0
+                ? Array.Empty<XPathValue>()
+                : new XPathValue[template.FrameSize];
+            inner.FrameBase = 0;
+
+            if (template.ContextItem.Says)
+            {
+                ApplyContextItemDeclaration(template, ref inner);
+            }
+
+            foreach (TemplateParameter parameter in template.Parameters)
+            {
+                // A tunnel parameter is matched against the tunnel set and an ordinary one against the
+                // call site. The two are separate namespaces, so one template may declare both under the
+                // same name and see two different values.
+                ParameterValue[] source = parameter.Tunnel ? m_tunnel : parameters;
+                int supplied = FindParameter(source, parameter.Name, parameter.Tunnel);
+
+                if (supplied < 0 && parameter.Required)
+                {
+                    string kind = parameter.Tunnel ? "tunnel " : string.Empty;
+                    string owner = template.Name is ExpandedName named
+                        ? $"template '{named.LocalName}'"
+                        : "the template that matched";
+
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XTDE0700,
+                        $"No value was supplied for the required {kind}parameter "
+                        + $"'{parameter.Name.LocalName}' of {owner}. A required parameter has no default "
+                        + "to fall back on.");
+                }
+
+                // A supplied value was evaluated in the caller's context; a default is evaluated here, in
+                // the callee's, so that it can refer to parameters bound before it. Either way the
+                // declared type applies: what the caller passed is checked as much as what the default
+                // produced, and the code says which of the two was wrong.
+                inner.Locals[parameter.Slot] = supplied >= 0
+                    ? XdmTypeConversion.Apply(source[supplied].Value, parameter.Type, XsltErrorCode.XTTE0590)
+                    : VariableInstruction.Evaluate(
+                        parameter.Select,
+                        parameter.Body,
+                        ref inner,
+                        this,
+                        parameter.Type,
+                        DefaultValueCode(parameter.Select, parameter.Body),
+                        parameter.BaseUri);
+            }
+        }
+
+        /// <summary>
+        /// Runs the body of a template that declares its result type, and checks what it produced.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A template declaring its result type produces a sequence, checked against the type —
+        /// <c>XTTE0505</c> — and written as a sequence is. A call the body ends in is made here, inside the
+        /// capture, so that the whole of what the template produced is what the type is checked against.
+        /// </para>
+        /// <para>
+        /// The capture stands for the output it replaces. Declaring a result type does not put the
+        /// transformation into temporary output state — it is a check on what the body produced, not a
+        /// variable to produce it into — so an <c>xsl:result-document</c> inside such a template is writing
+        /// a document of the transformation's own, exactly as it would be without the type.
+        /// </para>
+        /// <para>
+        /// A level of recursion through a template like this one has this method's frame in it as well as
+        /// <see cref="InvokeTemplate"/>'s. That is the price of the rest not paying for it.
+        /// </para>
+        /// </remarks>
+        /// <param name="template">The template, whose result type is declared.</param>
+        /// <param name="mode">The mode the invocation is in.</param>
+        /// <param name="inner">The invocation's context.</param>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private void ExecuteTypedBody(Template template, int mode, ref DynamicContext inner)
+        {
+            SequenceCaptureTarget capture = new SequenceCaptureTarget
+            {
+                StandsForFinalOutput = Output.IsFinalOutput,
+            };
+            OutputTarget previous = Output;
+            Output = capture;
+
+            try
+            {
+                Instruction.ExecuteAll(template.Body, ref inner, this);
+
+                while (m_tailTemplate is not null || m_tailRule is not null)
+                {
+                    if (m_tailTemplate is Template next)
+                    {
+                        ParameterValue[] nextParameters = m_tailParameters;
+                        m_tailTemplate = null;
+                        m_tailParameters = Array.Empty<ParameterValue>();
+                        InvokeTemplate(next, nextParameters, mode, ref inner);
+                        continue;
+                    }
+
+                    // Inside the capture the call is made rather than handed on: what the type is
+                    // checked against is the whole of what this template produced, so the call has to
+                    // happen where the capture can see it.
+                    InvokeDeferredApply(ref inner);
+                }
+            }
+            finally
+            {
+                Output = previous;
+            }
+
+            SequenceWriter.Write(
+                XdmTypeConversion.Apply(capture.Finish(), template.ResultType, XsltErrorCode.XTTE0505), this);
+        }
+
+        /// <summary>
+        /// Makes the <c>xsl:apply-templates</c> a body handed back, beneath the invocation that ran the body
+        /// rather than in its place.
+        /// </summary>
+        /// <param name="context">The context the body ran in, which supplies everything but the focus.</param>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private void InvokeDeferredApply(ref DynamicContext context)
+        {
+            TakeDeferredApply(
+                out TemplateRule rule,
+                out ParameterValue[] parameters,
+                out int mode,
+                out XdmTree tree,
+                out int node,
+                out int position,
+                out int size);
+
+            DynamicContext moved = OnOneNode(context, tree, node, position, size);
+            InvokeRule(rule, parameters, mode, ref moved);
+        }
+
+        /// <summary>
+        /// Turns the running invocation into the one an <c>xsl:apply-templates</c> in tail position asked
+        /// for: the focus moved to the node, and the rule that matched it made the current one.
+        /// </summary>
+        /// <param name="parameters">The invocation's parameters, replaced by the deferred call's.</param>
+        /// <param name="mode">The invocation's mode, replaced by the deferred call's.</param>
+        /// <param name="inner">The invocation's context, moved to the node the rule applies to.</param>
+        /// <returns>The template to run next.</returns>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private Template TakeOverDeferredApply(
+            ref ParameterValue[] parameters, ref int mode, ref DynamicContext inner)
+        {
+            TakeDeferredApply(
+                out TemplateRule applied,
+                out ParameterValue[] applyParameters,
+                out int applyMode,
+                out XdmTree applyTree,
+                out int applyNode,
+                out int applyPosition,
+                out int applySize);
+
+            Template template = applied.Template;
+
+            if (template.Visibility == Visibility.Abstract)
+            {
+                throw AbstractTemplate(template);
+            }
+
+            parameters = applyParameters;
+            mode = applyMode;
+            inner = OnOneNode(inner, applyTree, applyNode, applyPosition, applySize);
+            m_currentMode = mode;
+            m_currentPrecedence = template.ImportPrecedence;
+            m_currentFloor = template.ImportFloor;
+            m_currentRule = applied;
+            m_tunnel = ExtendTunnel(parameters);
+            return template;
+        }
+
+        /// <summary>Builds the error for more template invocations in progress than are allowed.</summary>
+        /// <remarks>Its own method for the reason <see cref="AbstractTemplate"/> is.</remarks>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static XsltException TooManyTemplateInvocations()
+        {
+            return new XsltException(
+                $"Template invocations nested more than {MaximumCallDepth} deep; the stylesheet is probably "
+                + "recursing without a terminating case.");
+        }
+
+        /// <summary>
+        /// Makes a template invocation on a new stack, the current one being nearly used up.
+        /// </summary>
+        /// <param name="template">The template to run.</param>
+        /// <param name="parameters">Parameters supplied by the call site.</param>
+        /// <param name="mode">The mode in force for the invocation.</param>
+        /// <param name="context">The caller's context, which the invocation only reads.</param>
+        /// <param name="asRule">The rule the invocation makes current, if a pattern chose it.</param>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private void InvokeTemplateOnFreshStack(
+            Template template,
+            ParameterValue[] parameters,
+            int mode,
+            ref DynamicContext context,
+            TemplateRule? asRule)
+        {
+            new TemplateOnFreshStack(this, template, parameters, mode, context.Hold(), asRule).RunToCompletion(
+                "Template invocations nested too deeply, and no further stack could be had to continue on; "
+                + "the stylesheet is probably recursing without a terminating case.");
+        }
+
+        /// <summary>A template invocation waiting to be made on a new stack.</summary>
+        private sealed class TemplateOnFreshStack : FreshStack
+        {
+            private readonly XsltRuntime m_runtime;
+            private readonly Template m_template;
+            private readonly ParameterValue[] m_parameters;
+            private readonly int m_mode;
+            private readonly DynamicContext.Held m_context;
+            private readonly TemplateRule? m_asRule;
+
+            public TemplateOnFreshStack(
+                XsltRuntime runtime,
+                Template template,
+                ParameterValue[] parameters,
+                int mode,
+                DynamicContext.Held context,
+                TemplateRule? asRule)
+            {
+                m_runtime = runtime;
+                m_template = template;
+                m_parameters = parameters;
+                m_mode = mode;
+                m_context = context;
+                m_asRule = asRule;
+            }
+
+            /// <inheritdoc/>
+            protected override void Run()
+            {
+                DynamicContext context = m_context.Restore();
+                m_runtime.InvokeTemplate(m_template, m_parameters, m_mode, ref context, m_asRule);
             }
         }
 
@@ -2951,6 +3250,18 @@ namespace CodeDeeds.Xslt.Runtime
             ParameterValue[] parameters,
             ref DynamicContext context)
         {
+            // A built-in rule goes down a level of the document without reaching InvokeTemplate, so the
+            // question asked there has to be asked here as well: a stylesheet with no rule for the elements
+            // of a document two thousand deep, in a mode that copies what it has no rule for, ran the stack
+            // out for real, and at five thousand so did the rule that was always there. Answered as it is
+            // there, on a new stack. Nothing is counted, because nothing here can fail to end: what is being
+            // descended is a tree, and a template reached on the way down is counted where it is invoked.
+            if (!System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
+            {
+                ApplyBuiltInRuleOnFreshStack(node, mode, parameters, ref context);
+                return;
+            }
+
             ModeDeclaration rules = m_stylesheet.ModeRules.TryGetValue(mode, out ModeDeclaration declared)
                 ? declared
                 : ModeDeclaration.Default;
@@ -3002,6 +3313,50 @@ namespace CodeDeeds.Xslt.Runtime
 
                 default:
                     return;
+            }
+        }
+
+        /// <summary>
+        /// Applies a built-in rule on a new stack, the current one being nearly used up.
+        /// </summary>
+        /// <param name="node">The node no template rule matched.</param>
+        /// <param name="mode">The mode in force.</param>
+        /// <param name="parameters">Parameters supplied by the call site.</param>
+        /// <param name="context">The context, positioned on the node, which the rule only reads.</param>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private void ApplyBuiltInRuleOnFreshStack(
+            int node, int mode, ParameterValue[] parameters, ref DynamicContext context)
+        {
+            new BuiltInRuleOnFreshStack(this, node, mode, parameters, context.Hold()).RunToCompletion(
+                "The document is nested too deeply for the built-in template rules to descend, and no further "
+                + "stack could be had to continue on.");
+        }
+
+        /// <summary>A built-in rule waiting to be applied on a new stack.</summary>
+        private sealed class BuiltInRuleOnFreshStack : FreshStack
+        {
+            private readonly XsltRuntime m_runtime;
+            private readonly int m_node;
+            private readonly int m_mode;
+            private readonly ParameterValue[] m_parameters;
+            private readonly DynamicContext.Held m_context;
+
+            public BuiltInRuleOnFreshStack(
+                XsltRuntime runtime, int node, int mode, ParameterValue[] parameters, DynamicContext.Held context)
+            {
+                m_runtime = runtime;
+                m_node = node;
+                m_mode = mode;
+                m_parameters = parameters;
+                m_context = context;
+            }
+
+            /// <inheritdoc/>
+            protected override void Run()
+            {
+                DynamicContext context = m_context.Restore();
+                m_runtime.ApplyBuiltInRule(m_node, m_mode, m_parameters, ref context);
             }
         }
 
