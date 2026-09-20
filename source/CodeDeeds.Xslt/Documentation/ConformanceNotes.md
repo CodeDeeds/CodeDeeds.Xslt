@@ -8179,10 +8179,26 @@ promise — what `ContextItemExpr` stopped promising for the same reason.
 Nothing moves on any run: the 3.0 run stands at 8,061 of 8,071, the 2.0 run at 5,678 of 5,701 and the
 schema-aware run at 8,668 of 8,727, each on both backends, and the XPath runs at 18,268 of 18,285 and
 14,553 of 14,577. Every failure set is identical test for test and message for message, taken before
-and after with the suites checked for having stood still under each run. Eleven new unit tests, 2,894
+and after with the suites checked for having stood still under each run. Eleven new unit tests, 2,909
 in all, each asking its expression as a value, in an `xsl:when` and in an `xsl:if`, on both backends,
 and requiring one answer or one error code; the two about `current()` and the function call fail
 against the engine as it was.
+
+The tables were taken before the two sections above this one landed underneath it: *A node, and the
+same text as a string*, which changes the 1.0 comparison and nothing a 3.0 expression reaches, and *A
+predicate in a pattern*, which changes how a pattern counts and nothing in a path. Both sides were
+built again on top of each as it landed and everything above taken again. The eight runs stand where
+they stood both times, identical test for test, and the rows of the tables taken again, the same way,
+say what they said. On the second of the two `[name and category and rating]` is 346 to 235
+interpreted and 212 to 132 compiled, and `[price > 100 and rating > 4]` 229 to 211 and 132 to 133, the
+bytes as they were; on the first, `[name and price > 100]` was 293 to 248 and 165 to 143. Every figure
+is between a twentieth and an eighth lower than in the tables, on both sides alike, the machine having
+gone quiet.
+
+And the template rule shows now what seven milliseconds of counted siblings had hidden. With those
+gone, `match="product[name and price > 100]"` over the thousand products is 408 to 373 interpreted and
+412 to 363 compiled, and the eighty thousand bytes a call are gone as they were before: a pattern's
+predicate is still evaluated as a value, and the `and` inside it no longer is.
 
 ### Which results the suite asks for and does not get
 
