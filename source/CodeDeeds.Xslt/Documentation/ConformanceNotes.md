@@ -8406,6 +8406,117 @@ three of them requiring the oracle's answer and a fourth recording where it diff
 eight of the nine fail against the engine as it was, the ninth holding that a typed number is still
 formatted from its own digits.
 
+### A tree as deep as it likes
+
+`deep-equal(., .)` over a document of 20,000 nested elements printed *Stack overflow* and the process was
+gone; at 3,000 it answered. `DeepEqualNodes` called `DeepEqualChildren` called `DeepEqualNodes`, a level
+of the tree at a time with nothing asking about the stack, and no deep file is needed to get there:
+`parse-xml` over a generated string builds such a tree from inside a stylesheet. A stack overflow cannot
+be caught, so this is not an error the caller sees. It is the end of the caller.
+
+**The comparison is a loop now, and has no depth.** A tree numbers its nodes in document order, a
+subtree is a run of ids, and every node knows its depth. Two trees are the same shape exactly when their
+nodes, read in that order, stand at the same depths, so the two subtrees are read side by side and the
+comparison of two nodes never looks below them. Comments and processing instructions are stepped over
+where they are descendants and compared where they are what was asked about; neither has children, so
+stepping over one moves nothing else.
+
+Reading shape off depths found the depths wrong. `XdmTreeBuilder.Detach`, which makes the nodes of an
+`as="element()"` constructor parentless, gave the node depth zero and left everything under it at the
+depth it had inside the document: a child two below its parent. Nothing had noticed because nothing in
+the library read a depth, `DepthOf` being public and unused, and `ModeTests` caught it the first time
+something did, as `deep-equal($x, copy-of($x))` answering false. `Detach` moves the whole subtree up now.
+
+**What else was tried at 20,000 deep**, each in a process of its own:
+
+| | was | is |
+|---|---|---|
+| `deep-equal` over nodes | overflow | answers |
+| `validation="strict"` on `xsl:copy-of` and on `xsl:document` | overflow in `NodeValidator.Walk` | answers; the walk is a loop over the tree's links, holding one flag per open element |
+| `innermost(//a)` | never came back | answers |
+| `xml-to-json` over elements nested that deep | overflow | refused as an error |
+| atomizing, `array:flatten`, `=`, `sum`, `sort`, `deep-equal`, `map:find`, `xsl:copy-of`, `xsl:where-populated`, the built-in rule for an array, and the `json` and `adaptive` methods, over an array in an array or a map in a map | overflow, every one | refused as an error |
+
+`innermost` was not a stack at all. It asked every node about every other by walking up from it, which on
+a chain of nested elements is the cube of the depth. Both functions sort first now, which they owe
+anyway, and then read once: everything under a node follows it before anything else does, so a node has
+a descendant in the set exactly when the next node is one, and an ancestor in the set exactly when the
+last node kept is one. Whether one node is under another is read off the numbering.
+
+Sound already, and tried for the first time here: `xsl:copy-of` with and without namespaces,
+`xsl:sequence` into an element, a variable declared `as="element()"`, `copy-of()`, `snapshot()` of the
+top and of the bottom, `path()`, `outermost()`, all three levels of `xsl:number`, an accumulator with
+rules for both phases, `serialize()` by every method, `xsl:message`, `xsl:key`, `xsl:strip-space`,
+`parse-xml`, `parse-xml-fragment`, and validation of the input as it is read. The `html` method writes
+eight hundred megabytes for that document, being indented unless told otherwise, which is slow and is not
+a stack. JSON never gets deep: `Utf8JsonReader` refuses text nested more than 64 levels and the engine
+reports it as `FOJS0001`, so `parse-json`, `json-to-xml` and a JSON input recurse sixty-four times at most.
+
+**A value is not a document, and is treated differently.** Folding `function($a, $i) { [$a] }` over a
+range nests an array 200,000 deep with no recursion in the stylesheet, and building it costs no stack.
+Everything that goes inside costs a frame a level. These walks stay the recursions they read best as and
+ask `TryEnsureSufficientExecutionStack` before going down a level (`NestingGuard`), once per map or array
+and never per atomic item, so a sequence of numbers pays nothing; where the answer is no, the walk ends
+in an `XsltException` that `xsl:try` catches like any other. The depth that happens at is the stack's
+and not a number to document, some thousands of levels, which would be a poor rule for a recursion a
+stylesheet is written to and is a fair one for a value no JSON could have held. `xml-to-json` is the one
+walk over elements handled this way, because it holds the keys of each map while it writes the members.
+Should `FreshStack` reach this branch, any of these can carry on upon another stack instead of refusing.
+
+**Found and not fixed.**
+
+- *The built-in template rules* descend a level of stack per level of the document and ask nothing. With
+  no rule matching its elements a document overflows between 2,000 and 5,000 deep, and between 1,000 and
+  2,000 in a mode declared `on-no-match="shallow-copy"`: an empty stylesheet is enough. The branch that
+  carries a deep recursion on to another stack (`FreshStack`) guards them; this one leaves `XsltRuntime`
+  alone there so as not to collide with it. Whichever of the two is merged second has a sentence to
+  take out: that branch's notes say `deep-equal` is not fixed, and these and the *Nesting depth* row of
+  `XsltCompatibility.md` say the built-in rules are not.
+- *The shape of a stylesheet.* `1+1+…+1` overflows in `BinaryExpr.Evaluate` between 2,000 and 5,000
+  terms, and an `or` chain between 10,000 and 20,000. Literal result elements nested 2,000 deep overflow
+  the compiler in `SettleUseWhenIn`. `xsl:if` nested 1,000 to 5,000 deep is refused by the XPath parser's
+  guard, the compiler having used the stack up by the time a `test` is read, which is safe and says the
+  wrong thing; at 10,000 it overflows. A pattern of 10,000 steps overflows in `Pattern.MatchStep`. A path
+  of 10,000 steps, a `||` chain and a comma sequence of 20,000 are sound. None of it is input, all of it
+  takes a generated stylesheet, and `BinaryExpr.Evaluate` is not somewhere to add a check unmeasured.
+
+**What it costs.** Three stylesheets over a parsed document of a thousand records, nine thousand nodes:
+two whole documents compared forty times, a thousand records each compared with the first, and a thousand
+comparisons that fail at the first node. Microseconds a transformation, the median of five fresh
+processes of each build taken turn about, six seconds of warm-up each; bytes allocated are the same to
+the byte.
+
+| | was | is |
+|---|---|---|
+| two documents, forty times | 8,675 | 8,472 |
+| a thousand small comparisons | 338 | 307 |
+| a thousand that fail at once | 119 | 123 |
+
+The last row is a loss, three nanoseconds a call: the two nodes asked about are compared in a method of
+their own now, a call away, where a mismatch used to return from the method it arrived in. An earlier
+eight processes of each, on a busier machine, had that row level at 128 and the other two at 9,195 to
+8,826 and 375 to 333.
+
+The loop alone came out level with the recursion. The rest is `SameName` comparing two fingerprints where
+the two trees share a name table, which two nodes of one document always do, in place of four strings.
+That cost something first. Written as one method with two branches it was compiled by whatever its first
+few thousand calls had been: where those all compared nodes of one tree the string route was taken for
+cold and its lookups left as calls, and comparing a document with a copy of it, which has a table of its
+own, ran a tenth slower and more in about half of all processes and level in the rest. Two guesses at
+the cause were wrong, the loop being mistaken for cold and tiering being blamed, and each was tried,
+measured and taken out again; `DOTNET_JitDisasm` from a slow process and a fast one differed in
+`SameName` and nowhere else. The string route is a method of its own, compiled by its own calls, and
+thirteen processes in thirteen are fast. With dynamic PGO off the two documents take 13.6 ms to the old
+comparison's 15.7, the median of three of each.
+
+Sixteen new unit tests, 2,945 in all. Against the engine as it was, the one that compares two deep
+documents and the one that validates one would end the test host, and the one over `innermost` would
+never finish, which is what the same stylesheets did in a process of their own and is why each was run
+there first. The ones over values pass
+on the answer or on the refusal, whichever the host's stack gives, since what they test is that the
+process is still there. All eight conformance runs are unchanged, totals and failure sets both: 5,678 of
+5,701, 8,061 of 8,071 and 8,668 of 8,727 on both backends, and 14,553 and 18,268 for XPath.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error

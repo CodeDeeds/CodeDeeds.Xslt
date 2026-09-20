@@ -238,6 +238,8 @@ namespace CodeDeeds.Xslt.XPath
                 case XPathValueKind.Array:
                     // XPath 3.1 makes an array atomize to its members, so '[2] = 2' is true and
                     // '[[1], [2]] = 2' is too. A map still has no typed value, and says so where it is asked.
+                    NestingGuard.Descend("atomize");
+
                     foreach (XPathValue member in value.AsArray().Members)
                     {
                         items.AddRange(Atomize(member));

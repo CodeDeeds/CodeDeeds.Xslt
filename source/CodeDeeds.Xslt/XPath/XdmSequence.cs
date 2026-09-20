@@ -309,6 +309,8 @@ namespace CodeDeeds.Xslt.XPath
                 return;
             }
 
+            NestingGuard.Descend("write into a result tree");
+
             foreach (XPathValue member in item.AsArray().Members)
             {
                 foreach (XPathValue single in Items(member))
@@ -508,6 +510,8 @@ namespace CodeDeeds.Xslt.XPath
                 }
 
                 case XPathValueKind.Array:
+                    NestingGuard.Descend("atomize");
+
                     foreach (XPathValue member in item.AsArray().Members)
                     {
                         AtomizeInto(member, into);

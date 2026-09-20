@@ -3379,6 +3379,8 @@ namespace CodeDeeds.Xslt.Runtime
                 // not got.
                 if (item.Kind == XPathValueKind.Array)
                 {
+                    // An array inside an array comes back here, a level of stack further down each time.
+                    NestingGuard.Descend("apply templates to");
                     List<XPathValue> members = new List<XPathValue>();
 
                     foreach (XPathValue member in item.AsArray().Members)

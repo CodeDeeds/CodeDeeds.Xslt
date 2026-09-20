@@ -683,60 +683,61 @@ namespace CodeDeeds.Xslt.XPath
         private XPathValue Nesting(ref DynamicContext context, bool outermost)
         {
             List<XPathValue> items = Items(0, ref context);
-            NodeSet kept = new NodeSet(items.Count > 0 ? TreeOf(items[0]) : context.Tree, items.Count);
+            NodeSet all = new NodeSet(items.Count > 0 ? TreeOf(items[0]) : context.Tree, items.Count);
 
             foreach (XPathValue item in items)
             {
-                bool covered = false;
-
-                foreach (XPathValue other in items)
-                {
-                    // A node covers itself, which would empty the answer, so the pair has to differ first.
-                    if (ReferenceEquals(TreeOf(other), TreeOf(item)) && IdOf(other) == IdOf(item))
-                    {
-                        continue;
-                    }
-
-                    if (outermost ? IsAncestor(other, item) : IsAncestor(item, other))
-                    {
-                        covered = true;
-                        break;
-                    }
-                }
-
-                if (!covered)
-                {
-                    kept.Add(TreeOf(item), IdOf(item));
-                }
+                all.Add(TreeOf(item), IdOf(item));
             }
 
             // Both are defined to answer in document order with no repeats, whatever order they were given
-            // in — which is what a node-set already promises, so saying so is all that is needed.
+            // in, and the order is also what makes each a single pass. Everything under a node follows it
+            // before anything else does. So a node has a descendant in the set exactly when the node after
+            // it is one, and an ancestor in the set exactly when the last node kept is one: whatever stands
+            // between an outermost node and something under it is under it too, and so was not kept.
+            // Asking every node about every other, by walking up from each, cost the cube of the depth on
+            // a chain of nested elements, and a document twenty thousand deep never came back.
+            all.SortAndDeduplicate();
+            NodeSet kept = new NodeSet(all.Tree, all.Count);
+            int last = -1;
+
+            for (int i = 0; i < all.Count; i++)
+            {
+                bool covered = outermost
+                    ? last >= 0 && IsAncestor(all.TreeAt(last), all[last], all.TreeAt(i), all[i])
+                    : i + 1 < all.Count && IsAncestor(all.TreeAt(i), all[i], all.TreeAt(i + 1), all[i + 1]);
+
+                if (!covered)
+                {
+                    kept.Add(all.TreeAt(i), all[i]);
+                    last = i;
+                }
+            }
+
             kept.SortAndDeduplicate();
             return XPathValue.FromNodeSet(kept);
         }
 
         /// <summary>Whether one node is an ancestor of another, which only holds within one tree.</summary>
-        private static bool IsAncestor(XPathValue ancestor, XPathValue node)
+        /// <remarks>
+        /// Read off the numbering rather than walked: a node's descendants are the ids that follow it up
+        /// to the end of its subtree, and an attribute or a namespace node is under whatever its element
+        /// is under, and under its element.
+        /// </remarks>
+        private static bool IsAncestor(XdmTree ancestorTree, int ancestor, XdmTree tree, int node)
         {
-            XdmTree tree = TreeOf(node);
-
-            if (!ReferenceEquals(TreeOf(ancestor), tree))
+            if (!ReferenceEquals(ancestorTree, tree) || XdmTree.IsAttribute(ancestor))
             {
                 return false;
             }
 
-            int wanted = IdOf(ancestor);
-
-            for (int at = tree.ParentOf(IdOf(node)); at >= 0; at = tree.ParentOf(at))
+            if (XdmTree.IsAttribute(node))
             {
-                if (at == wanted)
-                {
-                    return true;
-                }
+                int owner = tree.ParentOf(node);
+                return owner >= ancestor && owner <= tree.SubtreeEndOf(ancestor);
             }
 
-            return false;
+            return node > ancestor && node <= tree.SubtreeEndOf(ancestor);
         }
 
         /// <summary>

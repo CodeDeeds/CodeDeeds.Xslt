@@ -50,6 +50,8 @@ namespace CodeDeeds.Xslt.Compiler
 
                 case XPathValueKind.Array:
                 {
+                    NestingGuard.Descend("look for content in");
+
                     foreach (XPathValue member in item.AsArray().Members)
                     {
                         foreach (XPathValue flattened in XdmSequence.Items(member))

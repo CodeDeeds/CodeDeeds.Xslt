@@ -627,6 +627,7 @@ namespace CodeDeeds.Xslt.XPath
             {
                 case XPathValueKind.Map:
                 {
+                    NestingGuard.Descend("write as JSON");
                     XdmMap map = value.AsMap();
                     HashSet<string> names = new HashSet<string>(StringComparer.Ordinal);
                     json.Append('{');
@@ -663,6 +664,7 @@ namespace CodeDeeds.Xslt.XPath
 
                 case XPathValueKind.Array:
                 {
+                    NestingGuard.Descend("write as JSON");
                     XdmArray array = value.AsArray();
                     json.Append('[');
 
@@ -855,6 +857,7 @@ namespace CodeDeeds.Xslt.XPath
             {
                 case XPathValueKind.Map:
                 {
+                    NestingGuard.Descend("write with the adaptive method");
                     text.Append("map{");
                     bool first = true;
 
@@ -877,6 +880,7 @@ namespace CodeDeeds.Xslt.XPath
 
                 case XPathValueKind.Array:
                 {
+                    NestingGuard.Descend("write with the adaptive method");
                     XdmArray array = value.AsArray();
                     text.Append('[');
 

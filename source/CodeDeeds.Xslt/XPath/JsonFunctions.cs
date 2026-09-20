@@ -748,6 +748,7 @@ namespace CodeDeeds.Xslt.XPath
         private void WriteBraced(
             XdmTree tree, int id, StringBuilder json, bool indent, int depth, char open, char close, bool named)
         {
+            NestingGuard.DescendElements("write as JSON");
             json.Append(open);
             bool first = true;
             HashSet<string>? keys = named ? new HashSet<string>(StringComparer.Ordinal) : null;

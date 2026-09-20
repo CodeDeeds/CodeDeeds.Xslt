@@ -2337,6 +2337,8 @@ namespace CodeDeeds.Xslt.XPath
                     return false;
                 }
 
+                NestingGuard.Descend("compare with deep-equal");
+
                 XdmArray first = left.AsArray();
                 XdmArray second = right.AsArray();
 
@@ -2363,6 +2365,8 @@ namespace CodeDeeds.Xslt.XPath
                 {
                     return false;
                 }
+
+                NestingGuard.Descend("compare with deep-equal");
 
                 XdmMap first = left.AsMap();
                 XdmMap second = right.AsMap();
@@ -2412,7 +2416,57 @@ namespace CodeDeeds.Xslt.XPath
         /// one, the same attributes by name and value, and children that are pairwise deep-equal once
         /// comments and processing instructions are left out.
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Not a recursion, because a document may be nested as deep as it likes and the stack may not: one
+        /// call per level overflowed on a tree twenty thousand deep, and a stack overflow cannot be caught.
+        /// A tree numbers its nodes in document order and gives each its depth, and two trees are the same
+        /// shape exactly when their nodes, read in that order, are at the same depths. So the two subtrees
+        /// are read side by side, each as the run of ids it is, and the comparison of two nodes never has
+        /// to look below them.
+        /// </para>
+        /// <para>
+        /// A comment or a processing instruction is left out where it is a descendant, and compared where
+        /// it is one of the two nodes asked about; neither has children, so leaving one out moves nothing.
+        /// </para>
+        /// </remarks>
         private static bool DeepEqualNodes(
+            Model.XdmTree leftTree, int left, Model.XdmTree rightTree, int right, Collation collation)
+        {
+            if (!SameNode(leftTree, left, rightTree, right, collation))
+            {
+                return false;
+            }
+
+            // An attribute or a namespace node is its own subtree, so the loop below has nothing to read.
+            int leftEnd = leftTree.SubtreeEndOf(left);
+            int rightEnd = rightTree.SubtreeEndOf(right);
+            int leftDepth = leftTree.DepthOf(left);
+            int rightDepth = rightTree.DepthOf(right);
+
+            while (true)
+            {
+                left = NextCompared(leftTree, left + 1, leftEnd);
+                right = NextCompared(rightTree, right + 1, rightEnd);
+
+                if (left > leftEnd || right > rightEnd)
+                {
+                    return left > leftEnd && right > rightEnd;
+                }
+
+                if (leftTree.DepthOf(left) - leftDepth != rightTree.DepthOf(right) - rightDepth
+                    || !SameNode(leftTree, left, rightTree, right, collation))
+                {
+                    return false;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Whether two nodes agree in everything but their children: kind, name, attributes, and the text
+        /// of a node that has text of its own.
+        /// </summary>
+        private static bool SameNode(
             Model.XdmTree leftTree, int left, Model.XdmTree rightTree, int right, Collation collation)
         {
             Model.NodeKind kind = leftTree.KindOf(left);
@@ -2425,7 +2479,7 @@ namespace CodeDeeds.Xslt.XPath
             switch (kind)
             {
                 case Model.NodeKind.Root:
-                    return DeepEqualChildren(leftTree, left, rightTree, right, collation);
+                    return true;
 
                 case Model.NodeKind.Element:
                 {
@@ -2461,7 +2515,7 @@ namespace CodeDeeds.Xslt.XPath
                         }
                     }
 
-                    return DeepEqualChildren(leftTree, left, rightTree, right, collation);
+                    return true;
                 }
 
                 case Model.NodeKind.Attribute:
@@ -2481,41 +2535,39 @@ namespace CodeDeeds.Xslt.XPath
             int leftName = leftTree.FingerprintOf(left);
             int rightName = rightTree.FingerprintOf(right);
 
-            return leftTree.NameTable.GetLocalName(leftName) == rightTree.NameTable.GetLocalName(rightName)
-                && leftTree.NameTable.GetNamespaceUri(leftName) == rightTree.NameTable.GetNamespaceUri(rightName);
+            // One table gives one name one fingerprint, so two nodes of one tree, or of two trees that
+            // share a table, are compared as two integers.
+            return ReferenceEquals(leftTree.NameTable, rightTree.NameTable)
+                ? leftName == rightName
+                : SameNameAcrossTables(leftTree.NameTable, leftName, rightTree.NameTable, rightName);
+        }
+
+        /// <summary>Whether two fingerprints of two name tables stand for one expanded name.</summary>
+        /// <remarks>
+        /// A method of its own, and deliberately. Written as the other branch of <see cref="SameName"/> it
+        /// was compiled by what that method had been seen to do in its first few thousand calls: where
+        /// those all compared nodes of one tree, this route was taken for cold and its lookups were left
+        /// as calls, and comparing a document with a copy of it then took a tenth longer in about half of
+        /// all processes. The disassembly of a slow process and of a fast one differed in exactly that.
+        /// Here it is compiled by its own calls, which are all of this kind.
+        /// </remarks>
+        private static bool SameNameAcrossTables(
+            Model.NameTable leftNames, int leftName, Model.NameTable rightNames, int rightName)
+        {
+            return leftNames.GetLocalName(leftName) == rightNames.GetLocalName(rightName)
+                && leftNames.GetNamespaceUri(leftName) == rightNames.GetNamespaceUri(rightName);
         }
 
         /// <summary>
-        /// Whether two nodes' children are pairwise deep-equal, comments and processing instructions
-        /// left out of both.
+        /// The first node from an id up to the end of a subtree that takes part in the comparison, or the
+        /// id past the end where none does.
         /// </summary>
-        private static bool DeepEqualChildren(
-            Model.XdmTree leftTree, int left, Model.XdmTree rightTree, int right, Collation collation)
+        private static int NextCompared(Model.XdmTree tree, int node, int end)
         {
-            int leftChild = NextCompared(leftTree, leftTree.FirstChildOf(left));
-            int rightChild = NextCompared(rightTree, rightTree.FirstChildOf(right));
-
-            while (leftChild >= 0 && rightChild >= 0)
-            {
-                if (!DeepEqualNodes(leftTree, leftChild, rightTree, rightChild, collation))
-                {
-                    return false;
-                }
-
-                leftChild = NextCompared(leftTree, leftTree.NextSiblingOf(leftChild));
-                rightChild = NextCompared(rightTree, rightTree.NextSiblingOf(rightChild));
-            }
-
-            return leftChild < 0 && rightChild < 0;
-        }
-
-        /// <summary>The node itself, or the next sibling after it that takes part in the comparison.</summary>
-        private static int NextCompared(Model.XdmTree tree, int node)
-        {
-            while (node >= 0
+            while (node <= end
                 && tree.KindOf(node) is Model.NodeKind.Comment or Model.NodeKind.ProcessingInstruction)
             {
-                node = tree.NextSiblingOf(node);
+                node++;
             }
 
             return node;

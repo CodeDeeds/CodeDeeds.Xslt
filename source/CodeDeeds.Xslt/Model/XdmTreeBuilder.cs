@@ -1403,6 +1403,15 @@ namespace CodeDeeds.Xslt.Model
         /// mean rewriting every parent, sibling and subtree index in the tree to save one slot, and nothing
         /// reaches it once it has no children.
         /// </para>
+        /// <para>
+        /// A node that becomes a root is at depth zero, and everything under it moves up with it: a depth
+        /// is a distance from the top of the node's own tree, and two depths are only worth comparing if
+        /// that holds all the way down. It did not, once: the node was given zero and what was under it
+        /// kept the depth it had inside the document, so a child stood two below its parent, and
+        /// <c>deep-equal</c>, which tells two shapes apart by depth, found a copy unlike its original.
+        /// The elements are closed by the time this is called, which is what makes each one's subtree a
+        /// known run of ids.
+        /// </para>
         /// </remarks>
         public void Detach()
         {
@@ -1412,7 +1421,12 @@ namespace CodeDeeds.Xslt.Model
 
                 m_parent[node] = -1;
                 m_next[node] = -1;
-                m_depth[node] = 0;
+
+                for (int under = node; under <= m_subtreeEnd[node]; under++)
+                {
+                    m_depth[under]--;
+                }
+
                 node = next;
             }
 

@@ -375,7 +375,83 @@ namespace CodeDeeds.Xslt.Compiler
             return overlay;
         }
 
+        /// <summary>
+        /// Feeds an element and everything in it to the validator, in document order.
+        /// </summary>
+        /// <remarks>
+        /// A loop over the tree's own links rather than a call per element, because a document may be
+        /// nested as deep as it likes and the stack may not: validating one twenty thousand deep ended as a
+        /// stack overflow, which cannot be caught. What an element has to remember while its children are
+        /// read is one flag, and those are what the stack here holds.
+        /// </remarks>
         private void Walk(
+            XdmTree tree,
+            int top,
+            XmlSchemaValidator validator,
+            XmlNamespaceManager namespaces,
+            TypeOverlay overlay,
+            Problems problems)
+        {
+            // For each element that is open, whether it has an element among its children.
+            Stack<bool> open = new Stack<bool>();
+            int node = top;
+            bool arriving = true;
+
+            while (true)
+            {
+                NodeKind kind = tree.KindOf(node);
+
+                if (arriving)
+                {
+                    if (kind == NodeKind.Element)
+                    {
+                        open.Push(Open(tree, node, validator, namespaces, overlay, problems));
+
+                        if (tree.FirstChildOf(node) is int first and >= 0)
+                        {
+                            node = first;
+                            continue;
+                        }
+                    }
+                    else if (kind == NodeKind.Text)
+                    {
+                        // Text is fed as text, whitespace as whitespace, so that an element-only content
+                        // model does not trip over the indentation between its children.
+                        string text = tree.StringValueOf(node);
+                        if (open.Peek() && text.AsSpan().Trim().Length == 0)
+                        {
+                            validator.ValidateWhitespace(text);
+                        }
+                        else
+                        {
+                            validator.ValidateText(text);
+                        }
+                    }
+                }
+
+                // The node is done with, and its children where it had any.
+                if (kind == NodeKind.Element)
+                {
+                    open.Pop();
+                    Close(tree, node, validator, namespaces, overlay, problems);
+                }
+
+                if (node == top)
+                {
+                    return;
+                }
+
+                int next = tree.NextSiblingOf(node);
+                arriving = next >= 0;
+                node = arriving ? next : tree.ParentOf(node);
+            }
+        }
+
+        /// <summary>
+        /// Starts an element: its name, its attributes and the ones its declaration supplies.
+        /// </summary>
+        /// <returns>Whether the element has an element among its children.</returns>
+        private bool Open(
             XdmTree tree,
             int element,
             XmlSchemaValidator validator,
@@ -476,41 +552,26 @@ namespace CodeDeeds.Xslt.Compiler
 
             validator.ValidateEndOfAttributes(info);
 
-            bool hasElementChild = false;
             for (int child = tree.FirstChildOf(element); child >= 0; child = tree.NextSiblingOf(child))
             {
                 if (tree.KindOf(child) == NodeKind.Element)
                 {
-                    hasElementChild = true;
-                    break;
+                    return true;
                 }
             }
 
-            // Text is fed as text, whitespace as whitespace, so that an element-only content model does not
-            // trip over the indentation between its children.
-            for (int child = tree.FirstChildOf(element); child >= 0; child = tree.NextSiblingOf(child))
-            {
-                switch (tree.KindOf(child))
-                {
-                    case NodeKind.Text:
-                        string text = tree.StringValueOf(child);
-                        if (hasElementChild && text.AsSpan().Trim().Length == 0)
-                        {
-                            validator.ValidateWhitespace(text);
-                        }
-                        else
-                        {
-                            validator.ValidateText(text);
-                        }
+            return false;
+        }
 
-                        break;
-
-                    case NodeKind.Element:
-                        Walk(tree, child, validator, namespaces, overlay, problems);
-                        break;
-                }
-            }
-
+        /// <summary>Ends an element, which is when the validator settles its type and whether it is nilled.</summary>
+        private void Close(
+            XdmTree tree,
+            int element,
+            XmlSchemaValidator validator,
+            XmlNamespaceManager namespaces,
+            TypeOverlay overlay,
+            Problems problems)
+        {
             XmlSchemaInfo end = new XmlSchemaInfo();
             int endMark = problems.Count;
             validator.ValidateEndElement(end);

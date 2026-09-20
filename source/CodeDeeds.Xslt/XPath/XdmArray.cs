@@ -99,6 +99,8 @@ namespace CodeDeeds.Xslt.XPath
 
         private static void FlattenInto(XdmArray array, List<XPathValue> output)
         {
+            NestingGuard.Descend("flatten");
+
             foreach (XPathValue member in array.m_members)
             {
                 foreach (XPathValue item in XdmSequence.Items(member))

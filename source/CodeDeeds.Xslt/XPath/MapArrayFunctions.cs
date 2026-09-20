@@ -515,6 +515,7 @@ namespace CodeDeeds.Xslt.XPath
             {
                 case XPathValueKind.Map:
                 {
+                    NestingGuard.Descend("search with map:find");
                     XdmMap map = item.AsMap();
 
                     if (map.Contains(key))
@@ -535,6 +536,8 @@ namespace CodeDeeds.Xslt.XPath
 
                 case XPathValueKind.Array:
                 {
+                    NestingGuard.Descend("search with map:find");
+
                     foreach (XPathValue member in item.AsArray().Members)
                     {
                         foreach (XPathValue inner in XdmSequence.Items(member))
