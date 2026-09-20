@@ -671,7 +671,10 @@ namespace CodeDeeds.Xslt.Compiler
         {
             if (key.Numeric)
             {
-                return left.ToNumber().CompareTo(right.ToNumber());
+                // As number() reads them, which is what data-type="number" asks for: '1e1' is ten. The
+                // values are kept as they were atomized, current-merge-key() being a way to see them, and
+                // a merge compares each item once or twice rather than twenty times.
+                return XdmType.FirstItemAsDoubleOrNaN(left).CompareTo(XdmType.FirstItemAsDoubleOrNaN(right));
             }
 
             if (!Xpath2FunctionExpr.IsText(left) && !Xpath2FunctionExpr.IsText(right)

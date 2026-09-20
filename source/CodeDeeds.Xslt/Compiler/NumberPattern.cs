@@ -75,22 +75,13 @@ namespace CodeDeeds.Xslt.Compiler
         }
 
         /// <summary>
-        /// Formats a number through this picture.
-        /// </summary>
-        /// <param name="value">The value to format, whose type decides which digits it has.</param>
-        /// <param name="format">The symbols to write the result with.</param>
-        public string Format(XPathValue value, DecimalFormat format)
-        {
-            return Format(value, value.ToNumber(), format);
-        }
-
-        /// <summary>
-        /// Formats a number through this picture, the caller having already read the value as a number.
+        /// Formats a number through this picture, the caller having read the value as a number.
         /// </summary>
         /// <remarks>
-        /// For a backwards compatible call, whose conversion is not <see cref="XPathValue.ToNumber"/>:
-        /// the value is still what says which digits a typed number has, and the number is what the
-        /// caller's conversion made of it.
+        /// How the value is read is the caller's to say and differs by version — <c>fn:number</c> under
+        /// backwards compatibility, the cast of an untyped value from 2.0 — and neither is
+        /// <see cref="XPathValue.ToNumber"/>. The value is still what says which digits a typed number
+        /// has, and the number is what the caller's conversion made of it.
         /// </remarks>
         /// <param name="value">The value to format, whose type decides which digits it has.</param>
         /// <param name="number">The value as a number.</param>

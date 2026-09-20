@@ -1019,17 +1019,20 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="right">The other.</param>
         public int Compare(XPathValue left, XPathValue right)
         {
+            // A numeric key's values are doubles by now, Order having converted them with number(), which
+            // makes NaN of no value at all as it does of text that is no number. So there is no empty
+            // value to set apart here, and nothing to parse.
+            if (Numeric)
+            {
+                return CompareNumbers(left.ToNumber(), right.ToNumber());
+            }
+
             bool leftEmpty = Xpath2FunctionExpr.IsEmptySequence(left);
             bool rightEmpty = Xpath2FunctionExpr.IsEmptySequence(right);
 
             if (leftEmpty || rightEmpty)
             {
                 return leftEmpty && rightEmpty ? 0 : leftEmpty ? -1 : 1;
-            }
-
-            if (Numeric)
-            {
-                return CompareNumbers(left.ToNumber(), right.ToNumber());
             }
 
             if (m_asText || (Xpath2FunctionExpr.IsText(left) && Xpath2FunctionExpr.IsText(right)))
@@ -1211,8 +1214,35 @@ namespace CodeDeeds.Xslt.Compiler
             }
         }
 
+        /// <summary>
+        /// Works out the order the keys put their items in, as the positions the items stood at.
+        /// </summary>
+        /// <remarks>
+        /// A key with <c>data-type="number"</c> has its values converted here, once each and where they
+        /// lie, before anything is compared. XSLT 2.0 §13.1.2 converts such a key with <c>number()</c>,
+        /// which from 2.0 on reads what <c>xs:double</c> writes — an exponent, a leading plus,
+        /// <c>INF</c> — and answers NaN for the rest and for no value at all. It had been read by XPath
+        /// 1.0's grammar, so <c>1e1</c> sorted as NaN ahead of everything, and read again for every
+        /// comparison, which is twenty times for each of a thousand keys.
+        /// </remarks>
+        /// <param name="keys">The keys, first the most significant.</param>
+        /// <param name="values">Each key's value for each item, which a numeric key's are replaced in.</param>
+        /// <param name="count">How many items there are.</param>
         internal static int[] Order(SortKey[] keys, XPathValue[][] values, int count)
         {
+            for (int k = 0; k < keys.Length; k++)
+            {
+                if (keys[k].Numeric)
+                {
+                    XPathValue[] column = values[k];
+
+                    for (int i = 0; i < count; i++)
+                    {
+                        column[i] = XPathValue.FromNumber(XdmType.FirstItemAsDoubleOrNaN(column[i]));
+                    }
+                }
+            }
+
             int[] order = new int[count];
             for (int i = 0; i < count; i++)
             {

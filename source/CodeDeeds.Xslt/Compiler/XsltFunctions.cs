@@ -110,9 +110,50 @@ namespace CodeDeeds.Xslt.Compiler
             // Where a number is expected, backwards compatibility converts the first item with fn:number
             // (XPath 2.0 §3.1.5), which reads what xs:double writes: a price written '1e1' formats as ten.
             return XPathValue.FromString(
-                m_version.IsBackwardsCompatible
-                    ? pattern.Format(value, XdmType.FirstItemAsDoubleOrNaN(value), m_format)
-                    : pattern.Format(value, m_format));
+                pattern.Format(
+                    value,
+                    m_version.IsBackwardsCompatible ? XdmType.FirstItemAsDoubleOrNaN(value) : NumberOf(value),
+                    m_format));
+        }
+
+        /// <summary>
+        /// Reads the value as the number it is from 2.0 on, where an untyped one is cast to
+        /// <c>xs:double</c>.
+        /// </summary>
+        /// <remarks>
+        /// The function conversion rules for a parameter declared <c>xs:numeric?</c>: a number is itself,
+        /// nothing is NaN, and untyped content — which is what a node atomizes to — is cast, so
+        /// <c>1e1</c> is ten and what is no number is <c>FORG0001</c>, as it is for <c>round()</c> and
+        /// every other function given the same node. It had been read by XPath 1.0's grammar and
+        /// answered NaN for both. <see cref="Require"/> has refused everything else by now.
+        /// </remarks>
+        /// <param name="value">The first argument, already checked.</param>
+        /// <exception cref="XsltException">Untyped content that is not an <c>xs:double</c>.</exception>
+        private static double NumberOf(XPathValue value)
+        {
+            switch (value.Kind)
+            {
+                case XPathValueKind.Node:
+                    return XdmType.UntypedTextAsDouble(value.NodeTree.StringValueOf(value.NodeId));
+
+                case XPathValueKind.NodeSet:
+                {
+                    NodeSet nodes = value.AsNodeSet();
+
+                    return nodes.Count == 0
+                        ? double.NaN
+                        : XdmType.UntypedTextAsDouble(nodes.TreeAt(0).StringValueOf(nodes[0]));
+                }
+
+                case XPathValueKind.String when value.TypeCode == XdmTypeCode.UntypedAtomic:
+                    return XdmType.UntypedTextAsDouble(value.ToStringValue());
+
+                case XPathValueKind.Sequence when value.AsSequence().Count == 1:
+                    return NumberOf(value.AsSequence()[0]);
+
+                default:
+                    return value.ToNumber();
+            }
         }
 
         /// <summary>

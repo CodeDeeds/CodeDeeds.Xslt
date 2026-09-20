@@ -8314,12 +8314,97 @@ and it parses the text again for every comparison rather than once for every key
 gain as well. `format-number(a, '0.0')` over the same node is `10.0` at 1.0 now and still `NaN` at 2.0
 and 3.0, where an untyped argument is cast to `xs:double`. Neither is touched here: each is a change
 to what 2.0 and 3.0 stylesheets are given, with its own question about what text that is no number
-becomes there, and deserves its own measurement.
+becomes there, and deserves its own measurement — which *A number to sort by, and a number to format*
+is.
 
 Eleven new unit tests, 2,920 in all, every expression asked of both backends; nine of the eleven fail
 against the engine as it was, the other two holding what was right already — what `xs:double` does not
 write is NaN and never an error, and nothing is different without the mode. Three older tests pinned the
 narrow reading by hand and say the other thing now; no differential test did.
+
+### A number to sort by, and a number to format
+
+The two places the section above left, which read untyped text by `XPathValue.ToNumber()` — XPath 1.0's
+grammar for a number — at every version. Over keys of `100`, `abc`, none at all, `1e1`, `9`, `+11`,
+`xyz` and `-5`, sorted with `data-type="number"`, at 1.0, 2.0 and 3.0 and on both backends alike:
+
+| | ascending |
+|---|---|
+| was | `[]` `[abc]` `[1e1]` `[+11]` `[xyz]` `[-5]` `[9]` `[100]` |
+| `XslCompiledTransform` | `[abc]` `[]` `[xyz]` `[-5]` `[9]` `[1e1]` `[+11]` `[100]` |
+| is | `[abc]` `[]` `[xyz]` `[-5]` `[9]` `[1e1]` `[+11]` `[100]` |
+
+**The sort key.** XSLT 2.0 §13.1.2 converts a key whose `data-type` is `number` with `number()`, which
+is the cast to `xs:double` with its failure answered NaN, and puts NaN ahead of every other number. So `1e1` is ten and `+11` eleven, and they had been NaN and first. The oracle was asked this time
+before anything was written down about it, and sorts them as the numbers they are. It also settles what
+a key that is not there is: `number(())` is NaN, so an item without the key stands among the others
+whose key is no number, in document order, where this engine had put it ahead of them as the empty
+sequence it would be under any other `data-type`. `INF` is the one difference left, infinity here and a
+word there, as everywhere else.
+
+`SortKey.Order` is where every sort comes to be ordered — `xsl:sort` under `xsl:for-each`,
+`xsl:apply-templates` and `xsl:perform-sort`, over one tree or several, and the groups of an
+`xsl:for-each-group` — so a numeric key's values are converted there, once each and where they lie,
+before anything is compared. They had been parsed by `Compare` instead, both of them, every time two were
+compared: about twenty thousand parses to sort a thousand items, where a thousand are wanted. `xsl:merge`
+keeps its keys as they were atomized, `current-merge-key()` being a way to see them, and reads them as
+numbers where it compares them; a merge of `('9', '1e1', '100')` with `('+11', '2e2')` had been refused
+as `XTDE2220`, the first source being out of order if `1e1` is NaN.
+
+**The number to format.** `format-number()` does not go through the conversion every other function's
+arguments do: it checks its own, so that a call wrong in two ways reports the error the specification
+puts first, and so that a single node is read without a node-set being built round it. What it did with
+an untyped argument that passed the check was `ToNumber()`. From 2.0 the function conversion rules cast
+such a value to `xs:double`, so `format-number(a, '0.0')` over `<a>1e1</a>` is `10.0` and had been `NaN`
+— at 2.0 and 3.0 only, the section above having converted it for 1.0.
+
+Which left the question the cast brings with it: what untyped text that is no number becomes. The cast
+fails, and a cast that fails is `FORG0001`; the engine answered `NaN`. **It is `FORG0001` now**, on three
+grounds. It is what the rules say. It is what this engine already answers for the same node given to any
+other function — `round(word)` is `FORG0001` at 2.0 and 3.0 — and for `word > 5`, under *One comparison,
+and three ways into it*: `format-number()` was lenient by the accident of doing its own conversion and
+not by decision. And no test in either suite asks for either answer, so the suites do not say otherwise.
+An element that is empty is such text too. Under `version="1.0"` the answer is `NaN` as it always was,
+backwards compatibility converting with `number()`, which cannot fail; and `number()` is how a 2.0
+stylesheet says it wants NaN: `format-number(number(price), '0.00')`. Nothing at all is still `NaN` at
+every version, the parameter being `xs:numeric?`.
+
+In microseconds a transformation over the thousand-product benchmark document, parsed once, sorting
+every product and writing the first, each figure the mean of three runs in fresh processes taken turn
+about with the engine as it was, each warmed for at least eight seconds and until time and bytes a call
+had stopped moving; at `version="3.0"` and interpreted but where it says otherwise:
+
+| | was | is |
+|---|---|---|
+| `<xsl:sort select="price" data-type="number"/>` | 849 | 544 |
+| the same, compiled | 860 | 604 |
+| the same, at `version="1.0"` | 727 | 436 |
+| the same, `order="descending"` | 907 | 622 |
+| two numeric keys, `rating` and then `price` | 1,413 | 920 |
+| `<xsl:sort select="name" data-type="number"/>`, no key a number | 557 | 466 |
+| `<xsl:sort select="name"/>`, which nothing here touches | 733 | 741 |
+| `format-number(price, '#,##0.00')` for each product | 430 | 433 |
+| the same, compiled | 436 | 458 |
+| the same, at `version="1.0"` | 395 | 384 |
+
+Bytes allocated are the same to the byte in every row: the values are converted where they already lay.
+A numeric sort is between three and four tenths faster, in every pair of every round, for parsing each
+key once; it was a loaded hour, single runs of one binary eight percent apart and one of them forty,
+and the sorts are outside that by a distance. `format-number()` is not. The compiled row looked five
+percent slower, which the interpreted row beside it did not, and the two backends run one method here,
+the function not being emitted; four more rounds of the pair gave 459 to 463 compiled and 446 to 452
+interpreted with the signs mixed both ways. So nothing moved there that this machine can show.
+
+Nothing moves on any conformance run, every failure set identical test for test: the 3.0 run stands at
+8,061 of 8,071, the 2.0 run at 5,678 of 5,701 and the schema-aware run at 8,668 of 8,727, each on both
+backends, and the XPath runs at 18,268 of 18,285 and 14,553 of 14,577. `call-template-1001` landed the
+wrong side of its recursion limit on one run with the change, and the right side when that run was taken
+again. So the suites ask for neither the old sort order nor the old leniency, and do not ask for the new
+ones either: forty-three of their stylesheets sort by number, none over a key written with an exponent.
+Nine new unit tests, 2,929 in all, every one asked of both backends and the sorts of all three versions,
+three of them requiring the oracle's answer and a fourth recording where it differs, which is `INF`;
+eight of the nine fail against the engine as it was, the ninth holding that a typed number is still
+formatted from its own digits.
 
 ### Which results the suite asks for and does not get
 
