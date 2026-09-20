@@ -318,7 +318,9 @@ namespace CodeDeeds.Xslt.UnitTests
         [TestMethod]
         public void TheCurrentItemUnderAnOperatorIsReadAsWhatItIs()
         {
-            foreach (string version in new[] { "2.0", "3.0" })
+            // Under 1.0 behaviour as much as without: a 1.0 stylesheet on this processor can walk
+            // numbers, and current() is then a number with the mode still on.
+            foreach (string version in new[] { "1.0", "2.0", "3.0" })
             {
                 // An atomic value being walked is the current item as much as a node is. Asked for as a
                 // boolean it was refused as though nothing were being processed at all.

@@ -65,6 +65,41 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
+        /// Gets whether this expression produces nodes in every context but one it cannot rule out, so
+        /// that reading its nodes directly is worth trying and cannot be relied on.
+        /// </summary>
+        /// <remarks>
+        /// A hint worth a route and never a promise, which is <see cref="ReturnsNodeSet"/>'s to make.
+        /// Whoever acts on it asks <see cref="TryEvaluateNodes"/> each time, and takes the value where
+        /// that declines. True of <c>current()</c> under backwards-compatible behaviour and of nothing
+        /// else: the current item is a node there unless an instruction XSLT 1.0 did not have is walking
+        /// atomic values.
+        /// </remarks>
+        internal virtual bool UsuallyReturnsNodeSet => false;
+
+        /// <summary>
+        /// Appends the nodes this expression selects to a caller-supplied list where nodes are what it
+        /// yields in this context, and declines where that is not known without evaluating it.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="ReturnsNodeSet"/> answers for every context at once, and an expression that is nodes
+        /// in all but a few has to answer no. This is the same question asked of one context: what
+        /// <see cref="EvaluateNodes"/> gives where the answer is yes, and nothing evaluated, nothing
+        /// appended and nothing raised where it is no, so that the caller can go on to
+        /// <see cref="Evaluate"/> as though it had not asked.
+        /// </remarks>
+        /// <param name="context">The evaluation context.</param>
+        /// <param name="output">The list to append to. Nodes are appended in document order.</param>
+        /// <returns>
+        /// The tree the appended nodes belong to, or <see langword="null"/> where the expression has to
+        /// be evaluated as a value to learn what it is.
+        /// </returns>
+        internal virtual XdmTree? TryEvaluateNodes(ref DynamicContext context, List<int> output)
+        {
+            return ReturnsNodeSet ? EvaluateNodes(ref context, output) : null;
+        }
+
+        /// <summary>
         /// Evaluates this expression and converts the result to a boolean.
         /// </summary>
         /// <param name="context">The evaluation context.</param>
@@ -581,6 +616,10 @@ namespace CodeDeeds.Xslt.XPath
             m_right = right;
             m_version = version;
             m_route = RouteFor(op, left, right, version);
+            m_leftIsNodes = left.ReturnsNodeSet;
+            m_rightIsNodes = right.ReturnsNodeSet;
+            m_asksLeftForNodes = m_leftIsNodes || left.UsuallyReturnsNodeSet;
+            m_asksRightForNodes = m_rightIsNodes || right.UsuallyReturnsNodeSet;
         }
 
         private static readonly System.Reflection.MethodInfo s_compareTypedNodes =
@@ -591,6 +630,17 @@ namespace CodeDeeds.Xslt.XPath
 
         private readonly XsltVersion m_version;
         private readonly ComparisonRoute m_route;
+
+        /// <summary>
+        /// What the <see cref="ComparisonRoute.NodesWhereFound"/> route knows of each operand, settled with
+        /// the route and read by no other: whether it is statically nodes, and is then read as
+        /// <see cref="ComparisonRoute.NodesDirectly"/> reads it, and whether it is worth asking for nodes
+        /// at all, being that or usually nodes.
+        /// </summary>
+        private readonly bool m_leftIsNodes;
+        private readonly bool m_rightIsNodes;
+        private readonly bool m_asksLeftForNodes;
+        private readonly bool m_asksRightForNodes;
 
         /// <summary>How a comparison reads an operand that is statically a node-set.</summary>
         private enum ComparisonRoute : byte
@@ -608,6 +658,12 @@ namespace CodeDeeds.Xslt.XPath
             /// atomized one at a time against the other value rather than collected first.
             /// </summary>
             NodesTyped,
+
+            /// <summary>
+            /// Under 1.0 rules, an operand is nodes wherever it can be and cannot promise it, so each
+            /// operand's nodes are read from a pooled list where it has them and its value taken where not.
+            /// </summary>
+            NodesWhereFound,
         }
 
         /// <summary>
@@ -629,6 +685,13 @@ namespace CodeDeeds.Xslt.XPath
 
             if (version.IsBackwardsCompatible)
             {
+                // An operand that is only usually nodes — current() — is asked each time, and must not
+                // be read as nodes on the strength of the other operand being some.
+                if (left.UsuallyReturnsNodeSet || right.UsuallyReturnsNodeSet)
+                {
+                    return ComparisonRoute.NodesWhereFound;
+                }
+
                 return left.ReturnsNodeSet || right.ReturnsNodeSet
                     ? ComparisonRoute.NodesDirectly
                     : ComparisonRoute.General;
@@ -700,6 +763,13 @@ namespace CodeDeeds.Xslt.XPath
 
                 case ComparisonRoute.NodesTyped:
                     return XPathValue.FromBoolean(CompareTypedWithNodeOperand(ref context));
+            }
+
+            // Asked for here and not as a third case above, so that the switch the two routes every
+            // predicate takes go through is the one it was: this route is seldom taken, and they are not.
+            if (m_route == ComparisonRoute.NodesWhereFound)
+            {
+                return XPathValue.FromBoolean(CompareWhereNodesAreFound(ref context));
             }
 
             XPathValue left = m_left.Evaluate(ref context);
@@ -776,7 +846,12 @@ namespace CodeDeeds.Xslt.XPath
             {
                 ComparisonRoute.NodesDirectly => CompareWithNodeOperand(ref context),
                 ComparisonRoute.NodesTyped => CompareTypedWithNodeOperand(ref context),
-                _ => Evaluate(ref context).ToBoolean(),
+
+                // Beside the general way and not among the cases, for the reason Evaluate gives, and
+                // asked for outright: a boolean by way of a value is what this method is here to spare.
+                _ => m_route == ComparisonRoute.NodesWhereFound
+                    ? CompareWhereNodesAreFound(ref context)
+                    : Evaluate(ref context).ToBoolean(),
             };
         }
 
@@ -833,6 +908,78 @@ namespace CodeDeeds.Xslt.XPath
             finally
             {
                 NodeListPool.Return(leftNodes);
+            }
+        }
+
+        /// <summary>
+        /// A 1.0 comparison with an operand that is nodes wherever it can be, <c>current()</c>: each
+        /// operand is asked for its nodes, and for its value only where it has none to give.
+        /// </summary>
+        /// <remarks>
+        /// <c>current()</c> is a node in everything XSLT 1.0 could write, and once said so outright, which
+        /// let <c>@ref = current()</c> in a predicate read both sides from pooled lists. But a 1.0
+        /// stylesheet on this processor can walk atomic values with the mode still on, and the promise
+        /// then had the comparison refuse a current item that was there. So it is asked here, each time:
+        /// where the item is a node the comparison is the one it always was, allocating nothing, and
+        /// where it is a number the number is compared. What an operand turns out to be never changes
+        /// the rules, only how the operand is read — nodes against a value that proves to be a node-set
+        /// are compared as two node-sets, as <see cref="CompareWithNodeOperand"/> compares them.
+        /// </remarks>
+        private bool CompareWhereNodesAreFound(ref DynamicContext context)
+        {
+            // Only an operand that could answer is asked, and only it has a list rented for it: '.'
+            // beside current() is a value whatever the context, and was read as one before.
+            List<int>? leftNodes = m_asksLeftForNodes ? NodeListPool.Rent() : null;
+            List<int>? rightNodes = m_asksRightForNodes ? NodeListPool.Rent() : null;
+
+            try
+            {
+                XdmTree? leftTree = leftNodes is null ? null
+                    : m_leftIsNodes ? m_left.EvaluateNodes(ref context, leftNodes)
+                    : m_left.TryEvaluateNodes(ref context, leftNodes);
+
+                XdmTree? rightTree = rightNodes is null ? null
+                    : m_rightIsNodes ? m_right.EvaluateNodes(ref context, rightNodes)
+                    : m_right.TryEvaluateNodes(ref context, rightNodes);
+
+                if (leftTree is not null && rightTree is not null)
+                {
+                    return XPathComparison.NodesVersusNodes(
+                        leftTree, leftNodes!, rightTree, rightNodes!, m_operator);
+                }
+
+                if (leftTree is not null)
+                {
+                    XPathValue other = m_right.Evaluate(ref context);
+
+                    return other.Kind == XPathValueKind.NodeSet
+                        ? CompareAgainstNodeSet(leftTree, leftNodes!, other.AsNodeSet(), nodesOnLeft: true)
+                        : XPathComparison.NodesVersusValue(leftTree, leftNodes!, other, true, m_operator);
+                }
+
+                if (rightTree is not null)
+                {
+                    XPathValue other = m_left.Evaluate(ref context);
+
+                    return other.Kind == XPathValueKind.NodeSet
+                        ? CompareAgainstNodeSet(rightTree, rightNodes!, other.AsNodeSet(), nodesOnLeft: false)
+                        : XPathComparison.NodesVersusValue(rightTree, rightNodes!, other, false, m_operator);
+                }
+
+                return XPathComparison.General(
+                    m_left.Evaluate(ref context), m_right.Evaluate(ref context), m_operator, m_version, Comparing);
+            }
+            finally
+            {
+                if (rightNodes is not null)
+                {
+                    NodeListPool.Return(rightNodes);
+                }
+
+                if (leftNodes is not null)
+                {
+                    NodeListPool.Return(leftNodes);
+                }
             }
         }
 

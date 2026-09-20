@@ -136,6 +136,15 @@ namespace CodeDeeds.Xslt.Emit
         public override bool MaySpanDocuments => m_source.MaySpanDocuments;
 
         /// <inheritdoc/>
+        internal override bool UsuallyReturnsNodeSet => m_source.UsuallyReturnsNodeSet;
+
+        /// <inheritdoc/>
+        internal override XdmTree? TryEvaluateNodes(ref DynamicContext context, List<int> output)
+        {
+            return m_source.TryEvaluateNodes(ref context, output);
+        }
+
+        /// <inheritdoc/>
         internal override void MarkTailPosition()
         {
             // The emitted code holds the very nodes it was compiled from, and calls back into the ones it

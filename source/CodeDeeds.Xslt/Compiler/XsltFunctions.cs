@@ -1915,16 +1915,43 @@ namespace CodeDeeds.Xslt.Compiler
 
         /// <summary>Initializes a call to <c>current()</c>.</summary>
         /// <param name="version">
-        /// The version this was compiled against, which decides whether the current item is known to be a
-        /// node — XSLT 1.0 had no instruction that made it anything else.
+        /// The version this was compiled against, which decides whether the current item is worth asking
+        /// for as a node before it is asked for as a value — XSLT 1.0 had no instruction that made it
+        /// anything else, and a stylesheet written for it seldom uses one.
         /// </param>
         public CurrentExpr(XsltVersion version)
         {
             m_version = version;
         }
 
+        /// <summary>
+        /// False. The current item may be an atomic value under every version this engine compiles for,
+        /// the backwards-compatible ones included, so nothing here can be promised to be a node.
+        /// </summary>
+        /// <remarks>
+        /// It was once true under backwards-compatible behaviour, XSLT 1.0 having had no instruction that
+        /// made the current item anything but a node. A <c>version="1.0"</c> stylesheet on this processor
+        /// can still write <c>xsl:for-each select="(3, 0)"</c>, and everything that took the promise then
+        /// refused <c>current() = 3</c> as having no current item, and read <c>[current()]</c> as a
+        /// boolean where it is a position. What the promise bought, a comparison that builds nothing, is
+        /// kept by <see cref="UsuallyReturnsNodeSet"/>, which promises nothing.
+        /// </remarks>
+        public override bool ReturnsNodeSet => false;
+
         /// <inheritdoc/>
-        public override bool ReturnsNodeSet => m_version.IsBackwardsCompatible;
+        internal override bool UsuallyReturnsNodeSet => m_version.IsBackwardsCompatible;
+
+        /// <inheritdoc/>
+        internal override XdmTree? TryEvaluateNodes(ref DynamicContext context, List<int> output)
+        {
+            if (context.CurrentNode < 0)
+            {
+                return null;
+            }
+
+            output.Add(context.CurrentNode);
+            return context.CurrentTree;
+        }
 
         /// <inheritdoc/>
         public override XPathValue Evaluate(ref DynamicContext context)
@@ -1949,11 +1976,16 @@ namespace CodeDeeds.Xslt.Compiler
         {
             if (context.CurrentNode < 0)
             {
-                RequireASubstring(ref context);
+                // There being a current item that is not a node is one complaint, and there being none at
+                // all is another: only the second is XTDE1360.
+                if (context.Runtime?.CurrentAtomicItem is null)
+                {
+                    RequireASubstring(ref context);
+                }
 
                 throw XsltErrors.Error(
                     XsltErrorCode.XPTY0004,
-                    "Nodes were required here, and the item being processed is a piece of text rather than "
+                    "Nodes were required here, and the item being processed is an atomic value rather than "
                     + "a node.");
             }
 
@@ -2001,11 +2033,20 @@ namespace CodeDeeds.Xslt.Compiler
     {
         private readonly Expr? m_argument;
 
+        /// <summary>
+        /// Whether the argument is worth asking for its nodes before it is asked for its value: one that
+        /// is statically a node-set, or usually one. Settled here, the call being made once for each
+        /// candidate where a stylesheet compares identities.
+        /// </summary>
+        private readonly bool m_asksArgumentForNodes;
+
         /// <summary>Initializes a call to <c>generate-id()</c>.</summary>
         /// <param name="argument">The node-set to identify, or <see langword="null"/> for the context node.</param>
         public GenerateIdExpr(Expr? argument)
         {
             m_argument = argument;
+            m_asksArgumentForNodes = argument is not null
+                && (argument.ReturnsNodeSet || argument.UsuallyReturnsNodeSet);
         }
 
         /// <inheritdoc/>
@@ -2022,23 +2063,12 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 node = context.Node;
             }
-            else if (m_argument.ReturnsNodeSet)
+            else if (TryReadFirstNode(ref context, ref tree, out node))
             {
-                List<int> nodes = NodeListPool.Rent();
-                try
+                if (node < 0)
                 {
-                    tree = m_argument.EvaluateNodes(ref context, nodes);
-                    if (nodes.Count == 0)
-                    {
-                        // An empty node-set has no identity, so the result is the empty string.
-                        return XPathValue.FromString(string.Empty);
-                    }
-
-                    node = nodes[0];
-                }
-                finally
-                {
-                    NodeListPool.Return(nodes);
+                    // An empty node-set has no identity, so the result is the empty string.
+                    return XPathValue.FromString(string.Empty);
                 }
             }
             else
@@ -2052,6 +2082,15 @@ namespace CodeDeeds.Xslt.Compiler
                     return XPathValue.FromString(string.Empty);
                 }
 
+                // An atomic value has no identity to name, and no tree to be looked up in: what came of
+                // asking was a null reference, where the declared type refuses the argument.
+                if (items[0].Kind != XPathValueKind.Node)
+                {
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XPTY0004,
+                        "generate-id() identifies a node, and what it was given is an atomic value.");
+                }
+
                 tree = items[0].NodeTree;
                 node = items[0].NodeId;
             }
@@ -2059,6 +2098,55 @@ namespace CodeDeeds.Xslt.Compiler
             // Must be an XML name, so it cannot start with a digit.
             int treeId = context.Runtime?.GetTreeId(tree) ?? 0;
             return XPathValue.FromString($"id{treeId}n{node}");
+        }
+
+        /// <summary>
+        /// Reads the first node of an argument that is nodes, from a pooled list and without the node-set.
+        /// </summary>
+        /// <remarks>
+        /// An argument that is statically a node-set is read so always. One that is only usually nodes,
+        /// <c>current()</c>, is asked: <c>generate-id(.) = generate-id(current())</c> is how a 1.0
+        /// stylesheet says "this very node", once for each candidate, and what it names is a node unless
+        /// atomic values are being walked.
+        /// </remarks>
+        /// <param name="context">The evaluation context.</param>
+        /// <param name="tree">Set to the node's tree, where there is a node.</param>
+        /// <param name="node">The first node, or a negative number where the argument selected none.</param>
+        /// <returns>
+        /// <see langword="false"/> where the argument has to be evaluated as a value to learn what it is.
+        /// </returns>
+        private bool TryReadFirstNode(ref DynamicContext context, ref XdmTree tree, out int node)
+        {
+            node = -1;
+
+            if (!m_asksArgumentForNodes)
+            {
+                return false;
+            }
+
+            List<int> nodes = NodeListPool.Rent();
+
+            try
+            {
+                XdmTree? found = m_argument!.TryEvaluateNodes(ref context, nodes);
+
+                if (found is null)
+                {
+                    return false;
+                }
+
+                if (nodes.Count != 0)
+                {
+                    tree = found;
+                    node = nodes[0];
+                }
+
+                return true;
+            }
+            finally
+            {
+                NodeListPool.Return(nodes);
+            }
         }
     }
 

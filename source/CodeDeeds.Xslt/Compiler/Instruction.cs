@@ -478,6 +478,13 @@ namespace CodeDeeds.Xslt.Compiler
         private readonly AttributeValueTemplate? m_separator;
         private readonly bool m_wholeSequence;
 
+        /// <summary>
+        /// Whether the select is nodes wherever it can be and cannot promise it — <c>current()</c> under
+        /// 1.0 behaviour — so that it is asked for a node before it is asked for a value. Settled here
+        /// and not where the instruction runs, which is once for every element most stylesheets write.
+        /// </summary>
+        private readonly bool m_selectIsUsuallyNodes;
+
         /// <summary>Initializes a value-of instruction under a particular version's rules.</summary>
         /// <param name="select">The value to write, or <see langword="null"/> where the content says.</param>
         /// <param name="body">The content, where there is no <c>select</c>.</param>
@@ -500,6 +507,8 @@ namespace CodeDeeds.Xslt.Compiler
             m_disableEscaping = disableEscaping;
             m_separator = separator;
             m_wholeSequence = wholeSequence;
+            m_selectIsUsuallyNodes = select is not null && separator is null
+                && !select.ReturnsNodeSet && select.UsuallyReturnsNodeSet && !select.MaySpanDocuments;
         }
 
         /// <inheritdoc/>
@@ -518,6 +527,13 @@ namespace CodeDeeds.Xslt.Compiler
                 && !m_select.MaySpanDocuments && !context.Tree.HasTypeAnnotations)
             {
                 text = SelectedNodesText(ref context);
+            }
+            else if (m_selectIsUsuallyNodes && !context.Tree.HasTypeAnnotations
+                && CurrentNodeText(ref context) is string ofTheNode)
+            {
+                // A select that is only usually nodes — current() — was asked, and had a node to give.
+                // Where the item it names is an atomic value it declines, and the general way writes it.
+                text = ofTheNode;
             }
             else
             {
@@ -589,6 +605,42 @@ namespace CodeDeeds.Xslt.Compiler
                 }
 
                 return Join(XPathValue.FromNodeSet(NodeSet.FromOrderedNodes(tree, nodes)), " ");
+            }
+            finally
+            {
+                NodeListPool.Return(nodes);
+            }
+        }
+
+        /// <summary>
+        /// The text of a select that is nodes wherever it can be, <c>current()</c>, where in this context
+        /// it is: read from the node as <see cref="SelectedNodesText"/> reads it.
+        /// </summary>
+        /// <returns>
+        /// The text, or <see langword="null"/> where the select declined to be read as nodes — an atomic
+        /// value is being walked, and the select has to be evaluated to write it.
+        /// </returns>
+        private string? CurrentNodeText(ref DynamicContext context)
+        {
+            List<int> nodes = NodeListPool.Rent();
+
+            try
+            {
+                XdmTree? tree = m_select!.TryEvaluateNodes(ref context, nodes);
+
+                if (tree is null)
+                {
+                    return null;
+                }
+
+                if (nodes.Count == 0)
+                {
+                    return string.Empty;
+                }
+
+                return nodes.Count == 1 || !m_wholeSequence
+                    ? tree.StringValueOf(nodes[0])
+                    : Join(XPathValue.FromNodeSet(NodeSet.FromOrderedNodes(tree, nodes)), " ");
             }
             finally
             {

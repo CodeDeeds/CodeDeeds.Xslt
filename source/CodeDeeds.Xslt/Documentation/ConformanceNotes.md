@@ -8176,7 +8176,8 @@ One more was found by the audit and left, being no part of the boolean route and
 put right: in a `version="1.0"` stylesheet `current() = 3` inside `xsl:for-each select="(3, 0)"` is
 `XTDE1360` on both backends. `CurrentExpr.ReturnsNodeSet` promises a node under 1.0 behaviour, the
 comparison reads its nodes directly on the strength of it, and an atomic current item breaks the
-promise — what `ContextItemExpr` stopped promising for the same reason.
+promise — what `ContextItemExpr` stopped promising for the same reason. It has been put right since,
+fast path kept: *The current item, where it is not a node* below.
 
 Nothing moves on any run: the 3.0 run stands at 8,061 of 8,071, the 2.0 run at 5,678 of 5,701 and the
 schema-aware run at 8,668 of 8,727, each on both backends, and the XPath runs at 18,268 of 18,285 and
@@ -8516,6 +8517,177 @@ there first. The ones over values pass
 on the answer or on the refusal, whichever the host's stack gives, since what they test is that the
 process is still there. All eight conformance runs are unchanged, totals and failure sets both: 5,678 of
 5,701, 8,061 of 8,071 and 8,668 of 8,727 on both backends, and 14,553 and 18,268 for XPath.
+
+### The current item, where it is not a node
+
+Under `version="1.0"`, inside `<xsl:for-each select="(3, 0)">`, over four products priced 10, 40, 9 and 3,
+with `$root` bound to the document. The engine as it was is main at `6c11f8e`, asked by running it:
+
+| | was, interpreted | was, compiled | is, both |
+|---|---|---|---|
+| `current() = 3`, `3 = current()`, `current() < 2` | `XTDE1360` | `XTDE1360` | `true;false;` and `false;true;` |
+| `<xsl:value-of select="current()"/>` | `XTDE1360` | `XTDE1360` | `3;0;` |
+| `count(current())`, `format-number(current(), '0.0')` | `XTDE1360` | `XTDE1360` | `1;1;` and `3.0;0.0;` |
+| `count($root//product[price = current()])` | `XTDE1360` | `1;0;` | `1;0;` |
+| `$root//product[current()]/price` | `10;;` | `10;;` | `9;;` |
+| `count($root//product[current()])` | `4;0;` | `4;0;` | `1;0;` |
+| `generate-id(current())` | `XTDE1360` | `XTDE1360` | `XPTY0004` |
+| `generate-id(3)`, `generate-id(.)`, at 2.0 as well | `ArgumentNullException` | the same | `XPTY0004` |
+| `generate-id('x')`, at 2.0 as well | `InvalidCastException` | the same | `XPTY0004` |
+| `current() and true()`, `current()/price = 3` | `true;false;`, `XPTY0019` | the same | the same |
+
+Every row answers at 2.0 and 3.0 what it answers now at 1.0, and did before, but for one: at 2.0
+`generate-id(current())` was the `ArgumentNullException` too, where 3.0 refused it.
+
+`CurrentExpr.ReturnsNodeSet` was `true` under backwards-compatible behaviour, XSLT 1.0 having had no
+instruction that made the current item anything but a node. The mode takes no instruction away, though,
+and a 1.0 stylesheet on this processor walks numbers with it still on — the case `ContextItemExpr` stopped
+promising for. The audit that found it had the comparison in mind. Asked, every reader of the promise had
+the fault: `BinaryExpr`'s 1.0 route, `xsl:value-of`, `count()`, `format-number()` and `generate-id()` each
+called `EvaluateNodes`, which knew of a current node and of an `xsl:analyze-string` substring and not of an
+atomic item being walked, and called that no current item at all. **Two rows are worse than a refusal.**
+`PredicateFilter` takes a predicate that is statically a node-set for one that can never be positional and
+asks it for a boolean, so `[current()]` with the current item 3 kept all four products where it names the
+third — a wrong answer and no error, which the repair to `EvaluateAsBoolean` two sections up had made
+reachable by answering where there had been a refusal. And the two backends disagreed over
+`price = current()` in a predicate: the emitted form walks the child step inline and takes the other
+operand as a value, which was always right, where the interpreter asked for nodes.
+
+`ReturnsNodeSet` is `false` at every version now, as `.`'s is, and `EvaluateNodes` says `XPTY0004` of an
+atomic current item and keeps `XTDE1360` for there being none. `generate-id()` had a fault of its own
+underneath, which the first attempt ran into: at 1.0 and at 2.0 its argument reaches it without having
+been held to the declared `node()?`, and an atomic one went on to be looked up in a tree it does not
+have. It is refused there now as 3.0 refused it. With no argument and an atomic context item it still
+answers, at every version, where it should refuse; that is left, being no part of this.
+
+**What the promise bought is kept without it.** Dropping the promise and nothing more was measured first,
+and costs what `.` costs: `current()` evaluated as a value is a node-set of one and its array, eighty
+bytes for every candidate of a predicate, and a comparison that had allocated nothing allocates that. So
+an expression may now say that it is *usually* nodes — `Expr.UsuallyReturnsNodeSet`, true of `current()`
+under 1.0 behaviour and of nothing else — which is a hint worth a route and not a promise, and whoever
+acts on it asks `Expr.TryEvaluateNodes` each time: the nodes into a pooled list where the item is a node,
+and `null`, with nothing evaluated and nothing raised, where it is not. `BinaryExpr` has a third route
+for it, `NodesWhereFound`, chosen where an operand is such an expression: each side is asked for its
+nodes, and for its value only where it has none, and what is compared and by which rules is what
+`NodesDirectly` compares. The routes that were there are untouched, so nothing that does not mention
+`current()` runs a different instruction. `xsl:value-of` and `generate-id()` ask the same way, the second
+being how a 1.0 stylesheet says "this very node" — `generate-id(.) = generate-id(current())` — once for
+each candidate. `count(current())` and `format-number(current(), …)` take the value, as they do for `.`.
+
+In microseconds a transformation over the thousand-product benchmark document, parsed once, at
+`version="1.0"`, the current item a node as it is in every stylesheet that was ever fast. One case and
+one build to a fresh process, the builds taken turn about, each warmed for at least five seconds and until
+three 400 ms windows in a row agreed within 3% on time and 0.5% on bytes; what is quoted is the quickest of
+a process's twelve windows, averaged over three processes interpreted and two compiled. Two other
+sessions were timing work of their own on the machine throughout, so only the rounds taken side by side
+compare. Bytes a call are the same to the byte in every process of a build. First the promise dropped and
+nothing more, which is what was decided against:
+
+| interpreted | was | promise dropped | bytes a call, was | promise dropped |
+|---|---|---|---|---|
+| `count(//product[category = current()])` | 346 | 365 | 180,120 | 260,120 |
+| `count(//product[price < current()])` | 327 | 369 | 4,128 | 84,128 |
+| `count(//category[. = current()])` | 294 | 278 | 260,120 | 340,120 |
+| `count(//category[generate-id(.) = generate-id(current())])` | 330 | 359 | 244,232 | 404,232 |
+| `<xsl:value-of select="current()"/>` for each product name | 116 | 127 | 43,120 | 123,120 |
+| `count(//product[current()])`, one round | 159 | 567 | 4,040 | 346,539 |
+
+Eighty bytes for every evaluation in each of the first five, a hundred and sixty where `generate-id()`
+also laid its one item out in a list, and between a twentieth and an eighth of the time — but for
+`. = current()`, which is quicker as two values than as a list against a node-set copied into a second
+list, and pays its eighty bytes for it. The last row is the predicate that was being answered wrongly:
+a predicate that might be a number cannot be asked for a boolean, and a step whose predicate might be
+positional is walked parent by parent. Nobody writes it over nodes, where it keeps everything. And as it
+now stands, taken the same way over four processes interpreted and two compiled, later in the day and
+the machine quieter, so that *was* is lower here than above for the same build:
+
+| | interpreted, was | is | compiled, was | is | bytes a call, was and is |
+|---|---|---|---|---|---|
+| `count(//product[category = current()])` | 323 | 318 | 252 | 247 | 180,120 interpreted, 260,120 compiled |
+| `count(//product[price < current()])` | 312 | 303 | | | 4,128 |
+| `count(//category[. = current()])` | 262 | 258 | 220 | 221 | 260,120 |
+| `count(//category[generate-id(.) = generate-id(current())])` | 299 | 303 | 245 | 246 | 244,232 |
+| `<xsl:value-of select="current()"/>` for each product name | 106 | 109 | | | 43,120 |
+| `count(//product[category = current()/category])`, a path both times | 410 | 410 | | | 260,040 |
+| `count(//product[price > 100])`, no `current()` in it | 150 | 151 | | | 3,576 |
+| `<xsl:value-of select="name"/>` for each product | 141 | 138 | 143 | 147 | 43,096 |
+| `<xsl:value-of select="."/>` for each product name | 112 | 111 | | | 123,120 |
+
+The same to the byte in every row, and level: no row differs by more than a process differs from the
+next by, and the sign is mixed from round to round in every row but one. `xsl:value-of select="current()"`
+is two microseconds in a hundred slower in four rounds of four, which is two nanoseconds an instruction
+and is not explained by counting what it calls, which is one virtual call fewer than before; it is what
+is paid. The compiled `select="name"` row read 142 against 143 in the rounds before these, over code
+that is on that path what it was.
+
+**It took several cuts to be level, and each cost on the way was one that could be counted.** The
+first asked both operands for their nodes and rented a list for each, and `. = current()` was between
+two and six percent slower in all five pairs of rounds: `.` can never answer, and asking it was a list
+rented and a virtual call for nothing. Which operands are worth asking is settled where the route is,
+when the expression is built. That cut also gave `xsl:value-of` a flag and a null check on its way to
+the text of a child element, and the route a case of its own in the switch both `Evaluate` and
+`EvaluateAsBoolean` begin with; `select="name"` was one percent slower in eight rounds of ten and
+`price > 100`, which has nothing to do with any of this, three percent in nine of ten. So the instruction's
+first branch is the one it had, with what is asked of `current()` on an `else` decided when the
+instruction is built, and the switch has the two cases it had, with the new route beside the general
+way. Beside it meant at first that `EvaluateAsBoolean` reached the new route by way of `Evaluate` — a
+boolean wrapped as a value and unwrapped, which is what that method exists to spare — and
+`price < current()` was three percent slower in eight rounds of eight; asked for outright it is the three
+percent quicker of the table. `generate-id()` settles once whether its argument is worth asking, where
+it had asked it twice for every call.
+The rule the figures were read by is that bytes matter more than a little time. It was not needed: the
+bytes are the same, and the time was there to be had back.
+
+The compiled rows of the first table are not shown because there is nothing in them: the emitted form
+of `category = current()` walks the step inline and has always taken the other operand as a value, so it
+paid the eighty bytes before and pays them now — 260,120 against the interpreter's 180,120 — which is a
+gain still to be had, by handing `EmitHelpers.CompareNodes` a list where the operand has one.
+
+**The suites are silent again.** Nothing moves on any of the eight runs, every failure set identical test
+for test and message for message — one test apart, below — the two checkouts verified to have stood
+still and clean around each run: the 3.0 run stands at 8,061 of 8,071, the 2.0 run at 5,678 of 5,701 and
+the schema-aware run at 8,668 of 8,727, each on both backends, and the XPath runs at 18,268 of 18,285 and
+14,553 of 14,577. No test in either suite walks atomic values under `version="1.0"` and then asks for the
+current item, which is how this stood for as long as it did.
+
+The one apart is `call-template-1001`, again, and this time it was counted and not waved through. It
+failed with *template invocations nested too deeply* on two of the eight runs with the change, the
+compiled 2.0 run and the interpreted 3.0 run, and on none without. Alone in its test set it passed six
+runs of six on each build. The interpreted 3.0 run was then taken again, whole, turn about: in all it
+failed on four runs of eight with the change and **on one of seven without**, every other failure the
+same each time. So the engine as it was does it too, and the difference between the two rates is what
+seven and eight runs cannot tell from none. Nor is there a way for this change to be in it: the guard is
+the stack that is left, and at the bottom of those five hundred levels no method this touches has a frame
+live — the `$index != 0` has answered and the `xsl:value-of` has not begun. What an earlier section said
+stands, with a figure to it now: five hundred levels are near enough to a one-megabyte stack that the
+answer turns on which methods the runtime had finished optimising — in five of these fifteen runs — and
+that wants looking into on its own account.
+
+Nine new unit tests, 2,954 in all, each asking its expression as a value, in an `xsl:when` and in an
+`xsl:if`, on both backends, at 1.0, 2.0 and 3.0, and requiring one answer or one error code. Five fail
+against the engine as it was: the comparisons, a step compared inside a predicate, the predicate that is
+a position, what is written, counted and formatted, and what `generate-id()` refuses. The other four
+hold what was right already and must stay so — a node compared, kept and identified through `current()`
+as it always was, 1.0's numbers and 2.0's strings included — and `BooleanRouteTests` asks its questions
+about `current()` at 1.0 now as well as at 2.0 and 3.0.
+
+**The same promise is made once more, and is as breakable.** `FilterExpr.ReturnsNodeSet` is true under
+1.0 behaviour "where only a node-set can be filtered", and `count((3, 1, 2)[. > 1])` is `XPTY0004` at
+1.0 where it is 2 at 2.0 and 3.0, on both backends, before this and after. `count()` is the reader that
+trips; `xsl:value-of` and the comparison are spared by asking `MaySpanDocuments` first, which a filter
+over a sequence answers yes to. It is left for its own piece of work: `$nodes[…]` is a far commoner
+thing to compare and count than a bare `current()`, so what the promise buys there wants measuring
+before it is given up or asked for instead.
+
+Everything above was taken against main at `6c11f8e`, and main moved while it was: the two sections
+above this one landed underneath. Both sides were built again on top of them, `be16fae` and `be16fae`
+with this, and taken again. The eight runs stand where they stood on both, identical test for test and
+message for message, `call-template-1001` passing all sixteen times. Seven rows of the second table
+taken again over three processes a side say what they said, the bytes the same to the byte and no row
+apart by more than it was: `category = current()` 345 to 352, `price < current()` 332 to 328,
+`. = current()` 288 to 285, the `generate-id()` row 335 to 327, `value-of select="current()"` 113 to
+115, `price > 100` 158 to 157 and `value-of select="name"` 152 to 150 — every figure a twentieth or so
+higher than in the table on both sides alike, the machine having got busy again.
 
 ### Which results the suite asks for and does not get
 
