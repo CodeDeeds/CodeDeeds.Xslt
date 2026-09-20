@@ -264,5 +264,207 @@ namespace CodeDeeds.Xslt.UnitTests
                     + "<xsl:template match=\"$threes intersect $sevens\"><xsl:sequence select=\".\"/></xsl:template>"));
         }
 
+        /// <summary>
+        /// The ids of the nodes one pattern matches, on both backends, which have to agree.
+        /// </summary>
+        private static string Matched(string pattern, string input, string declarations = "")
+        {
+            string body = declarations + Applying(
+                $"<xsl:template match=\"{pattern}\"><xsl:value-of select=\"@id\"/><xsl:text> </xsl:text></xsl:template>");
+
+            string sheet = Head + body + "</xsl:stylesheet>";
+            string interpreted = new Xslt(sheet, Options(XsltBackend.Interpreted)).TransformXml(input);
+            string compiled = new Xslt(sheet, Options(XsltBackend.Compiled)).TransformXml(input);
+
+            Assert.AreEqual(interpreted, compiled, $"The backends disagree on match=\"{pattern}\".");
+            return interpreted;
+
+            static XsltOptions Options(XsltBackend backend) =>
+                new XsltOptions { OmitXmlDeclaration = true, Version = XsltVersion.V30, Backend = backend };
+        }
+
+        [TestMethod]
+        public void APredicateThatReadsNoPositionIsAnsweredWithoutOne()
+        {
+            // None of these can select by position, so none has its siblings counted. What each matches
+            // must be what it matched when they were.
+            const string Input =
+                "<r><foo id='1' a='c'><k/></foo><foo id='2' a='d'/><foo id='3' a='c' b='x'/><bar id='4' a='c'/>"
+                + "<g><foo id='5' a='c'><bar id='6'/></foo><foo id='7'><k/><bar id='8' a='d'/></foo></g></r>";
+
+            Assert.AreEqual("<out>1 3 5 </out>", Matched("foo[@a='c']", Input));
+            Assert.AreEqual("<out>1 2 3 5 </out>", Matched("foo[@a]", Input));
+            Assert.AreEqual("<out>1 7 </out>", Matched("foo[k]", Input));
+            Assert.AreEqual("<out>7 </out>", Matched("foo[not(@a)]", Input));
+            Assert.AreEqual("<out>3 </out>", Matched("foo[@a='c' and @b]", Input));
+            Assert.AreEqual("<out>1 5 7 </out>", Matched("foo[k | bar]", Input));
+            Assert.AreEqual("<out>1 3 4 5 </out>", Matched("*[@a='c']", Input));
+
+            // Several of them on one step, and steps either side of the one that carries them.
+            Assert.AreEqual("<out>3 </out>", Matched("foo[@a][@b]", Input));
+            Assert.AreEqual("<out>1 2 3 </out>", Matched("r/foo[@a]", Input));
+            Assert.AreEqual("<out>6 </out>", Matched("foo[@a]/bar", Input));
+            Assert.AreEqual("<out>5 </out>", Matched("g//foo[@a]", Input));
+            Assert.AreEqual("<out>5 </out>", Matched("g/descendant::foo[@a='c']", Input));
+            Assert.AreEqual("<out>1 5 </out>", Matched("foo[@a='c'][*]", Input));
+        }
+
+        [TestMethod]
+        public void APredicateThatCouldReadAPositionStillHasItCounted()
+        {
+            const string Input = "<r><x id='a' n='2'/><x id='b' n='2'/><y id='c'/><x id='d' n='3'/><x id='e' n='9'/></r>";
+
+            Assert.AreEqual("<out>b </out>", Matched("x[2]", Input));
+            Assert.AreEqual("<out>e </out>", Matched("x[last()]", Input));
+            Assert.AreEqual("<out>a d </out>", Matched("x[position() mod 2 = 1]", Input));
+            Assert.AreEqual("<out>d </out>", Matched("x[not(position() = (1, 2, 4))]", Input));
+
+            // A number from somewhere the pattern cannot see into is still a number.
+            Assert.AreEqual("<out>d </out>", Matched("x[$n]", Input, "<xsl:variable name=\"n\" select=\"3\"/>"));
+            Assert.AreEqual("<out>b </out>", Matched("x[count(../y) + 1]", Input));
+
+            // A path that ends in something other than a node answers with numbers, one here, and a
+            // number selects by position: the x whose n is where it stands.
+            Assert.AreEqual("<out>b d </out>", Matched("x[@n/xs:integer(.)]", Input));
+
+            // Whichever comes first, the positional one counts within what it should.
+            Assert.AreEqual("<out>b </out>", Matched("x[2][@n='2']", Input));
+            Assert.AreEqual("<out/>", Matched("x[3][@n='2']", Input));
+            Assert.AreEqual("<out>d </out>", Matched("x[@n != '2'][1]", Input));
+        }
+
+        /// <summary>What a stylesheet writes, on both backends, which have to agree.</summary>
+        private static string OnBoth(string body, string input)
+        {
+            string sheet = Head + body + "</xsl:stylesheet>";
+
+            string interpreted = new Xslt(sheet, new XsltOptions { OmitXmlDeclaration = true, Version = XsltVersion.V30 })
+                .TransformXml(input);
+            string compiled = new Xslt(
+                sheet,
+                new XsltOptions { OmitXmlDeclaration = true, Version = XsltVersion.V30, Backend = XsltBackend.Compiled })
+                .TransformXml(input);
+
+            Assert.AreEqual(interpreted, compiled, "The backends disagree.");
+            return interpreted;
+        }
+
+        [TestMethod]
+        public void APositionIsCountedWithinEachParentAndNotCarriedToTheNext()
+        {
+            // The siblings a position is counted among are remembered from one candidate to the next, and
+            // have to be let go of when the next candidate has a different parent.
+            const string Input =
+                "<r><g><x id='a'/><x id='b'/><x id='c'/></g><g><x id='d'/><x id='e'/></g><g><x id='f'/></g></r>";
+
+            Assert.AreEqual("<out>a d f </out>", Matched("x[1]", Input));
+            Assert.AreEqual("<out>b e </out>", Matched("x[2]", Input));
+            Assert.AreEqual("<out>c e f </out>", Matched("x[last()]", Input));
+            Assert.AreEqual("<out>b d </out>", Matched("x[last() - 1]", Input));
+            Assert.AreEqual("<out>b c e </out>", Matched("x[position() > 1]", Input));
+            Assert.AreEqual("<out>f </out>", Matched("x[last() = 1]", Input));
+            Assert.AreEqual("<out>a c d f </out>", Matched("x[position() = (1, 3)]", Input));
+
+            // A step further out, and the descendant axis, where what is counted among is whatever the
+            // anchor selects and the anchor climbs.
+            Assert.AreEqual("<out>d e </out>", Matched("g[2]/x", Input));
+            Assert.AreEqual("<out>d </out>", Matched("r/descendant::x[4]", Input));
+            Assert.AreEqual("<out>b e </out>", Matched("g/descendant::x[2]", Input));
+        }
+
+        [TestMethod]
+        public void APositionIsRightWhicheverOrderTheCandidatesComeIn()
+        {
+            const string Rules =
+                "<xsl:template match=\"x[last()]\"><xsl:value-of select=\"@id\"/>! </xsl:template>"
+                + "<xsl:template match=\"x\"><xsl:value-of select=\"@id\"/><xsl:text> </xsl:text></xsl:template>";
+
+            // Turn about between two parents, so that each candidate finds the other parent's children
+            // remembered and must not be counted among them.
+            Assert.AreEqual(
+                "<out>a d b e! c! </out>",
+                OnBoth(
+                    "<xsl:template match=\"/\"><out><xsl:apply-templates select=\"for $i in 1 to 3 return (/r/g[1]/x[$i], /r/g[2]/x[$i])\"/></out></xsl:template>"
+                    + Rules,
+                    "<r><g><x id='a'/><x id='b'/><x id='c'/></g><g><x id='d'/><x id='e'/></g></r>"));
+
+            // Turn about between two trees whose parents have the same node number, and whose children
+            // do as well: q is the second of two, and would be the second of three if the tree were not
+            // part of what is remembered.
+            Assert.AreEqual(
+                "<out>a p b q! c! </out>",
+                OnBoth(
+                    "<xsl:variable name=\"t\"><g><x id='p'/><x id='q'/></g></xsl:variable>"
+                    + "<xsl:template match=\"/\"><out><xsl:apply-templates select=\"/g/x[1], $t/g/x[1], /g/x[2], $t/g/x[2], /g/x[3]\"/></out></xsl:template>"
+                    + Rules,
+                    "<g><x id='a'/><x id='b'/><x id='c'/></g>"));
+        }
+
+        [TestMethod]
+        public void APredicateThatMatchesPatternsOfItsOwnDoesNotDisturbThePositionItWasGiven()
+        {
+            // The function applies templates to the other parent's children, which asks this same pattern
+            // about them while the outer candidate's predicate is still being evaluated. What the outer
+            // one then reads as position() and last() has to be its own.
+            const string Probe =
+                "<xsl:function name=\"f:probe\" as=\"xs:string\"><xsl:param name=\"n\" as=\"element()\"/>"
+                + "<xsl:value-of><xsl:if test=\"$n/../@id = 'g1'\"><xsl:apply-templates select=\"$n/../../g[@id = 'g2']/x\"/></xsl:if></xsl:value-of>"
+                + "</xsl:function>";
+
+            Assert.AreEqual(
+                "<out>c e </out>",
+                Matched(
+                    "x[f:probe(.) = f:probe(.) and position() = last()]",
+                    "<r><g id='g1'><x id='a'/><x id='b'/><x id='c'/></g><g id='g2'><x id='d'/><x id='e'/></g></r>",
+                    Probe));
+        }
+
+        [TestMethod]
+        public void APositionalPatternStillReadsTheVariablesOfTheCallItIsAskedIn()
+        {
+            // xsl:number's count may read a local variable, and it differs from call to call here: each
+            // x asks for the x's past the one before it, which is always itself alone.
+            Assert.AreEqual(
+                "<out>1 1 1 </out>",
+                OnBoth(
+                    "<xsl:template match=\"/\"><out><xsl:for-each select=\"/g/x\">"
+                    + "<xsl:variable name=\"skip\" select=\"position() - 1\"/>"
+                    + "<xsl:number count=\"x[position() > $skip]\"/><xsl:text> </xsl:text>"
+                    + "</xsl:for-each></out></xsl:template>",
+                    "<g><x id='a'/><x id='b'/><x id='c'/></g>"));
+        }
+
+        [TestMethod]
+        public void APositionSpeltAsAFunctionReferenceIsStillAPosition()
+        {
+            const string Input = "<r><g><x id='a' k='1'/><x id='b' k='1'/><x id='c'/></g><g><x id='d' k='1'/></g></r>";
+
+            // position#0 and last#0 read the focus they are written in, as the calls do.
+            Assert.AreEqual("<out>b </out>", Matched("x[position#0() = 2]", Input));
+            Assert.AreEqual("<out>c d </out>", Matched("x[position#0() = last#0()]", Input));
+
+            // After a predicate that drops the first x, the second of what is left is the third of them
+            // all: counted among the survivors, which needs the reference seen for the position it is.
+            Assert.AreEqual(
+                "<out>c </out>",
+                Matched("x[@k][position#0() = 2]", "<r><x id='a'/><x id='b' k='1'/><x id='c' k='1'/></r>"));
+
+            // And so may whatever function-lookup hands back, which is not known until it is asked.
+            Assert.AreEqual(
+                "<out>b </out>",
+                Matched("x[function-lookup(QName('http://www.w3.org/2005/xpath-functions', 'position'), 0)() = 2]", Input));
+            Assert.AreEqual(
+                "<out>c d </out>",
+                Matched("x[@id][function-lookup(QName('http://www.w3.org/2005/xpath-functions', 'position'), 0)() = function-lookup(QName('http://www.w3.org/2005/xpath-functions', 'last'), 0)()]", Input));
+
+            // The same question decides whether //x[...] may be read as descendant::x[...], where the
+            // position would be counted across the whole document instead of within each parent.
+            Assert.AreEqual(
+                "<out>a d</out>",
+                Run("<xsl:template match=\"/\"><out><xsl:value-of select=\"//x[position#0() = 1]/@id\"/></out></xsl:template>", Input));
+            Assert.AreEqual(
+                "<out>a d</out>",
+                Run("<xsl:template match=\"/\"><out><xsl:value-of select=\"//x[function-lookup(QName('http://www.w3.org/2005/xpath-functions', 'position'), 0)() = 1]/@id\"/></out></xsl:template>", Input));
+        }
     }
 }

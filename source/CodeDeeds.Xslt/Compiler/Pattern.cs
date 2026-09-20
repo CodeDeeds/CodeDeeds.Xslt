@@ -39,7 +39,38 @@ namespace CodeDeeds.Xslt.Compiler
             Predicates = predicates;
             Reach = reach;
             ExplicitAxis = explicitAxis;
+            CountsPosition = Pattern.AnyMayBePositional(predicates, 0);
+            RecountsBetweenPredicates = predicates.Length > 1 && Pattern.AnyMayBePositional(predicates, 1);
         }
+
+        /// <summary>
+        /// Whether a predicate after the first could select by position, so that it counts among what the
+        /// predicates before it left rather than among everything the step selects.
+        /// </summary>
+        /// <remarks>
+        /// <c>foo[@a='c'][2]</c> is the second <c>foo</c> with the attribute. What the earlier predicates
+        /// left is found by evaluating them against every node the step selects, and what they answer may
+        /// depend on more than the node: on <c>current()</c>, and in an <c>xsl:number</c> or an
+        /// <c>xsl:for-each-group</c> on local variables that differ from one call to the next. So that
+        /// list is worked out afresh for each candidate, as it always was, and only a step that never
+        /// needs one has its selection remembered; see <see cref="StepSelection"/>.
+        /// </remarks>
+        public bool RecountsBetweenPredicates { get; }
+
+        /// <summary>
+        /// Whether any predicate of this step could select by position, so that matching has to know where
+        /// the candidate stands among the nodes the step selects.
+        /// </summary>
+        /// <remarks>
+        /// Settled once, here, because it is asked every time the step is tried against a node, and
+        /// because of what the answer saves. Finding a candidate's position means enumerating everything
+        /// the step selects from its anchor — its siblings, on the child axis — and doing that for each
+        /// candidate in turn is the square of the list: <c>item[@type='a']</c> over sixteen thousand
+        /// siblings took two thirds of a second where the same test in an <c>xsl:choose</c> took five
+        /// milliseconds. A predicate that is a comparison or a path can read no position, which is most
+        /// predicates anyone writes, and for those nothing need be counted at all.
+        /// </remarks>
+        public bool CountsPosition { get; }
 
         /// <summary>
         /// Whether the axis was written out, <c>child::</c> rather than nothing.
@@ -62,6 +93,82 @@ namespace CodeDeeds.Xslt.Compiler
 
         /// <summary>Where the step written to the left of this one has to hold.</summary>
         public PatternReach Reach { get; }
+    }
+
+    /// <summary>
+    /// The nodes a pattern step last selected from an anchor, kept so that the next candidate under the
+    /// same anchor can be found among them without selecting them again.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A positional predicate needs the candidate's place among the nodes its step selects, and the
+    /// candidates arrive one after another from the same parent: <c>xsl:apply-templates</c> hands over an
+    /// element's children in order, and <c>item[1]</c> is asked of each. Selecting the siblings for every
+    /// one of them is the square of the list. Selected once and kept, they are selected once per parent,
+    /// and the candidate is found by a binary search, the selection being in document order.
+    /// </para>
+    /// <para>
+    /// Only what depends on nothing but the tree is kept: the nodes an axis and a node test select from
+    /// an anchor. No predicate has been evaluated to arrive at them, so nothing a predicate can read —
+    /// <c>current()</c>, a variable — can make them stale. One selection is kept per step and the newest
+    /// replaces it, which is all that candidates arriving in document order need; candidates that
+    /// alternate between two parents fill it each time, and cost what they did before there was one.
+    /// </para>
+    /// <para>
+    /// One belongs to one transformation, which holds it: see <c>XsltRuntime.SelectionOf</c>.
+    /// </para>
+    /// </remarks>
+    internal sealed class StepSelection
+    {
+        private readonly List<int> m_nodes = new List<int>();
+        private XdmTree? m_tree;
+        private int m_anchor;
+        private bool m_ascending;
+
+        /// <summary>How many nodes were selected, which is the context size a predicate sees.</summary>
+        public int Count => m_nodes.Count;
+
+        /// <summary>Whether what is held was selected from this anchor in this tree.</summary>
+        public bool IsFrom(XdmTree tree, int anchor)
+        {
+            return ReferenceEquals(m_tree, tree) && m_anchor == anchor;
+        }
+
+        /// <summary>Selects afresh, replacing whatever was held.</summary>
+        public void Fill(XdmTree tree, int anchor, PatternStep step, int[] fingerprintMap)
+        {
+            // Held by nothing while it is being filled, so that a walk that fails leaves no selection
+            // behind claiming to be one.
+            m_tree = null;
+            m_nodes.Clear();
+
+            AxisWalker.Collect(tree, anchor, step.Axis, step.Test, fingerprintMap, m_nodes);
+
+            // Every axis a pattern may use is a forward one, and a forward axis is walked in document
+            // order, which is ascending order of node id. Checked rather than taken on trust, since a
+            // binary search over anything else answers "not there" about a node that is.
+            bool ascending = true;
+
+            for (int i = 1; i < m_nodes.Count; i++)
+            {
+                if (m_nodes[i] <= m_nodes[i - 1])
+                {
+                    ascending = false;
+                    break;
+                }
+            }
+
+            m_ascending = ascending;
+            m_anchor = anchor;
+            m_tree = tree;
+        }
+
+        /// <summary>The one-based position of a node among those selected, or zero where it is not one.</summary>
+        public int PositionOf(int node)
+        {
+            int index = m_ascending ? m_nodes.BinarySearch(node) : m_nodes.IndexOf(node);
+            return index < 0 ? 0 : index + 1;
+        }
     }
 
     /// <summary>
@@ -455,6 +562,16 @@ namespace CodeDeeds.Xslt.Compiler
                 return true;
             }
 
+            if (!step.CountsPosition)
+            {
+                return HoldWithoutPosition(node, step, ref context);
+            }
+
+            if (!step.RecountsBetweenPredicates && anchor >= 0 && context.Runtime is XsltRuntime runtime)
+            {
+                return HoldAtRememberedPosition(node, step, anchor, runtime, ref context);
+            }
+
             List<int> selected = NodeListPool.Rent();
 
             try
@@ -513,8 +630,80 @@ namespace CodeDeeds.Xslt.Compiler
             }
         }
 
+        /// <summary>
+        /// Evaluates a step's predicates where none of them can read a position, without finding one.
+        /// </summary>
+        /// <remarks>
+        /// The candidate has already passed the step's node test and the anchor is where the step hangs
+        /// from, so it is among the nodes the step selects; what is left unknown is only which of them it
+        /// is, and these predicates cannot ask. They are given a position and size of one, which is what a
+        /// node with nothing above it has always been given, and each is evaluated in a context of its own
+        /// as it is when positions are counted.
+        /// </remarks>
+        private static bool HoldWithoutPosition(int node, PatternStep step, ref DynamicContext context)
+        {
+            for (int i = 0; i < step.Predicates.Length; i++)
+            {
+                DynamicContext inner = context;
+                inner.Node = node;
+                inner.Position = 1;
+                inner.Size = 1;
+
+                if (!PredicateFilter.Holds(step.Predicates[i], ref inner))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Evaluates a step's predicates at the candidate's position among what the step selects, reading
+        /// that from the selection the transformation remembers for the step.
+        /// </summary>
+        /// <remarks>
+        /// For a step whose first predicate alone may be positional, so that every predicate sees the one
+        /// position and size. The two are read before any predicate is evaluated and the selection is not
+        /// touched again: a predicate may call a function that applies templates, which may match this
+        /// very step under another anchor and leave the selection holding that one instead.
+        /// </remarks>
+        private static bool HoldAtRememberedPosition(
+            int node, PatternStep step, int anchor, XsltRuntime runtime, ref DynamicContext context)
+        {
+            StepSelection selection = runtime.SelectionOf(step);
+
+            if (!selection.IsFrom(context.Tree, anchor))
+            {
+                selection.Fill(context.Tree, anchor, step, context.FingerprintMap);
+            }
+
+            int position = selection.PositionOf(node);
+            int size = selection.Count;
+
+            if (position == 0)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < step.Predicates.Length; i++)
+            {
+                DynamicContext inner = context;
+                inner.Node = node;
+                inner.Position = position;
+                inner.Size = size;
+
+                if (!PredicateFilter.Holds(step.Predicates[i], ref inner))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         /// <summary>Whether any predicate from the one given onwards could select by position.</summary>
-        private static bool AnyMayBePositional(Expr[] predicates, int from)
+        internal static bool AnyMayBePositional(Expr[] predicates, int from)
         {
             for (int i = from; i < predicates.Length; i++)
             {
@@ -535,40 +724,36 @@ namespace CodeDeeds.Xslt.Compiler
         /// Conservative on purpose. A shape known to yield a boolean and to read no position — a
         /// comparison, a logical operator, <c>not()</c> — is the common case and is settled as no; anything
         /// less certain is a yes, which costs one enumeration of the siblings and never a wrong answer.
+        /// <para>
+        /// A path is settled as no as well, and a union of them: <c>[@type]</c> and <c>[child]</c> answer
+        /// with nodes, and nodes are never the number that would make them positional. A path ending in
+        /// something that is not a node is a different expression and is not among these.
+        /// </para>
+        /// <para>
+        /// What reads the focus is asked of <see cref="Expr.DependsOnFocusPosition"/>, which knows that
+        /// <c>position#0</c> and <c>function-lookup()</c> read it as <c>position()</c> does. Asking only
+        /// whether a call to <c>position()</c> or <c>last()</c> was written missed those two.
+        /// </para>
         /// </remarks>
         private static bool MayBePositional(Expr predicate)
         {
-            if (ReadsFocusPosition(predicate))
+            // As it was written: the compiled backend may hand over a wrapper, whose shape says nothing.
+            Expr written = predicate.Unwrapped;
+
+            if (Expr.DependsOnFocusPosition(written))
             {
                 return true;
             }
 
-            return predicate switch
+            return written switch
             {
                 BinaryExpr binary => !binary.IsBooleanValued,
                 FunctionCallExpr call => !call.IsBooleanValued,
                 ValueComparisonExpr or NodeComparisonExpr or InstanceOfExpr or QuantifiedExpr
                     or BooleanLiteralExpr => false,
+                PathExpr or UnionExpr => false,
                 _ => true,
             };
-        }
-
-        private static bool ReadsFocusPosition(Expr expression)
-        {
-            if (expression is FunctionCallExpr { ReadsFocusPosition: true })
-            {
-                return true;
-            }
-
-            foreach (Expr child in expression.Children)
-            {
-                if (ReadsFocusPosition(child))
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
 
         /// <summary>

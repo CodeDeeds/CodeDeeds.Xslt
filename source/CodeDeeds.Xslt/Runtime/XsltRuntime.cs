@@ -401,6 +401,32 @@ namespace CodeDeeds.Xslt.Runtime
         /// <summary>How many patterns are being matched, for what a pattern may not read.</summary>
         internal int PatternDepth { get; set; }
 
+        /// <summary>What each positional pattern step last selected, and from where; made on first use.</summary>
+        private Dictionary<PatternStep, StepSelection>? m_stepSelections;
+
+        /// <summary>
+        /// What a pattern step last selected in this transformation, for the step to ask whether that is
+        /// what it needs again.
+        /// </summary>
+        /// <remarks>
+        /// Kept here and not on the step, because a compiled stylesheet is shared between transformations
+        /// running at once and a step must stay as it was compiled. A transformation runs on one thread,
+        /// so nothing here is guarded.
+        /// </remarks>
+        /// <param name="step">The step, which is its own key: two steps are never the same selection.</param>
+        internal StepSelection SelectionOf(PatternStep step)
+        {
+            m_stepSelections ??= new Dictionary<PatternStep, StepSelection>();
+
+            if (!m_stepSelections.TryGetValue(step, out StepSelection? selection))
+            {
+                selection = new StepSelection();
+                m_stepSelections.Add(step, selection);
+            }
+
+            return selection;
+        }
+
         /// <summary>
         /// How deep the transformation is in temporary output state that no output target records: a
         /// function being called, a function item, a variable's select expression. What

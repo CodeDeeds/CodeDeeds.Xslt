@@ -7963,6 +7963,111 @@ what was right already: text that is no number is NaN and not an error, two node
 with `number()` reading the older grammar beside them, and a node against a sequence, which always went
 the general way.
 
+### A predicate in a pattern, and whether it needs to know where the candidate stands
+
+A predicate in a match pattern is evaluated with a position and a size: the candidate's place among the
+nodes its step selects, which on the child axis are its siblings. `Pattern.PredicatesHold` found them by
+collecting every one of those nodes and looking the candidate up in the list, and it did so for any step
+with a predicate at all, once per candidate. `MayBePositional` stood a few lines below, already knowing
+that `[@type='a']` can read no position, and was asked only whether to enumerate *again* between two
+predicates, never whether to enumerate in the first place. So `match="item[@type='a']"` over a flat list
+cost the square of the list: sixteen thousand siblings took two thirds of a second where the same test in
+an `xsl:choose` took five milliseconds. Past 4,096 siblings `NodeListPool` stops keeping the list they are
+collected into, so each test grew a new one, and the transformation allocated two gigabytes.
+
+**Whether a step's predicates could select by position is now settled once, when the step is built**
+(`PatternStep.CountsPosition`), and where none could, none is counted: each predicate is evaluated with a
+position and size of one, which is what a node with nothing above it was always given. The candidate has
+already passed the step's node test against the anchor the step hangs from, so it is among the nodes the
+step selects, and which of them it is these predicates cannot ask.
+
+What counts as unable to ask was widened in one direction and narrowed in another. A path, or a union of
+paths, is now settled as no: `[@type]` and `[child]` answer with nodes, never the number that would make
+them positional, and they had been falling to the cautious default along with everything unrecognised. A
+path that ends in something other than a node is a different expression and still falls there, so
+`x[@n/xs:integer(.)]` counts, as it must. The narrowing is what reads the focus. The pattern asked only
+whether a call to `position()` or `last()` was written, and `position#0` and `function-lookup()` read it
+without one: the reference keeps its call in a body that is not among its children, and what a lookup
+hands back is not known until it is asked. Both now say so through `Expr.ReadsFocusPosition`, and the
+pattern asks `Expr.DependsOnFocusPosition`, which it shares with the one other place that needs to know.
+
+**That other place was wrong already.** `//x[...]` is read as `descendant::x[...]` where the predicate is
+position-free, and the position then counts across the whole document rather than within each parent. It
+took `position#0() = 1` for position-free:
+
+| over `<r><g><x id='a'/><x id='b'/><x id='c'/></g><g><x id='d'/></g></r>` | was | is |
+|---|---|---|
+| `//x[position#0() = 1]/@id`, and the same through `function-lookup()` | `a` | `a d` |
+| `match="x[@k][position#0() = 2]"`, where the first `x` has no `k` | the second `x` | the second with a `k` |
+
+The second row is the pattern's own version of it: after a first predicate, a second was taken to need no
+recount. Neither is a shape any test in the suite has.
+
+**A predicate that does read a position needs the siblings, but not again for each of them.** The
+candidates come one after another from the same parent — `xsl:apply-templates` hands over an element's
+children in order, and `item[1]` is asked of each — so what the step selected from that parent is now
+kept, and the next candidate is looked up in it by a binary search, the selection being in document order
+(which is checked as it is filled, and searched from the front where it is not). One selection is kept for
+each step, the newest replacing it, in the transformation: a compiled stylesheet is shared between
+transformations running at once, so a step stays as it was compiled and `XsltRuntime.SelectionOf` holds
+what it last selected. It is remembered by tree and anchor both, a variable's tree numbering its nodes
+from zero as the source does.
+
+What is kept is only what an axis and a node test select. No predicate is evaluated to arrive at it, so
+nothing a predicate can read can make it stale, and that is why the other half is left alone. In
+`foo[@a='c'][2]` the second predicate counts among what the first left, and what the first leaves may
+depend on `current()`, and in an `xsl:number` or an `xsl:for-each-group` on local variables that differ
+from one call to the next; that list is worked out for each candidate as it always was, and such a step
+(`PatternStep.RecountsBetweenPredicates`) is still the square. So is a step on `descendant::`, whose
+anchor climbs for every candidate and refills the selection each time: both cost what they did, neither
+is common, and neither is measured here. The position and size are read before any predicate is
+evaluated and the selection is not touched again, because a predicate may call a function that applies
+templates, which asks the same step about another parent's children in the middle of it.
+
+The predicate is still not asked for a boolean where it could be, which would spare `[@type]` a node-set
+per test: that entry point compared by the wrong rules until two changes above this one.
+
+BenchmarkDotNet, `PatternPredicateBenchmarks`, one template applied to each item of a flat list in a tree
+already parsed, the first row being the same transformation with the test in the template:
+
+| pattern | 1,000 items | 4,000 | 16,000 | allocated at 16,000 |
+|---|---:|---:|---:|---:|
+| `match="item"`, the test in an `xsl:choose` | 0.28 ms | 1.10 ms | 4.51 ms | 320 KB |
+| `match="item[@type='a']"` | 2.40 → 0.30 ms | 33.2 → 1.20 ms | 664 → 4.93 ms | 2,051,945 → 320 KB |
+| `match="*[@type='a']"` | 2.15 → 0.29 ms | 29.7 → 1.22 ms | 1,367 → 4.84 ms | 2,051,945 → 320 KB |
+| `match="item[1]"` | 2.31 → 0.27 ms | 33.5 → 1.06 ms | 645 → 4.24 ms | 2,051,945 → 448 KB |
+| `match="item[position() mod 2 = 1]"` | 2.57 → 0.49 ms | 33.5 → 1.96 ms | 650 → 8.11 ms | 2,058,445 → 6,948 KB |
+
+Every row now goes up four times for four times the items. The figures before are of the engine as it
+was when the problem was found, and those after are of it with both changes; the two commits between,
+above this one, are about comparisons and touch nothing a pattern runs. What the last row still
+allocates is its predicate: `position() mod 2 = 1` makes some 430 bytes each time it is evaluated, as it
+did before, when there were two gigabytes to hide it behind.
+
+Nothing else moved. The two halves were each run turn about with the engine before them, three times in
+fresh processes, single processes differing by more than either could. With the first, `item[1]` at
+16,000 was 660, 691 and 700 ms before and 673, 667 and 671 ms after, and the products transformation
+4.41, 4.16 and 4.15 ms before and 4.17, 4.27 and 4.56 ms after. With the second, the products
+transformation was 4.18, 4.14 and 4.23 ms before and 4.15, 4.07 and 4.14 ms after, and the identity
+template 7.93, 8.00 and 7.95 ms before and 7.90, 8.06 and 8.18 ms after.
+
+Nothing moves on any run: the 3.0 run stands at 8,061 of 8,071 on both backends, the 2.0 run at 5,678 of
+5,701, the schema-aware run at 8,668 of 8,727, and the XPath runs at 18,268 of 18,285 and 14,553 of
+14,577, every output identical line for line with the engine as it was, measured after each half and
+against the commit each was made on. `call-template-1001` failed twice along the way with *template
+invocations nested too deeply*: once in five runs of the 2.0 suite with the first half in, and once in a
+compiled 3.0 run of the engine with neither. So it is not this. That test recurses five hundred levels
+through a named template and has no predicate in any pattern; what it shows is that five hundred levels
+are near enough to what a one-megabyte stack allows that the answer depends on which methods the runtime
+had finished optimising, which is worth looking into on its own account. Seven new unit tests, 2,898 in
+all. Two hold what the predicates that read no position matched to what they matched before, and four do
+the same for the ones that do: across parents, with the candidates arriving turn about from two parents
+and from two trees whose nodes are numbered alike, with a predicate that matches patterns of its own, and
+with an `xsl:number` reading a local variable. Those six pass against the engine as it was, being what
+must not change, and the four were checked the other way: with the tree left out of what is remembered
+one of them fails, and with the anchor left out three of them do. The seventh asks the positions spelt
+as references and fails against the engine as it was.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error

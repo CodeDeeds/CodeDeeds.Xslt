@@ -438,6 +438,14 @@ namespace CodeDeeds.Xslt.Compiler
         /// <inheritdoc/>
         internal override IEnumerable<Expr> Children => new[] { m_name, m_arity };
 
+        /// <inheritdoc/>
+        /// <remarks>
+        /// Which function comes back is not known until the name is, and <c>fn:position</c> and
+        /// <c>fn:last</c> are among the ones it may be. So every lookup is taken to read the focus, which
+        /// costs a rewrite forgone where it did not and a wrong answer nowhere.
+        /// </remarks>
+        internal override bool ReadsFocusPosition => true;
+
         /// <summary>
         /// Builds the argument list a function item's body reads: one variable per slot, from zero upwards.
         /// </summary>

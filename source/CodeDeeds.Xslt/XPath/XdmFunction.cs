@@ -679,6 +679,14 @@ namespace CodeDeeds.Xslt.XPath
         public override bool MaySpanDocuments => true;
 
         /// <inheritdoc/>
+        /// <remarks>
+        /// <c>position#0</c> and <c>last#0</c> read the focus they were written in as surely as the calls
+        /// do, only later. The body is not among <see cref="Expr.Children"/>, so without this an analysis
+        /// walking the tree for <c>position()</c> would walk straight past one spelt as a reference.
+        /// </remarks>
+        internal override bool ReadsFocusPosition => DependsOnFocusPosition(m_body);
+
+        /// <inheritdoc/>
         public override XPathValue Evaluate(ref DynamicContext context)
         {
             return XPathValue.FromFunction(new XdmNamedFunction(m_name, m_arity, m_body, ref context)
