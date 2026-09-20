@@ -416,8 +416,9 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 // XSLT 1.0 converts the value with number() and formats whatever comes back, so a value that
                 // is not a number at all reads as NaN rather than being refused. Where a 2.0 expression
-                // gives a sequence, that conversion sees its first item and nothing else.
-                double single = XdmSequence.FirstItem(value).ToNumber();
+                // gives a sequence, that conversion sees its first item and nothing else. The number() is
+                // the one the mode has everywhere, so a value written '1e1' numbers as ten.
+                double single = XdmType.FirstItemAsDoubleOrNaN(value);
 
                 if (double.IsNaN(single) || double.IsInfinity(single))
                 {

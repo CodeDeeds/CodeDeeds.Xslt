@@ -347,7 +347,7 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
-        public void NumberConversionRejectsFormsXPathDoesNotAllow()
+        public void NumberConversionReadsTheLexicalSpaceOfDoubleAndNothingBeyondIt()
         {
             string xml = "<r/>";
 
@@ -355,11 +355,20 @@ namespace CodeDeeds.Xslt.UnitTests
             Assert.AreEqual(-1.5, Number(xml, "number('  -1.5  ')"), "surrounding whitespace is allowed");
             Assert.AreEqual(0.5, Number(xml, "number('.5')"));
 
-            // Exponent notation, a leading plus, and the special names are all invalid in XPath 1.0.
-            Assert.IsTrue(double.IsNaN(Number(xml, "number('1e3')")));
-            Assert.IsTrue(double.IsNaN(Number(xml, "number('+1')")));
+            // Exponent notation, a leading plus and INF were all NaN to XPath 1.0. These expressions are
+            // compiled at 1.0, which here is XPath 2.0 with backwards compatibility on, and its number()
+            // reads what xs:double writes (XPath 2.0 Appendix I.1).
+            Assert.AreEqual(1000.0, Number(xml, "number('1e3')"));
+            Assert.AreEqual(1.0, Number(xml, "number('+1')"));
+            Assert.AreEqual(double.PositiveInfinity, Number(xml, "number('INF')"));
+            Assert.AreEqual(double.NegativeInfinity, Number(xml, "number('-INF')"));
+
+            // What xs:double does not write is still NaN, and never an error.
             Assert.IsTrue(double.IsNaN(Number(xml, "number('NaN')")));
             Assert.IsTrue(double.IsNaN(Number(xml, "number('Infinity')")));
+            Assert.IsTrue(double.IsNaN(Number(xml, "number('+INF')")));
+            Assert.IsTrue(double.IsNaN(Number(xml, "number('1e')")));
+            Assert.IsTrue(double.IsNaN(Number(xml, "number('0x10')")));
             Assert.IsTrue(double.IsNaN(Number(xml, "number('')")));
         }
 

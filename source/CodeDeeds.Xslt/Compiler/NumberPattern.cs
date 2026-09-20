@@ -81,8 +81,22 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="format">The symbols to write the result with.</param>
         public string Format(XPathValue value, DecimalFormat format)
         {
-            double number = value.ToNumber();
+            return Format(value, value.ToNumber(), format);
+        }
 
+        /// <summary>
+        /// Formats a number through this picture, the caller having already read the value as a number.
+        /// </summary>
+        /// <remarks>
+        /// For a backwards compatible call, whose conversion is not <see cref="XPathValue.ToNumber"/>:
+        /// the value is still what says which digits a typed number has, and the number is what the
+        /// caller's conversion made of it.
+        /// </remarks>
+        /// <param name="value">The value to format, whose type decides which digits it has.</param>
+        /// <param name="number">The value as a number.</param>
+        /// <param name="format">The symbols to write the result with.</param>
+        public string Format(XPathValue value, double number, DecimalFormat format)
+        {
             if (double.IsNaN(number))
             {
                 // NaN carries no sign, so it never picks up the negative sub-picture.

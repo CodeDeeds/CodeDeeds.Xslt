@@ -107,9 +107,13 @@ namespace CodeDeeds.Xslt.UnitTests
 
             Assert.AreEqual("INF", Writes("number('INF') + 3"));
 
-            // XPath 1.0's own grammar for a number has a sign, digits and a point and nothing else, so
-            // there the three of them are words like any other.
-            Assert.AreEqual("NaN,NaN,NaN", Writes("number('INF'), number('-INF'), number('NaN')", "1.0"));
+            // A version="1.0" stylesheet calls the same function: backwards compatibility changes how many
+            // items it is given and not what it reads, and XPath 2.0 Appendix I.1 lists INF and -INF among
+            // the strings that were NaN to XPath 1.0 and are numbers to number() now, the mode
+            // notwithstanding.
+            Assert.AreEqual(
+                "INF,-INF,NaN,NaN",
+                Writes("number('INF'), number('-INF'), number('NaN'), number('nonsense')", "1.0"));
         }
     }
 }

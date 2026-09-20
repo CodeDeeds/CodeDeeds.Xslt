@@ -1411,6 +1411,78 @@ namespace CodeDeeds.Xslt.XPath
             return TryReadDouble(text, out double value) ? value : double.NaN;
         }
 
+        /// <summary>
+        /// Reads a value as the number a backwards-compatible expression converts it to: <c>fn:number</c>
+        /// of its first item.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The one conversion behind everything XPath 2.0 has compatibility mode convert to a number — an
+        /// operand of arithmetic (§3.4), an argument where a number is expected (§3.1.5), and
+        /// <c>number()</c> and <c>sum()</c> called outright. Two things in it are 1.0's: a sequence gives
+        /// up its first item and the rest are discarded, and what cannot be read is NaN and never
+        /// <c>FORG0001</c>. The reading of text is 2.0's, because the function is: the lexical space of
+        /// <c>xs:double</c>, so <c>1e1</c> and <c>+10</c> are ten and <c>INF</c> is infinity, where XPath
+        /// 1.0's grammar for a number had none of them. Appendix I.1 lists exactly that among the
+        /// incompatibilities the mode does not remove, "explicitly when using the number function, or
+        /// implicitly".
+        /// </para>
+        /// <para>
+        /// <see cref="XPathValue.ToNumber"/> is the older reading and stays as it is, being reached from
+        /// places that carry no version. A node-set is read here without its first node being wrapped as
+        /// a value, this being the operand of every <c>price * quantity</c> a 1.0 stylesheet writes.
+        /// </para>
+        /// </remarks>
+        /// <param name="value">The value, which may be a sequence or a node-set of any length.</param>
+        /// <exception cref="XsltException">
+        /// The first item is a function item, a map or an array, which has no typed value to read.
+        /// </exception>
+        internal static double FirstItemAsDoubleOrNaN(XPathValue value)
+        {
+            switch (value.Kind)
+            {
+                case XPathValueKind.Node:
+                    return TextAsDoubleOrNaN(value.NodeTree.StringValueOf(value.NodeId));
+
+                case XPathValueKind.NodeSet:
+                {
+                    NodeSet nodes = value.AsNodeSet();
+
+                    return nodes.Count == 0
+                        ? double.NaN
+                        : TextAsDoubleOrNaN(nodes.TreeAt(0).StringValueOf(nodes[0]));
+                }
+
+                case XPathValueKind.String:
+                    // A date or a QName is held as a string and is not text to be read as a number.
+                    return value.TypeCode is XdmTypeCode.String or XdmTypeCode.UntypedAtomic
+                        ? TextAsDoubleOrNaN(value.ToStringValue())
+                        : value.ToNumber();
+
+                case XPathValueKind.Sequence:
+                {
+                    XdmSequence sequence = value.AsSequence();
+
+                    if (sequence.Count == 0)
+                    {
+                        return double.NaN;
+                    }
+
+                    // What a sequence holds may itself be a sequence or a node-set, and an empty one
+                    // there means the first item lies further along; that is left to the general reading.
+                    XPathValue first = sequence[0];
+
+                    return FirstItemAsDoubleOrNaN(
+                        first.Kind is XPathValueKind.Sequence or XPathValueKind.NodeSet
+                            ? XdmSequence.FirstItem(value)
+                            : first);
+                }
+
+                default:
+                    return value.ToNumber();
+            }
+        }
+
         /// <summary>Reads text in the lexical space of <c>xs:double</c>, if it is in it.</summary>
         /// <param name="text">The text, which may have whitespace around it.</param>
         /// <param name="value">The value read, or NaN where there was none.</param>

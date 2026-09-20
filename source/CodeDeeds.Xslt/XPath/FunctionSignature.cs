@@ -266,7 +266,8 @@ namespace CodeDeeds.Xslt.XPath
         /// where a string was expected is converted by <c>fn:string()</c>, and one where a number was
         /// expected by <c>fn:number()</c>. Neither of those can fail, which is the point of them: XPath 1.0
         /// had no type error to raise here, and a stylesheet written for it is entitled to the answers it
-        /// had.
+        /// had. The <c>fn:number()</c> is 2.0's all the same, as it is wherever this mode converts, so
+        /// <c>round('2.6e0')</c> is 3 — see <see cref="XdmType.FirstItemAsDoubleOrNaN"/>.
         /// </remarks>
         /// <param name="value">The argument's value.</param>
         internal XPathValue ConvertBackwards(XPathValue value)
@@ -299,7 +300,7 @@ namespace CodeDeeds.Xslt.XPath
             if (m_shape == Shape.Numeric
                 || (m_shape == Shape.Atomic && XdmComparison.IsNumeric(m_type.Code)))
             {
-                return XPathValue.FromNumber(value.ToNumber());
+                return XPathValue.FromNumber(XdmType.FirstItemAsDoubleOrNaN(value));
             }
 
             return m_shape == Shape.Atomic && m_type.Code == XdmTypeCode.String

@@ -370,15 +370,16 @@ namespace CodeDeeds.Xslt.XPath
                 case XPathFunction.Number:
                 {
                     // fn:number is a cast to xs:double from XPath 2.0 on, and the lexical space of
-                    // xs:double takes INF, -INF and NaN. XPath 1.0's own grammar for a number has a sign,
-                    // digits and a point and nothing else, so there the three of them are words like any
-                    // other and read as NaN. What the cast will not read is NaN either way, which is the
-                    // one thing the function keeps from 1.0.
+                    // xs:double takes an exponent, a leading plus, INF, -INF and NaN. A backwards
+                    // compatible call reads the same lexical space, the function being 2.0's there too —
+                    // XPath 2.0 Appendix I.1 names number() among what the mode does not give back — and
+                    // differs only in taking the first item of a sequence. What the cast will not read
+                    // is NaN either way, which is the one thing the function keeps from 1.0.
                     XPathValue argument = ArgumentOrContext(0, ref context);
 
                     return XPathValue.FromNumber(
                         m_version.IsBackwardsCompatible
-                            ? argument.ToNumber()
+                            ? XdmType.FirstItemAsDoubleOrNaN(argument)
                             : XdmType.AsDoubleOrNaN(argument));
                 }
 
@@ -838,6 +839,12 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>
         /// Adds up a node-set or a sequence, which is the same operation over items of different shapes.
         /// </summary>
+        /// <remarks>
+        /// The backwards-compatible sum: every item a number by <c>fn:number</c>, so one that is not a
+        /// number makes the total NaN rather than an error. The text of a node is read as
+        /// <c>xs:double</c> writes one, as <c>number()</c> and arithmetic read it, so
+        /// <c>sum(a)</c>, <c>number(a)</c> and <c>a + 0</c> agree over one node.
+        /// </remarks>
         private static double Sum(XPathValue value)
         {
             double total = 0.0;
@@ -847,7 +854,7 @@ namespace CodeDeeds.Xslt.XPath
                 NodeSet nodes = value.AsNodeSet();
                 for (int i = 0; i < nodes.Count; i++)
                 {
-                    total += XPathValue.ParseNumber(nodes.TreeAt(i).StringValueOf(nodes[i]));
+                    total += XdmType.TextAsDoubleOrNaN(nodes.TreeAt(i).StringValueOf(nodes[i]));
                 }
 
                 return total;
@@ -855,9 +862,7 @@ namespace CodeDeeds.Xslt.XPath
 
             foreach (XPathValue item in XdmSequence.Items(value))
             {
-                total += item.Kind == XPathValueKind.Node
-                    ? XPathValue.ParseNumber(XdmSequence.StringValueOf(item))
-                    : item.ToNumber();
+                total += XdmType.FirstItemAsDoubleOrNaN(item);
             }
 
             return total;

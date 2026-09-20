@@ -737,9 +737,10 @@ namespace CodeDeeds.Xslt.XPath
         {
             // One number apiece, from the first item of whatever each side gave: XPath 1.0 arithmetic took
             // number() of a node-set, which is number() of its first node, and the compatibility mode keeps
-            // that where a 2.0 expression now yields a sequence.
-            double a = XdmSequence.FirstItem(left).ToNumber();
-            double b = XdmSequence.FirstItem(right).ToNumber();
+            // that where a 2.0 expression now yields a sequence. The number() is 2.0's (XPath 2.0 §3.4),
+            // so an operand whose text is '1e1' is ten, as it is when it is compared with one.
+            double a = XdmType.FirstItemAsDoubleOrNaN(left);
+            double b = XdmType.FirstItemAsDoubleOrNaN(right);
 
             return op switch
             {
@@ -1055,7 +1056,7 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>Emits one operand of backwards compatible arithmetic as a raw double.</summary>
-        private static void EmitOperand(Expr operand, EmitContext context)
+        internal static void EmitOperand(Expr operand, EmitContext context)
         {
             operand.Emit(context);
             context.IL.Call(EmitHelpers.ToNumberFirstItemMethod);
@@ -1269,7 +1270,7 @@ namespace CodeDeeds.Xslt.XPath
             // which turns -'a string' into a value; there is no negative of a string to be that value.
             if (m_version.IsBackwardsCompatible)
             {
-                return XPathValue.FromNumber(-XdmSequence.FirstItem(value).ToNumber());
+                return XPathValue.FromNumber(-XdmType.FirstItemAsDoubleOrNaN(value));
             }
 
             value = XdmArithmetic.RequireNumericOperand(value, "-");
@@ -1324,7 +1325,18 @@ namespace CodeDeeds.Xslt.XPath
         /// <inheritdoc/>
         internal override void EmitAsNumber(EmitContext context)
         {
-            m_operand.EmitAsNumber(context);
+            // Only a backwards compatible negation is emitted, and its operand is converted as any other
+            // operand of 1.0 arithmetic is: the first item, read as fn:number reads it. An operand that
+            // is already a double by construction is left as one.
+            if (m_operand is NumberLiteralExpr or BinaryExpr or NegateExpr)
+            {
+                m_operand.EmitAsNumber(context);
+            }
+            else
+            {
+                BinaryExpr.EmitOperand(m_operand, context);
+            }
+
             context.IL.UnaryOperation(System.Reflection.Emit.OpCodes.Neg, "neg");
         }
     }

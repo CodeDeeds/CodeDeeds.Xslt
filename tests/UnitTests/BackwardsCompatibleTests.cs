@@ -63,15 +63,25 @@ namespace CodeDeeds.Xslt.UnitTests
             Assert.AreEqual("2", Writes("string-length(12)", "1.0"));
             Assert.AreEqual("3", Writes("round('2.6')", "1.0"));
             Assert.AreEqual("true", Writes("starts-with(12.5, '12')", "1.0"));
+
+            // The fn:number() is XPath 2.0's, which reads what xs:double writes, so an argument written
+            // with an exponent or a leading plus is the number it spells and not NaN.
+            Assert.AreEqual("3", Writes("round('2.6e0')", "1.0"));
+            Assert.AreEqual("bcd", Writes("substring('abcdef', '2e0', '+3')", "1.0"));
+
+            // And what it cannot read is NaN, which is not an error and selects nothing.
+            Assert.AreEqual("NaN", Writes("round('two')", "1.0"));
+            Assert.AreEqual(string.Empty, Writes("substring('abcdef', 'two')", "1.0"));
         }
 
         [TestMethod]
         public void AComparisonWithANumberOnEitherSideComparesNumerically()
         {
             // And the conversion is to xs:double, whose lexical space has an exponent in it — so '5.00e0'
-            // is the number five here, where XPath 1.0's own grammar for a number has no exponent and
-            // number('5.00e0') is NaN.
+            // is the number five here, where XPath 1.0's own grammar for a number has no exponent. It is
+            // number() that converts, and called by name it answers the same.
             Assert.AreEqual("true", Writes("(1 to 5) = ('apple', 'banana', '5.00e0')", "1.0"));
+            Assert.AreEqual("5", Writes("number('5.00e0')", "1.0"));
             Assert.AreEqual("true", Writes("1 = '1.0e0'", "1.0"));
             Assert.AreEqual("false", Writes("1 = 'apple'", "1.0"));
 

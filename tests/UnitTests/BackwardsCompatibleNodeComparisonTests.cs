@@ -15,9 +15,10 @@ namespace CodeDeeds.Xslt.UnitTests
     /// <para>
     /// Every comparison is asked four ways — in a <c>select</c> and in an <c>xsl:if</c>, which evaluate a
     /// comparison by different routes, and on both backends — and every node form is asked beside the string
-    /// form it must agree with. A real XSLT 1.0 processor answers NaN for <c>1e1</c> either way round; this
-    /// is XSLT 2.0's backwards compatibility, which is not that. See <c>ConformanceNotes.md</c>, "What
-    /// backwards compatibility is, and what it is not".
+    /// form it must agree with. XPath 1.0 as specified answers NaN for <c>1e1</c> either way round; this
+    /// is XSLT 2.0's backwards compatibility, which is not that — and neither is
+    /// <c>XslCompiledTransform</c>, which reads the exponent, as <c>BackwardsCompatibleNumberTests</c>
+    /// shows. See <c>ConformanceNotes.md</c>, "What backwards compatibility is, and what it is not".
     /// </para>
     /// </remarks>
     [TestClass]
@@ -166,16 +167,19 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
-        public void TwoNodesAreStillEqualAsTextAndNumberStillReadsTheOlderGrammar()
+        public void TwoNodesAreStillEqualAsTextAndNumberReadsThemAsTheComparisonDoes()
         {
             // Neither operand being a number, an equality is between two untyped values and compares
             // them as strings: '1e1' and '10' are different text, as nodes and as strings alike.
             Agree("false", "a = plain", "string(a) = string(plain)");
             Agree("true", "a != plain", "string(a) != string(plain)");
 
-            // And number() is the function the stylesheet called rather than a conversion the language
-            // made for it; it reads XPath 1.0's grammar at 1.0, which the conformance notes record.
-            Assert.AreEqual("false", Answers("number(a) = 10"));
+            // And number() is the conversion the comparison makes, called by name, so it makes two nodes
+            // that are different text the same number. It read XPath 1.0's grammar here once, and
+            // 'number(a) = 10' was false beside an 'a = 10' that was true; BackwardsCompatibleNumberTests
+            // has the rest of that.
+            Agree("true", "number(a) = 10", "number(string(a)) = 10");
+            Agree("true", "number(a) = number(plain)", "number(string(a)) = number(string(plain))");
         }
     }
 }

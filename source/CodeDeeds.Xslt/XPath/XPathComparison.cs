@@ -397,10 +397,11 @@ namespace CodeDeeds.Xslt.XPath
         /// is numeric, and the lexical space of <c>xs:double</c> has an exponent in it — so
         /// <c>1 = '1.0e0'</c> is true here, where XPath 1.0's own grammar for a number has no exponent at
         /// all and would read that string as NaN. Backwards compatibility is XSLT 2.0's imitation of 1.0
-        /// within 2.0's data model rather than 1.0 itself, and the conversion it names is 2.0's;
-        /// <c>number()</c> called in the same stylesheet still reads 1.0's grammar, that being the function
-        /// the stylesheet asked for rather than a conversion the language is making on its behalf.
-        /// A node is read the same way — see <see cref="NodeAsDouble"/>.
+        /// within 2.0's data model rather than 1.0 itself, and the conversion it names is 2.0's
+        /// <c>fn:number</c>. <c>number()</c> called in the same stylesheet is that function and answers
+        /// the same, as do arithmetic, <c>sum()</c> and an argument converted to a number — see
+        /// <see cref="XdmType.FirstItemAsDoubleOrNaN"/>. A node is read the same way — see
+        /// <see cref="NodeAsDouble"/>.
         /// </remarks>
         /// <param name="value">The operand.</param>
         private static double AsDouble(XPathValue value)

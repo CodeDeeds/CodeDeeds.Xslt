@@ -107,7 +107,12 @@ namespace CodeDeeds.Xslt.Compiler
                 pattern = ReadPicture(picture.ToStringValue());
             }
 
-            return XPathValue.FromString(pattern.Format(value, m_format));
+            // Where a number is expected, backwards compatibility converts the first item with fn:number
+            // (XPath 2.0 §3.1.5), which reads what xs:double writes: a price written '1e1' formats as ten.
+            return XPathValue.FromString(
+                m_version.IsBackwardsCompatible
+                    ? pattern.Format(value, XdmType.FirstItemAsDoubleOrNaN(value), m_format)
+                    : pattern.Format(value, m_format));
         }
 
         /// <summary>

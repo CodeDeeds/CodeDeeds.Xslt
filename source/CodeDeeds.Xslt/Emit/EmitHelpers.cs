@@ -18,17 +18,18 @@ namespace CodeDeeds.Xslt.Emit
         public static double ToNumber(XPathValue value) => value.ToNumber();
 
         /// <summary>
-        /// Converts a value to a number under XPath 1.0's rules, where a sequence is its first item.
+        /// Converts a value to a number as backwards compatibility does, where a sequence is its first item.
         /// </summary>
         /// <remarks>
-        /// The compiled counterpart of what the interpreter does for backwards compatible arithmetic. It has
-        /// to be a separate entry point rather than a change to <see cref="ToNumber"/>, which serves 2.0 as
-        /// well and must leave a sequence a type error there.
+        /// The compiled counterpart of what the interpreter does for backwards compatible arithmetic, and
+        /// the same method, so that the two cannot read an operand differently. It has to be a separate
+        /// entry point rather than a change to <see cref="ToNumber"/>, which serves 2.0 as well and must
+        /// leave a sequence a type error there.
         /// </remarks>
         /// <param name="value">The value to convert.</param>
         public static double ToNumberFirstItem(XPathValue value)
         {
-            return XdmSequence.FirstItem(value).ToNumber();
+            return XdmType.FirstItemAsDoubleOrNaN(value);
         }
 
         /// <summary>Converts a value to a boolean, per XPath's rules.</summary>

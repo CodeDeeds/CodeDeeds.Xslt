@@ -1445,12 +1445,15 @@ its one job. And **the version attribute is truncated to the hundredth rather th
 a version below 2.0 and has to stay one, where rounding makes it exactly 2.0 and switches off the very thing
 it asked for.
 
-Left as it is: `number('5.00e0')` is `NaN` here, XPath 1.0's lexical form for a number having no exponent.
-XPath 2.0's `fn:number` does accept one, and a 1.0 stylesheet on a 2.0 processor is entitled to that reading —
-but the conversion is reached from a hundred places that do not carry a version, and threading one through
-them all would cost more than the two tests it earns. **A comparison is not one of those places**: it knows
-its version, and it reads an operand it compares with a number as `xs:double`, exponent and all, whether
-the operand arrives as a string or as a node — see *A node, and the same text as a string*.
+**The number the mode converts to is 2.0's**: `number('5.00e0')` is five, XPath 1.0's lexical form for a
+number having no exponent and `fn:number`'s having one. This stood the other way for a while, on the
+reasoning that the conversion is reached from a hundred places that do not carry a version and that
+threading one through them all would cost more than it earned. The places the *mode* converts in turned
+out to be few and every one of them knows its version: a comparison, arithmetic and the unary minus,
+an argument where a number is expected, `number()`, `sum()`, `format-number()` and the `value` of
+`xsl:number`. `XPathValue.ToNumber()`, which the hundred places call, is untouched. See *A node, and the
+same text as a string* for the comparison and *One number() for everything the mode converts* for the
+rest.
 
 **A built-in template rule passes on the parameters it was given**, tunnel and ordinary alike. An element the
 stylesheet wrote no rule for is not a reason for a parameter to stop: what the caller meant was for the
@@ -7915,14 +7918,13 @@ text that was NaN under 1.0 for its leading plus, its exponent, or for being `IN
 now, implicitly as well as through `number()`. So the general path was right and the node paths agree with
 it. What cannot be read is still NaN and never `FORG0001`, which is the half of 1.0 the mode keeps.
 
-**`System.Xml.Xsl.XslCompiledTransform` answers the other way**, being a real 1.0 processor: `1e1` is NaN
-there whichever way it arrives. The differential tests against it are the authority on 1.0 behaviour and
-every one of them passes unchanged, which says none of them writes a number with an exponent into a
-source document and compares it. That is the right outcome rather than a gap: where XSLT 2.0's imitation
-of 1.0 and 1.0 itself differ, this engine is the former, and a differential test asserting the latter here
-would be asserting a processor this is not. `number()`, arithmetic and `sum()` do still read the older
-grammar at 1.0, as the section above records, so `number(a) = 10` is false where `a = 10` is now true —
-Appendix I.1 names `number()` with the rest, and that remains the larger piece of work it was.
+**What `System.Xml.Xsl.XslCompiledTransform` answers was stated here without being asked, and stated
+wrongly.** This paragraph said that, being a real 1.0 processor, it reads `1e1` as NaN whichever way it
+arrives. It reads it as ten — see *One number() for everything the mode converts*, where it was finally
+run. The differential tests against it all passed unchanged because none of them writes a number with an
+exponent into a source document, which is all that their passing ever said. `number()`, arithmetic and
+`sum()` were left reading the older grammar by this change, so `number(a) = 10` was false where `a = 10`
+had become true; *One number() for everything the mode converts* closes that.
 
 **The scanner for 1.0's grammar still goes first.** It lies wholly inside `xs:double`'s lexical space,
 reads the same value wherever it reads one, and takes nearly all real data; only what it answers NaN for
@@ -8199,6 +8201,125 @@ And the template rule shows now what seven milliseconds of counted siblings had 
 gone, `match="product[name and price > 100]"` over the thousand products is 408 to 373 interpreted and
 412 to 363 compiled, and the eighty thousand bytes a call are gone as they were before: a pattern's
 predicate is still evaluated as a value, and the `and` inside it no longer is.
+
+### One number() for everything the mode converts
+
+Under `version="1.0"`, over `<r><a>1e1</a></r>`, on both backends:
+
+| | was | is |
+|---|---|---|
+| `a = 10` | true | true |
+| `number(a) = 10` | false | true |
+| `a + 0 = 10`, `-a = -10` | false | true |
+| `sum(a) = 10` | false | true |
+| `round(a) = 10`, and any argument where a number is expected | false | true |
+| `format-number(a, '0.0')` | `NaN` | `10.0` |
+| `<xsl:number value="a"/>` | `NaN` | `10` |
+
+*A node, and the same text as a string* made the comparison read a node as `xs:double` and left the rest
+reading XPath 1.0's grammar, recording it as a larger piece of work and as something two suite tests
+hinged on. Neither held up. The question was whether to close the gap, and three kinds of evidence were
+asked.
+
+**The specification has one conversion, not two.** XPath 2.0 with compatibility mode on converts with
+`fn:number` in the operands of a general comparison (§3.5.2), in the operands of arithmetic, unary minus
+included (§3.4), and in an argument where the expected type is numeric (§3.1.5); `number()` called outright
+is the same function, and XSLT 2.0 §12.1 converts the `value` of `xsl:number` with it in backwards
+compatible mode. `fn:number` from 2.0 on is the cast to `xs:double` with its failure answered NaN.
+Appendix I.1 — what still differs from 1.0 *with* the mode on — says a string with a leading plus, an
+exponent, or spelling `INF` or `-INF`, NaN under 1.0, converts to a number now "either explicitly when
+using the number function, or implicitly". A reading under which `a = 10` and `number(a) = 10` differ is
+not one the specification offers.
+
+**The oracle was on the wide side all along, for the two forms that occur in data.** The notes had said
+that `System.Xml.Xsl.XslCompiledTransform`, being a real 1.0 processor, reads `1e1` as NaN. Nobody had run
+it. Asked, over the same source:
+
+| under `version="1.0"` | XPath 1.0 as specified | `XPathNavigator.Evaluate` | `XslCompiledTransform` | this engine, was | is |
+|---|---|---|---|---|---|
+| `number('1e1')`, `number('+10')`, `number(a)` | NaN | NaN | 10 | NaN | 10 |
+| `a + 0`, `-a`, `sum(a \| b)`, `round('2.6e0')` | NaN | NaN | 10, -10, 35, 3 | NaN | the same as the oracle |
+| `a = 10`, `a > 9` | false | false | true | true, since that section | true |
+| `number('INF')`, `number('-INF')` | NaN | NaN | NaN | NaN | INF, -INF |
+| `number('Infinity')` | NaN | Infinity | NaN | NaN | NaN |
+| `number('1e')`, `number('0x10')`, `number('1d')` | NaN | NaN | NaN | NaN | NaN |
+
+So the two Microsoft implementations disagree with each other, "what a 1.0 processor does" is not one
+thing, and the one this project measures itself against reads an exponent and a leading plus in every
+position — the comparison too, which that section took for a deliberate departure from it and was
+in fact the engine catching up. For a stylesheet moved here from `XslCompiledTransform`, the narrow
+reading was not faithfulness to 1.0 but a change of answer, from ten to NaN. What is left different from
+the oracle is `INF` and `-INF`, which Appendix I.1 names and which it reads as words; that one is
+deliberate, and `BackwardsCompatibleNumberTests` holds both answers side by side so that it stays on the
+record as such. The same file has the differential test that was impossible while the claim stood:
+twenty-three expressions over exponents and plus signs, every one required to match the oracle.
+
+**The suites are silent.** Nothing moves on any of the eight runs, every failure set identical test for
+test — so no test hinges on this in either direction, and whichever two tests the older note had in mind,
+the one the suite does have is a comparison (`backwards-033` compares with `'5.00e0'`) and passed already.
+The 3.0 run stands at 8,061 of 8,071, the 2.0 run at 5,678 of 5,701 and the schema-aware run at 8,668 of
+8,727, each on both backends, and the XPath runs at 18,268 of 18,285 and 14,553 of 14,577. The sweep was
+taken twice, main having moved under it: on the second, `call-template-1001` landed the wrong side of its
+recursion limit once with the change and once without, in different runs, as it does.
+
+**"A hundred places that do not carry a version" was the wrong count.** `XPathValue.ToNumber()` is
+reached from that many, and it is untouched: it still reads XPath 1.0's grammar, for every caller at
+every version. The places where *the mode* converts are seven, and each already held its version —
+`BinaryExpr.BackwardsCompatibleArithmetic` and `EmitHelpers.ToNumberFirstItem` for the two backends,
+`NegateExpr`, `FunctionParameter.ConvertBackwards` which every function library's arguments pass through,
+`number()`, `sum()`, `format-number()` and `xsl:number`. They now share
+`XdmType.FirstItemAsDoubleOrNaN`: the first item, read by `TextAsDoubleOrNaN` where it is text or a node
+— the scanner for 1.0's grammar first, the wider look only for what that answers NaN for — and by
+`ToNumber()` where it is already a number or a boolean. A node-set gives up its first node's text without
+the node being wrapped as a value first, which arithmetic had been doing for every operand.
+
+Reading the emitted unary minus found it had a rule of its own: it converted its operand with
+`ToNumber()` rather than the first-item conversion the binary operators emit, so `-(3, 4)` was NaN
+compiled and -3 interpreted. It goes through the same entry point as the rest now.
+
+In microseconds a transformation over the thousand-product benchmark document, parsed once, at
+`version="1.0"`, each figure the mean of three runs in fresh processes taken turn about with the engine as
+it was, each warmed for at least eight seconds and until time and bytes a call had stopped moving:
+
+| | interpreted, was | is | compiled, was | is |
+|---|---|---|---|---|
+| `count(//product[price * rating > 400])` | 339 | 326 | 242 | 221 |
+| `count(//product[price * rating + id > 400])` | | | 338 | 313 |
+| `price * rating` written for each product | | | 494 | 478 |
+| `count(//product[-price < -100])` | 209 | 207 | 153 | 153 |
+| `count(//product[number(price) > 100])` | 236 | 238 | 241 | 231 |
+| `count(//product[round(price) > 100])` | 240 | 236 | | |
+| `sum(//product/price)` | 76 | 77 | | |
+| `format-number(price, '#,##0.00')` for each product | 367 | 365 | | |
+| `sum(//product/name)`, no node a number | 68 | 72 | | |
+| `count(//product[name * 2 > 1])`, no node a number | 202 | 210 | 140 | 134 |
+
+Bytes allocated are the same to the byte in every row. Compiled arithmetic is between three and eight
+percent faster, the sign the same in all three rounds and in three more taken on the base before main
+moved: an operand's first node is read where it stands, where it had been wrapped as a value and the
+value then asked for its number. The one compiled `number()` figure that looks like a gain is a single
+slow run of the engine as it was, 268 against 225 and 231; the pairs either side of it are level. Where
+every node is a number, which is what arithmetic is written over, the interpreted rows are level. What
+costs is what cost in the comparison: text that is no number is looked at a second time, out of line,
+and settled on its first letter, which comes to about four nanoseconds a node in a `sum()` over a
+thousand names — a sum that was NaN before and is NaN now. The first set of rounds also had
+`format-number` two percent slower, in all three; the number had been wrapped as a value again so that
+the picture could unwrap it, and the picture takes the number as read now.
+
+**What is left is not the mode's.** Two places read untyped text by `ToNumber()` at every version, where
+the conversion named is `fn:number` or the cast and the exponent belongs to both. `xsl:sort` with
+`data-type="number"` sorts `1e1` and `+11` as NaN, ahead of everything, at 1.0, 2.0 and 3.0 alike, where
+XSLT 2.0 §13.1.2 converts the key with `number()` and `XslCompiledTransform` sorts them as ten and eleven;
+and it parses the text again for every comparison rather than once for every key, so the repair is a
+gain as well. `format-number(a, '0.0')` over the same node is `10.0` at 1.0 now and still `NaN` at 2.0
+and 3.0, where an untyped argument is cast to `xs:double`. Neither is touched here: each is a change
+to what 2.0 and 3.0 stylesheets are given, with its own question about what text that is no number
+becomes there, and deserves its own measurement.
+
+Eleven new unit tests, 2,920 in all, every expression asked of both backends; nine of the eleven fail
+against the engine as it was, the other two holding what was right already — what `xs:double` does not
+write is NaN and never an error, and nothing is different without the mode. Three older tests pinned the
+narrow reading by hand and say the other thing now; no differential test did.
 
 ### Which results the suite asks for and does not get
 
