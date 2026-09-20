@@ -41,7 +41,23 @@ namespace CodeDeeds.Xslt.Compiler
             ExplicitAxis = explicitAxis;
             CountsPosition = Pattern.AnyMayBePositional(predicates, 0);
             RecountsBetweenPredicates = predicates.Length > 1 && Pattern.AnyMayBePositional(predicates, 1);
+            AskedForBoolean = Pattern.NeverNumbers(predicates);
         }
+
+        /// <summary>
+        /// For each predicate, whether it is asked for a boolean outright, its value being known never to
+        /// be the number that would select by position.
+        /// </summary>
+        /// <remarks>
+        /// A predicate is evaluated for every candidate the step is tried against, and its value is looked
+        /// at for one thing: whether it is a number. Where it cannot be, the value need not be made.
+        /// <c>product[@type]</c> built a node-set for each product only to be asked whether it was empty,
+        /// where the path asked for a boolean answers from the list its steps filled. Settled here, once,
+        /// so that a candidate pays for reading a flag and not for asking the expression what it is. Such
+        /// a predicate may still <em>read</em> the position, as <c>position() &gt; 1</c> does, which is
+        /// <see cref="CountsPosition"/>'s business and not this one's.
+        /// </remarks>
+        public bool[] AskedForBoolean { get; }
 
         /// <summary>
         /// Whether a predicate after the first could select by position, so that it counts among what the
@@ -607,7 +623,7 @@ namespace CodeDeeds.Xslt.Compiler
                     inner.Position = position;
                     inner.Size = current.Count;
 
-                    if (!PredicateFilter.Holds(step.Predicates[i], ref inner))
+                    if (!PredicateHolds(step.Predicates[i], step.AskedForBoolean[i], ref inner))
                     {
                         return false;
                     }
@@ -649,7 +665,7 @@ namespace CodeDeeds.Xslt.Compiler
                 inner.Position = 1;
                 inner.Size = 1;
 
-                if (!PredicateFilter.Holds(step.Predicates[i], ref inner))
+                if (!PredicateHolds(step.Predicates[i], step.AskedForBoolean[i], ref inner))
                 {
                     return false;
                 }
@@ -693,7 +709,7 @@ namespace CodeDeeds.Xslt.Compiler
                 inner.Position = position;
                 inner.Size = size;
 
-                if (!PredicateFilter.Holds(step.Predicates[i], ref inner))
+                if (!PredicateHolds(step.Predicates[i], step.AskedForBoolean[i], ref inner))
                 {
                     return false;
                 }
@@ -737,15 +753,36 @@ namespace CodeDeeds.Xslt.Compiler
         /// </remarks>
         private static bool MayBePositional(Expr predicate)
         {
+            return Expr.DependsOnFocusPosition(predicate.Unwrapped) || MayBeANumber(predicate);
+        }
+
+        /// <summary>
+        /// Whether a predicate's value could be the number that selects by position, which is the one
+        /// thing its value is looked at for.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Read from the shape, and only from shapes that cannot answer otherwise whatever the version. It
+        /// is deliberately not <see cref="Expr.ReturnsNodeSet"/>, which a path's own predicates go by:
+        /// under <c>version="1.0"</c> a filter expression promises nodes on the strength of what XPath
+        /// 1.0 allowed, and a 1.0 stylesheet on this processor can break the promise, as it could the
+        /// one <c>current()</c> made until it stopped making it. <c>x[(2, 5)[1]]</c> is the second
+        /// <c>x</c>, the filter's value being the number 2, and a pattern taking the promise would ask
+        /// that 2 for a boolean and match every <c>x</c>. Neither shape is here, so both are evaluated
+        /// and looked at, as anything unrecognised is.
+        /// </para>
+        /// <para>
+        /// A pattern's predicates are never compiled: a pattern is parsed by <see cref="PatternParser"/>
+        /// and does not pass through the expression compiler, so on both backends what stands here is the
+        /// interpreted node and says for itself what it is. The shape is read through
+        /// <see cref="Expr.Unwrapped"/> all the same, so that a wrapper would cost nothing but the emitted
+        /// code it wraps: asked for a boolean, it hands the question to the node it was compiled from.
+        /// </para>
+        /// </remarks>
+        private static bool MayBeANumber(Expr predicate)
+        {
             // As it was written: the compiled backend may hand over a wrapper, whose shape says nothing.
-            Expr written = predicate.Unwrapped;
-
-            if (Expr.DependsOnFocusPosition(written))
-            {
-                return true;
-            }
-
-            return written switch
+            return predicate.Unwrapped switch
             {
                 BinaryExpr binary => !binary.IsBooleanValued,
                 FunctionCallExpr call => !call.IsBooleanValued,
@@ -754,6 +791,49 @@ namespace CodeDeeds.Xslt.Compiler
                 PathExpr or UnionExpr => false,
                 _ => true,
             };
+        }
+
+        /// <summary>
+        /// For each predicate, whether it can be asked for a boolean outright: see
+        /// <see cref="PatternStep.AskedForBoolean"/>.
+        /// </summary>
+        internal static bool[] NeverNumbers(Expr[] predicates)
+        {
+            if (predicates.Length == 0)
+            {
+                return Array.Empty<bool>();
+            }
+
+            bool[] never = new bool[predicates.Length];
+
+            for (int i = 0; i < predicates.Length; i++)
+            {
+                never[i] = !MayBeANumber(predicates[i]);
+            }
+
+            return never;
+        }
+
+        /// <summary>
+        /// Evaluates one predicate against a context already positioned on the candidate, and says whether
+        /// it keeps that candidate.
+        /// </summary>
+        /// <remarks>
+        /// A predicate that could be a number goes through the rule every predicate follows, which
+        /// evaluates it and selects by position where a number is what came back: <c>x[$n]</c> with
+        /// <c>$n</c> of 2 is the second <c>x</c>. One that could not is asked for its effective boolean
+        /// value and nothing else, which is what that rule would have made of its value, errors included —
+        /// every expression that answers the question for itself is held to its value by
+        /// <c>BooleanRouteTests</c>.
+        /// </remarks>
+        /// <param name="predicate">The predicate.</param>
+        /// <param name="askedForBoolean">What was settled for it when the pattern was built.</param>
+        /// <param name="context">The context, positioned on the candidate.</param>
+        private static bool PredicateHolds(Expr predicate, bool askedForBoolean, ref DynamicContext context)
+        {
+            return askedForBoolean
+                ? predicate.EvaluateAsBoolean(ref context)
+                : PredicateFilter.Holds(predicate, ref context);
         }
 
         /// <summary>
@@ -1020,8 +1100,15 @@ namespace CodeDeeds.Xslt.Compiler
             return new Pattern(Array.Empty<PatternStep>(), false, false, predicates.Length == 0 ? -1.0 : 1.0)
             {
                 ItemPredicates = predicates,
+                ItemPredicatesAskedForBoolean = NeverNumbers(predicates),
             };
         }
+
+        /// <summary>
+        /// For each of <see cref="ItemPredicates"/>, what <see cref="PatternStep.AskedForBoolean"/> is for
+        /// a step's.
+        /// </summary>
+        private bool[] ItemPredicatesAskedForBoolean { get; init; } = Array.Empty<bool>();
 
         /// <summary>
         /// The predicates of a <c>.[…]</c> pattern, or null where this is an ordinary pattern.
@@ -1080,12 +1167,13 @@ namespace CodeDeeds.Xslt.Compiler
             inner.Position = 1;
             inner.Size = 1;
 
-            foreach (Expr predicate in ItemPredicates)
+            for (int i = 0; i < ItemPredicates.Length; i++)
             {
                 // Through the same rule an ordinary predicate follows, which is why this is not a plain
                 // boolean test: a predicate whose value is a number selects by position. So '.[$n]' with $n
-                // of 2 does not match, where reading 2 as true would have matched everything.
-                if (!PredicateFilter.Holds(predicate, ref inner))
+                // of 2 does not match, where reading 2 as true would have matched everything. Only a
+                // predicate that could never be a number is asked for a boolean and nothing else.
+                if (!PredicateHolds(ItemPredicates[i], ItemPredicatesAskedForBoolean[i], ref inner))
                 {
                     return false;
                 }

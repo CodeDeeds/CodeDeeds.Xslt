@@ -8026,8 +8026,11 @@ is common, and neither is measured here. The position and size are read before a
 evaluated and the selection is not touched again, because a predicate may call a function that applies
 templates, which asks the same step about another parent's children in the middle of it.
 
-The predicate is still not asked for a boolean where it could be, which would spare `[@type]` a node-set
-per test: that entry point compared by the wrong rules until two changes above this one.
+The predicate was not asked for a boolean where it could be, which would have spared `[@type]` a node-set
+per test: that entry point compared by the wrong rules until two changes above this one. With that put
+right, and every other expression that answers the question for itself held to its value in *What `and`
+asks of its operands*, the reason is gone and so is the node-set: *A predicate in a pattern, asked for a
+boolean*, below.
 
 BenchmarkDotNet, `PatternPredicateBenchmarks`, one template applied to each item of a flat list in a tree
 already parsed, the first row being the same transformation with the test in the template:
@@ -8201,7 +8204,8 @@ gone quiet.
 And the template rule shows now what seven milliseconds of counted siblings had hidden. With those
 gone, `match="product[name and price > 100]"` over the thousand products is 408 to 373 interpreted and
 412 to 363 compiled, and the eighty thousand bytes a call are gone as they were before: a pattern's
-predicate is still evaluated as a value, and the `and` inside it no longer is.
+predicate was still evaluated as a value, and the `and` inside it no longer was. The predicate itself
+is the subject of *A predicate in a pattern, asked for a boolean*, below.
 
 ### One number() for everything the mode converts
 
@@ -8688,6 +8692,149 @@ apart by more than it was: `category = current()` 345 to 352, `price < current()
 `. = current()` 288 to 285, the `generate-id()` row 335 to 327, `value-of select="current()"` 113 to
 115, `price > 100` 158 to 157 and `value-of select="name"` 152 to 150 — every figure a twentieth or so
 higher than in the table on both sides alike, the machine having got busy again.
+
+### A predicate in a pattern, asked for a boolean
+
+A pattern step's predicates were evaluated through `PredicateFilter.Holds`, which takes the predicate's
+value and looks at it: a number selects by position, and anything else is read for its effective boolean
+value. So `match="product[name]"` built a node-set for every product it was tried against only to ask
+whether it was empty — eighty bytes each time where a node is found, a node-set and its array, and
+forty-eight where none is — where `PathExpr.EvaluateAsBoolean` answers from the list the steps filled and
+builds nothing. *A predicate in a pattern, and whether it needs to know where the candidate stands* left
+it so because that entry point could not yet be trusted. *What `and` asks of its operands* then held
+every expression that answers the question for itself to its value, errors included, and took the route
+for a path's own predicates; `Holds` it left alone, being called once for each candidate, where asking
+the predicate what it is would be two virtual calls each time.
+
+**A pattern is built once, so it is asked once.** `PatternStep.AskedForBoolean` holds a flag for each
+predicate, settled where `CountsPosition` is, and the four places a pattern evaluates a predicate — with
+the positions counted, without, at a remembered position, and for the `.[…]` pattern — go through
+`Pattern.PredicateHolds`, which asks `EvaluateAsBoolean` where the flag is set and `PredicateFilter.Holds`
+where it is not. The numeric case is as it was: `x[$n]` with `$n` of 2 is the second `x` and `.[$n]`
+matches nothing, a variable being a shape nothing is known about.
+
+What sets the flag is the list of shapes `MayBePositional` already had, now a method of its own,
+`Pattern.MayBeANumber`. "Could select by position" was always two questions — whether the predicate
+reads the focus, and whether its value could be a number — and only the second decides how it is asked:
+`position() > 1` reads the position, so the siblings are counted, and is asked for a boolean at it.
+
+**The flag is not `ReturnsNodeSet`, and the reason is a fault found on the way.** A path's predicates
+take the boolean route for `ReturnsNodeSet || IsBooleanValued`, and the note that prompted this asked
+whether a pattern should take a statically node-set predicate for non-positional in the same way. For a
+path and a union it has since the section on patterns above. For the rest it should not, because one of
+those promises is made on the strength of the version and can be broken: under `version="1.0"` a filter
+expression says it is a node-set, XPath 1.0 allowing nothing else, and this processor lets a 1.0
+stylesheet filter a sequence of numbers. `current()` said the same until *The current item, where it is
+not a node*, above, which landed while this was being measured and records the filter's promise as left
+for its own work, `count()` being the reader it found tripping. A predicate is another. Over four `x`
+under one parent, at `version="1.0"`, on both backends:
+
+| | gives | should give |
+|---|---|---|
+| `select="r/x[(2, 5)[1]]"` | all four | `b` |
+| `match="x[(2, 5)[1]]"` | `b` | `b` |
+| `match="x[(2, 5)[1]][1]"` | nothing | `b` |
+
+The filter's value is the number 2. In a path it is asked for a boolean on the strength of the promise,
+and 2 is true. The third row is the same fault reaching a pattern by `PredicateFilter.Apply`, which
+counts again between predicates and keeps all four, so that `b` is the second of them. Both are as they
+were before this change, at 3.0 all three rows are `b`, and the repair belongs with that piece of work:
+either the filter stops promising, as `ContextItemExpr` and now `current()` have, and keeps what the
+promise bought for `$nodes[1]` some other way, or the predicate filter stops believing it. What matters
+here is the second row. A pattern looked at the value and was right, and had it gone by
+`ReturnsNodeSet` it would have matched every `x`. `.[current()]` over `(1, 2, 0)` was the same at 1.0
+on the base this was written on — the first item alone, a number being a position, where the promise
+would have matched the first two — and is held to that answer still, though nothing now promises
+otherwise.
+
+**On the compiled backend a pattern's predicate is the same interpreted node.** A pattern is parsed by
+`PatternParser` and never passes through `ExpressionCompiler`, which compiles a `select` and rewrites
+the predicate arrays of the paths and filters inside it; nothing does that for a `match`. So there is
+no wrapper to look through and no emitted code to prefer, `IsBooleanValued` is read from the node that
+has it, and the two backends run the same code for a pattern, which is why the two halves of the table
+agree. The shape is read through `Expr.Unwrapped` all the same, so that compiling them one day changes
+nothing here.
+
+What it comes to, in microseconds a transformation: one template rule with the predicate and one
+without, applied to each of the thousand products (or prices) of the benchmark document at
+`version="3.0"`, writing one letter a product, a tree already parsed, on .NET 10.0 with the JIT and the
+collector at their defaults. Fresh processes, one case and one build to a process, the builds taken turn
+about and the order turned round between rounds, each warmed for five seconds and then until three
+400 ms windows in a row agreed within 3% on time and 0.5% on bytes a call. What is quoted is the
+quickest of a process's twelve windows averaged over two processes, six for `product[1]`. Bytes a call
+are the same to the byte in every process of a build.
+
+| | interpreted | compiled | bytes a call |
+|---|---|---|---|
+| `match="product[name]"` | 233 → 209 | 233 → 206 | 89,824 → 9,824 |
+| `match="product[discount]"`, which no product has | 216 → 201 | 221 → 206 | 57,824 → 9,824 |
+| `match="price[@currency]"` | 243 → 221 | 247 → 226 | 89,848 → 9,848 |
+| `match="product[name][rating]"` | 326 → 268 | 335 → 285 | 169,824 → 9,824 |
+| `match="product[name and price > 100]"` | 400 → 388 | 385 → 373 | 9,824 |
+| `match="product[price > 100]"` | 307 → 292 | 304 → 300 | 9,824 |
+| `match="product[not(discount)]"` | 205 → 198 | 201 → 199 | 9,824 |
+| `match="product[1]"`, six processes | 219 → 221 | 221 → 224 | 18,496 |
+| `match="product"` | 119 → 119 | 124 → 121 | 9,816 |
+
+**The gain is where the predicate is a path**: seven to twelve percent of the time, fifteen to eighteen
+where there are two, and everything the predicates allocated — what is left is within eight bytes of
+what the transformation with no predicate at all allocates. A predicate that was a boolean already made
+no node-set, the `and` inside it having stopped making its operands' in *What `and` asks of its
+operands*, and is spared a boolean wrapped and unwrapped: between one and five percent, which is about
+what one process differs from the next by, though quicker in ten pairs of the twelve.
+
+The rule the figures were read by is that a large cut in what is allocated is worth a small cost in
+time, and one row is asked to pay with nothing to gain: `product[1]`, whose predicate is evaluated and
+looked at as before, after a flag has been read. It is one percent slower on both backends over six
+processes a side, slower in nine pairs of the twelve and quicker in three, where the interpreted
+processes of the engine as it was differ among themselves by nearly four. `PredicateHolds` and `Holds`
+are both inlined into the loop at the top tier — `HoldAtRememberedPosition` as the JIT wrote it calls
+`Expr.Evaluate` and neither of them — so what was added is an array element read and a branch for each
+candidate, and that is the most it can be.
+
+`PatternPredicateBenchmarks` had no predicate that is a bare path, so none of this showed in it, and has
+one now: `match="item[@type]"`, which every item matches. BenchmarkDotNet, the interpreted backend, one
+process a side, so a difference of a percent or two is no finding:
+
+| pattern | 1,000 items | 4,000 | 16,000 | allocated at 16,000 |
+|---|---:|---:|---:|---:|
+| `match="item[@type]"` | 264.5 → 233.0 µs | 1,029 → 951 µs | 4,255 → 3,805 µs | 1,570 → 320 KB |
+| `match="item[@type='a']"` | 302.6 → 291.6 µs | 1,215 → 1,174 µs | 5,042 → 4,915 µs | 320 KB |
+| `match="item[1]"` | 262.4 → 260.9 µs | 1,058 → 1,065 µs | 4,325 → 4,367 µs | 448 KB |
+
+The bare path now allocates what the comparison does at every size, to the ten bytes BenchmarkDotNet
+prints, which is what asking it for nothing but an answer should come to.
+
+Nothing moves on any run: the 3.0 run stands at 8,061 of 8,071, the 2.0 run at 5,678 of 5,701 and the
+schema-aware run at 8,668 of 8,727, each on both backends, and the XPath runs at 18,268 of 18,285 and
+14,553 of 14,577, every failure set identical test for test and message for message with main, the
+suites checked for having stood still under each run. `call-template-1001` failed with *template
+invocations nested too deeply* in the two interpreted 3.0 runs of the engine as it was, and passed when
+those two were run again; it is the stack-depth flake written up in the section on patterns above, and
+it was main that it struck. Nine new unit tests, 2,929 in all, in `PatternPredicateTests`: every kind of
+predicate — a bare path, a boolean, a number, a boolean that reads the position, a variable holding a
+number, a string or nodes, several in a row, the `.[…]` pattern, a predicate with no effective boolean
+value at 2.0 and 3.0, a message that terminates — asked on both backends at each version, as
+`match="x[P]"` and again as `select="//x[P]"`, which reaches the predicate by another road, and held to
+the ids written beside it. All nine pass against the engine as it was, being what must not change, and
+were checked the other way: with the flag taken from `ReturnsNodeSet || IsBooleanValued` two of them
+failed, the 1.0 filter and `.[current()]`, and with every predicate asked for a boolean four do.
+
+Everything above was taken against main at `6c11f8e`, and main moved before it was merged: the three
+sections above this one landed underneath, the last of them withdrawing the promise `current()` made.
+Both sides were built again, `3db78e1` and `3db78e1` with this, and everything taken again. The eight
+runs stand where they stood on both, identical test for test and message for message, and
+`call-template-1001` failed once more on main, in its compiled 3.0 run, and passed when that was run
+again; with this change it has passed all eight of the runs it is in. The table taken again the same
+way, two processes a side, says what it said, the bytes the same to the byte on both sides:
+`product[name]` 229 to 205 interpreted and 226 to 203 compiled, `product[discount]` 214 to 199 and 215
+to 201, `price[@currency]` 244 to 220 and 244 to 217, `product[name][rating]` 314 to 271 and 315 to
+266, `product[name and price > 100]` 383 to 365 and 381 to 380, `product[price > 100]` 304 to 291 and
+303 to 290, `product[not(discount)]` 190 to 190 and 194 to 189. `product[1]`, the row with nothing to
+gain, is 215.3 to 215.3 and 217.2 to 216.0, so the one percent it was charged above is no more than
+the processes differing, and `product` alone is 120 to 117 and 119 to 118. With the flag taken from
+`ReturnsNodeSet || IsBooleanValued` one test fails now and not two, the 1.0 filter, `current()` no
+longer promising what the second had to be held against. 2,963 unit tests in all.
 
 ### Which results the suite asks for and does not get
 

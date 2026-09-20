@@ -31,6 +31,12 @@ namespace CodeDeeds.Xslt.Benchmarks
     /// whatever the others do.
     /// </para>
     /// <para>
+    /// <see cref="BarePathPredicate"/> is a different transformation, every item having a type, and is
+    /// there for what it allocates rather than for how it grows: <c>[@type]</c> is a predicate whose value
+    /// is a node-set, which a pattern has no use for beyond whether it is empty. Asked for that alone it
+    /// should allocate what <see cref="AttributePredicate"/> does, a comparison never having made one.
+    /// </para>
+    /// <para>
     /// Everything runs against a tree already parsed, and writes one small element per item, so that what
     /// grows is the matching and little else.
     /// </para>
@@ -49,6 +55,7 @@ namespace CodeDeeds.Xslt.Benchmarks
         private Xslt m_positionalPredicate = null!;
         private Xslt m_firstOnly = null!;
         private Xslt m_attributePredicateInGroups = null!;
+        private Xslt m_barePathPredicate = null!;
 
         /// <summary>How many items the list holds.</summary>
         [Params(1000, 4000, 16000)]
@@ -83,6 +90,9 @@ namespace CodeDeeds.Xslt.Benchmarks
             m_attributePredicateInGroups = new Xslt(Sheet(
                 "list/group/item", "<xsl:template match=\"item[@type='a']\"><a/></xsl:template>" + Rest));
 
+            m_barePathPredicate = new Xslt(Sheet(
+                "list/item", "<xsl:template match=\"item[@type]\"><a/></xsl:template>" + Rest));
+
             // Four spellings of one transformation, and a fifth over the grouped list: if they disagree,
             // one of them is not measuring what its name says.
             string expected = m_choose.Transform(m_flat);
@@ -91,6 +101,12 @@ namespace CodeDeeds.Xslt.Benchmarks
             Require(m_wildcardPredicate.Transform(m_flat), expected, nameof(WildcardAttributePredicate));
             Require(m_positionalPredicate.Transform(m_flat), expected, nameof(PositionalPredicate));
             Require(m_attributePredicateInGroups.Transform(m_grouped), expected, nameof(AttributePredicateInGroups));
+
+            // Every item has a type, so the bare path matches them all.
+            Require(
+                m_barePathPredicate.Transform(m_flat),
+                expected.Replace("<b/>", "<a/>", StringComparison.Ordinal),
+                nameof(BarePathPredicate));
         }
 
         [Benchmark(Baseline = true, Description = "match=\"item\", the test in an xsl:choose")]
@@ -107,6 +123,9 @@ namespace CodeDeeds.Xslt.Benchmarks
 
         [Benchmark(Description = "match=\"item[1]\"")]
         public string FirstOnly() => m_firstOnly.Transform(m_flat);
+
+        [Benchmark(Description = "match=\"item[@type]\", which every item matches")]
+        public string BarePathPredicate() => m_barePathPredicate.Transform(m_flat);
 
         [Benchmark(Description = "match=\"item[@type='a']\", the items ten to a parent")]
         public string AttributePredicateInGroups() => m_attributePredicateInGroups.Transform(m_grouped);
