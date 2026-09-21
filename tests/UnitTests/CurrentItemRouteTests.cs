@@ -238,6 +238,28 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
+        public void ANodeBeingProcessedIsComparedWithEachItemOfASequence()
+        {
+            // The route that reads current() from a list took whatever was beside it for one value,
+            // and a range for the string its integers make joined by spaces: a price of 10 was not
+            // among 1 to 10 under 1.0, where it was from 2.0 on.
+            const string OverTheFirst = "<xsl:for-each select=\"product[1]/price\">{0}</xsl:for-each>";
+
+            foreach (string version in s_versions)
+            {
+                Assert.AreEqual("true;", Asked("current() = (1 to 10)", version, OverTheFirst), version);
+                Assert.AreEqual("true;", Asked("(1 to 10) = current()", version, OverTheFirst), version);
+                Assert.AreEqual("false;", Asked("current() = (1 to 9)", version, OverTheFirst), version);
+                Assert.AreEqual("true;", Asked("current() &gt; (1 to 3)", version, OverTheFirst), version);
+                Assert.AreEqual("false;", Asked("current() = (5 to 1)", version, OverTheFirst), version);
+                Assert.AreEqual(
+                    "true;false;",
+                    Asked("count($root//product[price = (current() to current())]) = 1", version, OverNumbers),
+                    version);
+            }
+        }
+
+        [TestMethod]
         public void ANumberBeingWalkedSelectsByPositionInAPredicate()
         {
             // A predicate that is a number keeps the node at that position, and current() is a number

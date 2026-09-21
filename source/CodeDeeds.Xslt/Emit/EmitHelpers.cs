@@ -115,34 +115,11 @@ namespace CodeDeeds.Xslt.Emit
             bool nodesOnLeft,
             int op)
         {
-            return other.Kind == XPathValueKind.NodeSet
-                ? CompareAgainstNodeSet(tree, nodes, other.AsNodeSet(), nodesOnLeft, op)
-                : XPathComparison.NodesVersusValue(tree, nodes, other, nodesOnLeft, (BinaryOperator)op);
-        }
-
-        private static bool CompareAgainstNodeSet(
-            Model.XdmTree tree,
-            List<int> nodes,
-            NodeSet other,
-            bool nodesOnLeft,
-            int op)
-        {
-            List<int> otherNodes = NodeListPool.Rent();
-            try
-            {
-                for (int i = 0; i < other.Count; i++)
-                {
-                    otherNodes.Add(other[i]);
-                }
-
-                return nodesOnLeft
-                    ? XPathComparison.NodesVersusNodes(tree, nodes, other.Tree, otherNodes, (BinaryOperator)op)
-                    : XPathComparison.NodesVersusNodes(other.Tree, otherNodes, tree, nodes, (BinaryOperator)op);
-            }
-            finally
-            {
-                NodeListPool.Return(otherNodes);
-            }
+            // The same two ways the interpreter's list route goes, by the same test, so that the backends
+            // cannot come to read a node-set or a sequence beside the nodes differently.
+            return XPathComparison.IsOneAtomicValue(other)
+                ? XPathComparison.NodesVersusValue(tree, nodes, other, nodesOnLeft, (BinaryOperator)op)
+                : XPathComparison.NodesVersusOther(tree, nodes, other, nodesOnLeft, (BinaryOperator)op);
         }
 
         /// <summary>Looks up one of this class's methods.</summary>

@@ -878,10 +878,11 @@ namespace CodeDeeds.Xslt.XPath
                     XdmTree tree = m_left.EvaluateNodes(ref context, leftNodes);
                     XPathValue other = m_right.Evaluate(ref context);
 
-                    // A variable can still turn out to hold a node-set, in which case fall back.
-                    return other.Kind == XPathValueKind.NodeSet
-                        ? CompareAgainstNodeSet(tree, leftNodes, other.AsNodeSet(), nodesOnLeft: true)
-                        : XPathComparison.NodesVersusValue(tree, leftNodes, other, true, m_operator);
+                    // The value can still turn out to be a node-set, or a sequence whose items are each
+                    // an operand, and neither is NodesVersusValue's to read.
+                    return XPathComparison.IsOneAtomicValue(other)
+                        ? XPathComparison.NodesVersusValue(tree, leftNodes, other, true, m_operator)
+                        : XPathComparison.NodesVersusOther(tree, leftNodes, other, true, m_operator);
                 }
 
                 if (!m_left.ReturnsNodeSet)
@@ -889,9 +890,9 @@ namespace CodeDeeds.Xslt.XPath
                     XdmTree tree = m_right.EvaluateNodes(ref context, leftNodes);
                     XPathValue other = m_left.Evaluate(ref context);
 
-                    return other.Kind == XPathValueKind.NodeSet
-                        ? CompareAgainstNodeSet(tree, leftNodes, other.AsNodeSet(), nodesOnLeft: false)
-                        : XPathComparison.NodesVersusValue(tree, leftNodes, other, false, m_operator);
+                    return XPathComparison.IsOneAtomicValue(other)
+                        ? XPathComparison.NodesVersusValue(tree, leftNodes, other, false, m_operator)
+                        : XPathComparison.NodesVersusOther(tree, leftNodes, other, false, m_operator);
                 }
 
                 List<int> rightNodes = NodeListPool.Rent();
@@ -925,7 +926,8 @@ namespace CodeDeeds.Xslt.XPath
         /// where the item is a node the comparison is the one it always was, allocating nothing, and
         /// where it is a number the number is compared. What an operand turns out to be never changes
         /// the rules, only how the operand is read — nodes against a value that proves to be a node-set
-        /// are compared as two node-sets, as <see cref="CompareWithNodeOperand"/> compares them.
+        /// are compared as two node-sets, and against one that proves to be a sequence item by item, as
+        /// <see cref="CompareWithNodeOperand"/> compares them.
         /// </remarks>
         private bool CompareWhereNodesAreFound(ref DynamicContext context)
         {
@@ -954,18 +956,18 @@ namespace CodeDeeds.Xslt.XPath
                 {
                     XPathValue other = m_right.Evaluate(ref context);
 
-                    return other.Kind == XPathValueKind.NodeSet
-                        ? CompareAgainstNodeSet(leftTree, leftNodes!, other.AsNodeSet(), nodesOnLeft: true)
-                        : XPathComparison.NodesVersusValue(leftTree, leftNodes!, other, true, m_operator);
+                    return XPathComparison.IsOneAtomicValue(other)
+                        ? XPathComparison.NodesVersusValue(leftTree, leftNodes!, other, true, m_operator)
+                        : XPathComparison.NodesVersusOther(leftTree, leftNodes!, other, true, m_operator);
                 }
 
                 if (rightTree is not null)
                 {
                     XPathValue other = m_left.Evaluate(ref context);
 
-                    return other.Kind == XPathValueKind.NodeSet
-                        ? CompareAgainstNodeSet(rightTree, rightNodes!, other.AsNodeSet(), nodesOnLeft: false)
-                        : XPathComparison.NodesVersusValue(rightTree, rightNodes!, other, false, m_operator);
+                    return XPathComparison.IsOneAtomicValue(other)
+                        ? XPathComparison.NodesVersusValue(rightTree, rightNodes!, other, false, m_operator)
+                        : XPathComparison.NodesVersusOther(rightTree, rightNodes!, other, false, m_operator);
                 }
 
                 return XPathComparison.General(
@@ -1350,26 +1352,6 @@ namespace CodeDeeds.Xslt.XPath
             }
         }
 
-        private bool CompareAgainstNodeSet(XdmTree tree, List<int> nodes, NodeSet other, bool nodesOnLeft)
-        {
-            List<int> otherNodes = NodeListPool.Rent();
-
-            try
-            {
-                for (int i = 0; i < other.Count; i++)
-                {
-                    otherNodes.Add(other[i]);
-                }
-
-                return nodesOnLeft
-                    ? XPathComparison.NodesVersusNodes(tree, nodes, other.Tree, otherNodes, m_operator)
-                    : XPathComparison.NodesVersusNodes(other.Tree, otherNodes, tree, nodes, m_operator);
-            }
-            finally
-            {
-                NodeListPool.Return(otherNodes);
-            }
-        }
     }
 
     /// <summary>Arithmetic negation.</summary>

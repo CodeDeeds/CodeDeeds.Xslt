@@ -154,6 +154,32 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
+        public void ANodeComparedWithARangeIsComparedWithEachIntegerInIt()
+        {
+            // A range is a sequence that does not say so where the comparison is built, so it reached
+            // the route that reads the nodes from a list, which read it as one string: its integers
+            // joined by spaces, equal to no price and no number at all. An empty one was the empty
+            // string, and equal to every empty element.
+            Agree("true", "plain = (1 to 10)", "string(plain) = (1 to 10)");
+            Agree("true", "(1 to 10) = a", "(1 to 10) = string(a)");
+            Agree("false", "plain = (1 to 9)", "string(plain) = (1 to 9)");
+            Agree("true", "plain != (1 to 10)", "string(plain) != (1 to 10)");
+            Agree("true", "plain > (1 to 3)", "string(plain) > (1 to 3)");
+            Agree("true", "(11 to 12) > a", "(11 to 12) > string(a)");
+            Agree("false", "plain > (10 to 12)", "string(plain) > (10 to 12)");
+            Agree("false", "empty = (5 to 1)", "string(empty) = (5 to 1)");
+            Agree("false", "empty != (5 to 1)", "string(empty) != (5 to 1)");
+
+            // Inside a predicate, where the emitted form walks the step itself and compares through a
+            // helper of its own.
+            Assert.AreEqual("true", Answers("count(/r[plain = (1 to 10)]) = 1"));
+            Assert.AreEqual("true", Answers("count(/r[(1 to 10) = a]) = 1"));
+            Assert.AreEqual("true", Answers("count(/r[plain > (1 to 3)]) = 1"));
+            Assert.AreEqual("true", Answers("count(/r[empty = (5 to 1)]) = 0"));
+            Assert.AreEqual("true", Answers("count(/r/*[. = (1 to 10)]) = 4"));
+        }
+
+        [TestMethod]
         public void TextThatIsNotANumberIsStillNotOne()
         {
             // No FORG0001 under backwards compatibility: what cannot be read is NaN, and NaN is unequal

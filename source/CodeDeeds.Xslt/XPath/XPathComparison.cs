@@ -21,7 +21,9 @@ namespace CodeDeeds.Xslt.XPath
         /// </summary>
         /// <param name="tree">The tree the nodes belong to.</param>
         /// <param name="nodes">The nodes forming one operand.</param>
-        /// <param name="other">The other operand, which is not a node-set.</param>
+        /// <param name="other">
+        /// The other operand, which is one boolean, number or string — see <see cref="IsOneAtomicValue"/>.
+        /// </param>
         /// <param name="nodesOnLeft">Whether the nodes were written on the left of the operator.</param>
         /// <param name="op">The operator to apply.</param>
         public static bool NodesVersusValue(
@@ -87,6 +89,84 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Compares a list of nodes against an operand whose value proved to be something other than the
+        /// one boolean, number or string <see cref="NodesVersusValue"/> reads.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A node-set a variable turned out to hold is laid out in a list and compared as two lists are.
+        /// </para>
+        /// <para>
+        /// Anything else is a sequence, which a 1.0 stylesheet on this processor may write, and each of
+        /// its items is an operand in its turn: the general comparison knows how, so the nodes are given
+        /// to it as the node-set they would have been. <see cref="NodesVersusValue"/> was handed these
+        /// once, and read a sequence as its items joined by spaces — <c>price = (1 to 10)</c> compared
+        /// each price with the text <c>1 2 3 …</c> and found none, where <c>string(price) = (1 to 10)</c>
+        /// beside it found four, and <c>category = (5 to 1)</c> found every empty category equal to an
+        /// empty sequence. Which expressions yield a sequence is not something an expression says, so it
+        /// is asked of the value, by whoever calls: one boolean, number or string goes there and the rest
+        /// come here, which is one test of the kind where there was one before.
+        /// </para>
+        /// </remarks>
+        /// <param name="tree">The tree the nodes belong to.</param>
+        /// <param name="nodes">The nodes forming one operand, in document order.</param>
+        /// <param name="other">The other operand, which is not one boolean, number or string.</param>
+        /// <param name="nodesOnLeft">Whether the nodes were written on the left of the operator.</param>
+        /// <param name="op">The operator to apply.</param>
+        public static bool NodesVersusOther(
+            XdmTree tree,
+            List<int> nodes,
+            XPathValue other,
+            bool nodesOnLeft,
+            BinaryOperator op)
+        {
+            if (other.Kind == XPathValueKind.NodeSet)
+            {
+                NodeSet set = other.AsNodeSet();
+                List<int> otherNodes = NodeListPool.Rent();
+
+                try
+                {
+                    for (int i = 0; i < set.Count; i++)
+                    {
+                        otherNodes.Add(set[i]);
+                    }
+
+                    return nodesOnLeft
+                        ? NodesVersusNodes(tree, nodes, set.Tree, otherNodes, op)
+                        : NodesVersusNodes(set.Tree, otherNodes, tree, nodes, op);
+                }
+                finally
+                {
+                    NodeListPool.Return(otherNodes);
+                }
+            }
+
+            XPathValue mine = XPathValue.FromNodeSet(NodeSet.FromOrderedNodes(tree, nodes));
+            XPathValue left = nodesOnLeft ? mine : other;
+            XPathValue right = nodesOnLeft ? other : mine;
+
+            return op switch
+            {
+                BinaryOperator.Equal => AreEqual(left, right),
+                BinaryOperator.NotEqual => NotEquals(left, right),
+                _ => Relational(left, right, op),
+            };
+        }
+
+        /// <summary>
+        /// Whether a value is one boolean, number or string, which is what <see cref="NodesVersusValue"/>
+        /// compares nodes against; anything else is <see cref="NodesVersusOther"/>'s.
+        /// </summary>
+        /// <param name="value">The operand beside the nodes.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsOneAtomicValue(XPathValue value)
+        {
+            // Three kinds in a row, so one comparison.
+            return value.Kind is XPathValueKind.Boolean or XPathValueKind.Number or XPathValueKind.String;
         }
 
         /// <summary>
