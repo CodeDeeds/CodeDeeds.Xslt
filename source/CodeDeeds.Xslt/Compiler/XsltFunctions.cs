@@ -6,19 +6,6 @@ using CodeDeeds.Xslt.XPath;
 namespace CodeDeeds.Xslt.Compiler
 {
     /// <summary>
-    /// XSLT's <c>generate-id()</c> function.
-    /// </summary>
-    /// <remarks>
-    /// Returns a string that identifies a node uniquely and consistently for the duration of a transformation.
-    /// The identifier is built from the node's position in its tree, which the flat document model already
-    /// provides as an integer, so no bookkeeping is needed to keep it stable.
-    /// <para>
-    /// It is what makes grouping possible in XSLT 1.0: comparing a node's identity against the first node a
-    /// key returns is how a stylesheet asks "is this the first item in its group?", which has no other
-    /// expression in the language.
-    /// </para>
-    /// </remarks>
-    /// <summary>
     /// XSLT's <c>format-number()</c> function.
     /// </summary>
     /// <remarks>
@@ -157,18 +144,6 @@ namespace CodeDeeds.Xslt.Compiler
         }
 
         /// <summary>
-        /// Reads the picture, giving the failure the code the language in force names it by.
-        /// </summary>
-        /// <remarks>
-        /// One complaint with two codes. XSLT 2.0 has a <c>format-number</c> of its own and calls a picture
-        /// it cannot read <c>XTDE1310</c>; XPath 3.0 moved the function into the core library, where the
-        /// same failure is <c>FODF1310</c>. Which one a caller hears is a question about which specification
-        /// defines the function being called, so it follows the processor's library rather than the version
-        /// the stylesheet claims — the suite pairs these tests over one <c>version="2.0"</c> stylesheet and
-        /// wants the two codes from the two processors.
-        /// </remarks>
-        /// <param name="picture">The picture text.</param>
-        /// <summary>
         /// Evaluates the number, reaching a single selected node as the node itself rather than as a
         /// node-set built to hold it.
         /// </summary>
@@ -200,6 +175,18 @@ namespace CodeDeeds.Xslt.Compiler
             }
         }
 
+        /// <summary>
+        /// Reads the picture, giving the failure the code the language in force names it by.
+        /// </summary>
+        /// <remarks>
+        /// One complaint with two codes. XSLT 2.0 has a <c>format-number</c> of its own and calls a picture
+        /// it cannot read <c>XTDE1310</c>; XPath 3.0 moved the function into the core library, where the
+        /// same failure is <c>FODF1310</c>. Which one a caller hears is a question about which specification
+        /// defines the function being called, so it follows the processor's library rather than the version
+        /// the stylesheet claims — the suite pairs these tests over one <c>version="2.0"</c> stylesheet and
+        /// wants the two codes from the two processors.
+        /// </remarks>
+        /// <param name="picture">The picture text.</param>
         private NumberPattern ReadPicture(string picture)
         {
             try
@@ -400,14 +387,6 @@ namespace CodeDeeds.Xslt.Compiler
             return m_baseUri;
         }
 
-        /// <summary>What one item of the first argument resolves its reference against.</summary>
-        /// <remarks>
-        /// A node carries where it came from, and a reference written in a document means what it means
-        /// there. Anything else is a string that arrived from wherever the expression got it, and the
-        /// stylesheet is the only base there is for one of those.
-        /// </remarks>
-        /// <param name="item">The item naming a document.</param>
-        /// <param name="context">The context, for the runtime that knows where a tree came from.</param>
         /// <summary>Whether a node is a text node, comment or processing instruction with no parent.</summary>
         private static bool IsOrphanText(XPathValue item)
         {
@@ -417,6 +396,14 @@ namespace CodeDeeds.Xslt.Compiler
                 && item.NodeTree.ParentOf(item.NodeId) < 0;
         }
 
+        /// <summary>What one item of the first argument resolves its reference against.</summary>
+        /// <remarks>
+        /// A node carries where it came from, and a reference written in a document means what it means
+        /// there. Anything else is a string that arrived from wherever the expression got it, and the
+        /// stylesheet is the only base there is for one of those.
+        /// </remarks>
+        /// <param name="item">The item naming a document.</param>
+        /// <param name="context">The context, for the runtime that knows where a tree came from.</param>
         private string? BaseUriOfItem(XPathValue item, ref DynamicContext context)
         {
             return item.Kind == XPathValueKind.Node
@@ -1630,9 +1617,6 @@ namespace CodeDeeds.Xslt.Compiler
         private readonly string m_name;
         private readonly Expr? m_argument;
 
-        /// <summary>Initializes one of the contextual functions.</summary>
-        /// <param name="name">Which function was written.</param>
-        /// <param name="argument">The group number, for <c>regex-group()</c>.</param>
         /// <summary>Initializes a call.</summary>
         /// <param name="name">The function's name.</param>
         /// <param name="argument">Its argument, where it takes one.</param>
@@ -2024,6 +2008,19 @@ namespace CodeDeeds.Xslt.Compiler
         }
     }
 
+    /// <summary>
+    /// XSLT's <c>generate-id()</c> function.
+    /// </summary>
+    /// <remarks>
+    /// Returns a string that identifies a node uniquely and consistently for the duration of a transformation.
+    /// The identifier is built from the node's position in its tree, which the flat document model already
+    /// provides as an integer, so no bookkeeping is needed to keep it stable.
+    /// <para>
+    /// It is what makes grouping possible in XSLT 1.0: comparing a node's identity against the first node a
+    /// key returns is how a stylesheet asks "is this the first item in its group?", which has no other
+    /// expression in the language.
+    /// </para>
+    /// </remarks>
     internal sealed class GenerateIdExpr : Expr
     {
         private readonly Expr? m_argument;
