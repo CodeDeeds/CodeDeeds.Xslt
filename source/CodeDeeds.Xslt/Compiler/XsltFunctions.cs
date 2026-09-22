@@ -2073,33 +2073,71 @@ namespace CodeDeeds.Xslt.Compiler
                     return XPathValue.FromString(string.Empty);
                 }
             }
-            else
+            else if (!ReadFirstNodeOfValue(m_argument.Evaluate(ref context), ref tree, out node))
             {
-                // 3.0 declares the argument node()?, so what arrives may be one node or the empty sequence
-                // rather than a node-set. Both are asked the same question and the empty one has no answer.
-                List<XPathValue> items = XdmSequence.Items(m_argument.Evaluate(ref context));
-
-                if (items.Count == 0)
-                {
-                    return XPathValue.FromString(string.Empty);
-                }
-
-                // An atomic value has no identity to name, and no tree to be looked up in: what came of
-                // asking was a null reference, where the declared type refuses the argument.
-                if (items[0].Kind != XPathValueKind.Node)
-                {
-                    throw XsltErrors.Error(
-                        XsltErrorCode.XPTY0004,
-                        "generate-id() identifies a node, and what it was given is an atomic value.");
-                }
-
-                tree = items[0].NodeTree;
-                node = items[0].NodeId;
+                return XPathValue.FromString(string.Empty);
             }
 
             // Must be an XML name, so it cannot start with a digit.
             int treeId = context.Runtime?.GetTreeId(tree) ?? 0;
             return XPathValue.FromString($"id{treeId}n{node}");
+        }
+
+        /// <summary>
+        /// Reads the first node of an argument that had to be evaluated to learn what it is.
+        /// </summary>
+        /// <remarks>
+        /// Apart from <see cref="Evaluate"/> so that the way most calls take, through
+        /// <see cref="TryReadFirstNode"/>, stays the size it was for the JIT to weigh; this is the way a
+        /// variable and a filter over one take, and the one an atomic value is refused on.
+        /// </remarks>
+        /// <param name="value">The argument's value.</param>
+        /// <param name="tree">Set to the node's tree, where there is a node.</param>
+        /// <param name="node">The first node, where there is one.</param>
+        /// <returns><see langword="false"/> where the argument selected nothing, which has no identity.</returns>
+        /// <exception cref="XsltException">The first item is an atomic value.</exception>
+        private static bool ReadFirstNodeOfValue(XPathValue value, ref XdmTree tree, out int node)
+        {
+            if (value.Kind == XPathValueKind.NodeSet)
+            {
+                // A node-set that was not promised, which is what a variable holds and what a filter
+                // over one gives: its first node is read where it stands, and not from the node-set
+                // laid out as a list of items, eighty bytes for every generate-id($nodes[1]).
+                NodeSet found = value.AsNodeSet();
+
+                if (found.Count == 0)
+                {
+                    node = -1;
+                    return false;
+                }
+
+                tree = found.TreeAt(0);
+                node = found.FirstNode();
+                return true;
+            }
+
+            // 3.0 declares the argument node()?, so what arrives may be one node or the empty sequence
+            // rather than a node-set. Both are asked the same question and the empty one has no answer.
+            List<XPathValue> items = XdmSequence.Items(value);
+
+            if (items.Count == 0)
+            {
+                node = -1;
+                return false;
+            }
+
+            // An atomic value has no identity to name, and no tree to be looked up in: what came of
+            // asking was a null reference, where the declared type refuses the argument.
+            if (items[0].Kind != XPathValueKind.Node)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XPTY0004,
+                    "generate-id() identifies a node, and what it was given is an atomic value.");
+            }
+
+            tree = items[0].NodeTree;
+            node = items[0].NodeId;
+            return true;
         }
 
         /// <summary>

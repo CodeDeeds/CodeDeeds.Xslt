@@ -1699,29 +1699,48 @@ namespace CodeDeeds.Xslt.XPath
     {
         private readonly Expr m_primary;
         private readonly Expr[] m_predicates;
-        private readonly XsltVersion m_version;
 
         /// <summary>Initializes a filter expression.</summary>
         /// <param name="primary">The expression producing the node-set to filter.</param>
         /// <param name="predicates">The predicates, applied left to right.</param>
-        /// <param name="version">The version this was compiled against.</param>
+        /// <param name="version">
+        /// The version this was compiled against. Nothing a filter does depends on it any longer — see
+        /// <see cref="ReturnsNodeSet"/> — and it is kept so that callers written against it still compile.
+        /// </param>
         public FilterExpr(Expr primary, Expr[] predicates, XsltVersion version)
         {
+            _ = version;
             m_primary = primary;
             m_predicates = predicates;
-            m_version = version;
         }
 
         /// <summary>
-        /// True under 1.0, where only a node-set can be filtered, and otherwise whatever the primary is
-        /// known to produce.
+        /// Whatever the primary is known to produce, at every version.
         /// </summary>
         /// <remarks>
+        /// <para>
         /// A filter yields the kind of thing it filtered, so <c>(1, 2, 3)[. gt 1]</c> is a sequence and not a
         /// node-set. Claiming otherwise sends every caller that trusts this down a route that then asks the
         /// result for nodes it does not have.
+        /// </para>
+        /// <para>
+        /// It was once true outright under 1.0 behaviour, XPath 1.0 having let nothing but a node-set be
+        /// filtered. The mode takes no syntax away, so a 1.0 stylesheet here filters numbers with it still
+        /// on, and the promise was then broken where it cost most: <c>x[(2, 5)[1]]</c> is the second
+        /// <c>x</c>, and a predicate believed to be nodes was asked only whether it had found one, said
+        /// yes, and kept every <c>x</c>. What <see cref="ContextItemExpr"/> and <c>current()</c> stopped
+        /// promising, for the same reason.
+        /// </para>
+        /// <para>
+        /// Little was bought by it. This class builds its node-set whichever way it is asked, so a reader
+        /// taking the promise read that same node-set through a copy, and a filter over a variable was
+        /// never read so by a comparison or an <c>xsl:value-of</c>, a variable being something that may
+        /// span documents. The one thing it bought was the reading that was wrong: <c>//x[$v[1]]</c>
+        /// taken for <c>descendant::x[$v[1]]</c>, which counts a position across the document and not
+        /// within each parent. It was never taken at 2.0 or 3.0, and 1.0 now costs there what they cost.
+        /// </para>
         /// </remarks>
-        public override bool ReturnsNodeSet => m_version.IsBackwardsCompatible || m_primary.ReturnsNodeSet;
+        public override bool ReturnsNodeSet => m_primary.ReturnsNodeSet;
 
         /// <inheritdoc/>
         public override bool MaySpanDocuments => m_primary.MaySpanDocuments;

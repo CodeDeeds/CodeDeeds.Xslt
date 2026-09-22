@@ -221,17 +221,23 @@ namespace CodeDeeds.Xslt.UnitTests
         [TestMethod]
         public void UnderTheOlderRulesAFilterAndTheCurrentItemAreStillLookedAt()
         {
-            // Under version="1.0" a filter expression promises a node-set, which is all XPath 1.0 let it
-            // be, and this processor lets a 1.0 stylesheet break the promise: the filter's value here is
-            // the number 2, which selects the second x. Taken at its word it would be asked for a boolean
-            // and keep every x — which is what the same predicate in a path does, and so that is not held
-            // to the same answer here.
-            Matches("b f ", "[(2, 5)[1]]", "1.0", alsoSelected: false);
-            Matches("b f ", "[$n[1]]", "1.0", "<xsl:variable name=\"n\" select=\"2\"/>", alsoSelected: false);
+            // Under version="1.0" a filter expression once promised a node-set, which is all XPath 1.0
+            // let it be, and this processor lets a 1.0 stylesheet filter numbers: the filter's value here
+            // is the number 2, which selects the second x. Taken at its word it was asked for a boolean
+            // and kept every x, in a path and wherever a pattern counted again between two predicates. A
+            // pattern never took the promise for its own test, and nothing makes it now, so the path is
+            // held to the same answer.
+            foreach (string version in EveryVersion)
+            {
+                Matches("b f ", "[(2, 5)[1]]", version);
+                Matches("b f ", "[$n[1]]", version, "<xsl:variable name=\"n\" select=\"2\"/>");
+                Matches("b f ", "[(2, 5)[1]][1]", version);
+                Matches("c ", "[@a][(2, 5)[1]]", version);
+                Matches("a b c e ", "[(n | m)[1]]", version);
+            }
 
             foreach (string version in TwoAndThree)
             {
-                Matches("b f ", "[(2, 5)[1]]", version);
                 Matches("a b c e ", "[(n, m)[1]]", version);
             }
 

@@ -8680,7 +8680,8 @@ about `current()` at 1.0 now as well as at 2.0 and 3.0.
 trips; `xsl:value-of` and the comparison are spared by asking `MaySpanDocuments` first, which a filter
 over a sequence answers yes to. It is left for its own piece of work: `$nodes[…]` is a far commoner
 thing to compare and count than a bare `current()`, so what the promise buys there wants measuring
-before it is given up or asked for instead.
+before it is given up or asked for instead. It was measured, and given up: *A filter expression, which
+promised nodes too*, below.
 
 Everything above was taken against main at `6c11f8e`, and main moved while it was: the two sections
 above this one landed underneath. Both sides were built again on top of them, `be16fae` and `be16fae`
@@ -8739,8 +8740,9 @@ and 2 is true. The third row is the same fault reaching a pattern by `PredicateF
 counts again between predicates and keeps all four, so that `b` is the second of them. Both are as they
 were before this change, at 3.0 all three rows are `b`, and the repair belongs with that piece of work:
 either the filter stops promising, as `ContextItemExpr` and now `current()` have, and keeps what the
-promise bought for `$nodes[1]` some other way, or the predicate filter stops believing it. What matters
-here is the second row. A pattern looked at the value and was right, and had it gone by
+promise bought for `$nodes[1]` some other way, or the predicate filter stops believing it. It stopped
+promising, in *A filter expression, which promised nodes too*, below, and all three rows are `b`. What
+mattered here is the second row. A pattern looked at the value and was right, and had it gone by
 `ReturnsNodeSet` it would have matched every `x`. `.[current()]` over `(1, 2, 0)` was the same at 1.0
 on the base this was written on — the first item alone, a number being a position, where the promise
 would have matched the first two — and is held to that answer still, though nothing now promises
@@ -9317,6 +9319,121 @@ at 1.0 and 161 to 67 and 187 to 83 at 3.0, `[. > 100]` 79 to 56 at 1.0 and 228 t
 `select="current()"` 105 to 84; the guards `price > 100` 151 to 153 and 105 to 102 at 1.0 and 156 to
 155 at 3.0, `select="name"` 136 to 136 and 136 to 138, `1 to 1000` written 75 to 74, `. = current()`
 at 3.0 196 to 192; and `sum((1 to 1000)[. > 500])` 69 to 74 once more, in three rounds of three.
+
+### A filter expression, which promised nodes too
+
+Under `version="1.0"`, over `<r><x id='a'/><x id='b'/><x id='c'/><x id='d'/></r>`, on both backends:
+
+| | was | is |
+|---|---|---|
+| `select="r/x[(2, 5)[1]]"`, and `r/x[$n[1]]` with `$n` of 2 | all four | `b` |
+| `select="//x[$n[1]]"`, over two parents | all six | the second of each |
+| `select="r/x[(2, 5)[1]][1]"` | `a` | `b` |
+| `select="r/x[@k][(2, 5)[1]]"`, `a` and `c` having a `k` | `a c` | `c` |
+| `select="r/x[3[1]]"` | all four | `c` |
+| `match="x[(2, 5)[1]][1]"` | nothing | `b` |
+| `count((3, 1, 2)[. > 1])`, `count($s[. > 1])` | `XPTY0004` | 2 |
+| `count(3[1])`, `3[1] = 3` | `XPTY0004` | 1, true |
+
+At 2.0 and 3.0 every row was the right-hand column already.
+
+`FilterExpr.ReturnsNodeSet` was `m_version.IsBackwardsCompatible || m_primary.ReturnsNodeSet`: true
+outright under 1.0 behaviour, XPath 1.0 having let nothing but a node-set be filtered. The mode takes
+no syntax away, so a 1.0 stylesheet here filters a sequence of numbers with it still on, and the value
+of `(2, 5)[1]` is the number 2. Whatever read a node list on the strength of the promise then read
+what was not there. `PredicateFilter.IsNeverPositional` took a node-set predicate for one that could
+never be a position and asked it for a boolean, and 2 is true, so the first two rows kept every
+candidate; `PathExpr.IsAbbreviatedDescendant` folded `//x[$n[1]]` into `descendant::x[$n[1]]` on the
+same ground, which would have counted across the document had the predicate been looked at; a pattern
+counting again between two predicates went through `Apply` and kept all four, so that the second of
+them was `b`, and nothing was the first of what `(2, 5)[1]` left; `count()` asked for the nodes and got
+a sequence of numbers, `XPTY0004`; and a comparison took the one filter that spans no documents — over
+a literal, `3[1]` — as nodes outright and refused it the same way. The two sections above this one
+found the fault and left it for the measuring the notes on `current()` asked for, `$nodes[…]` being a
+far commoner thing to compare and count than a bare `current()`.
+
+**It promises nothing now, at every version, and the promise had bought almost nothing.** The class
+builds its node-set whichever way it is asked, having no `EvaluateNodes` of its own, so every reader
+that took the promise read that node-set through a copy into a pooled list, and reads it now from where
+it stands: `count($v[…])` counts the node-set, and `generate-id($v[1])` takes its first node from it,
+where the general way had laid the node-set out as a list of items for eighty bytes a call — which was
+the general way at 2.0 and 3.0 as well, and is not now. A filter over a variable was never read as
+nodes by a comparison, an `xsl:value-of` or a `format-number()`, each of which asks `MaySpanDocuments`
+first and a variable may; and a filter over a key or a path, `key('k', @ref)[1]`, promises through its
+primary and is read exactly as it was. `current()` was given a hint in the promise's place,
+`UsuallyReturnsNodeSet`, because dropping its promise cost eighty bytes for every candidate of a
+predicate. A filter needs none: nothing it had bought is lost with it.
+
+**Except the fold, and that was the fault.** `//x[P]` is read as `descendant::x[P]` where `P` cannot
+be a position, and a filter over a variable can. So `//price[$first[id]]` at 1.0 is walked as
+`descendant-or-self::node()/price[…]` now, as it always was at 2.0 and 3.0 and as `//price[$v]` was at
+every version: over the thousand products, 182 to 500 microseconds interpreted and 197 to 497
+compiled, and 211,824 to 474,402 bytes a call — which is what the same stylesheet costs at
+`version="3.0"` on both sides, 501 and 512 microseconds and the same 474 KB. A predicate that is a
+whole filter expression is a strange thing to write — it does not mention the candidate, so it keeps
+every `x` or none, or names a position — and `//x[. = $v[1]]`, which is what is written, is a
+comparison and folds as before.
+
+What it comes to, in microseconds a transformation, each `version="1.0"` over the thousand-product
+benchmark document parsed once, `$kids` being `<xsl:variable name="kids" select="*"/>` inside
+`xsl:for-each select="products/product"` and the expression written once for each product. Fresh
+processes, one case and one build to a process, the builds taken turn about with the order turned
+round between the two rounds, each warmed for five seconds and then until three 400 ms windows agreed
+within 3% on time and 0.5% on bytes; the quickest window of each process, and the quicker of the two
+processes a side. Bytes a call are the same to the byte in every process of a build, the products
+stylesheet apart, which differs by a hundred bytes or so from one process to the next on both sides,
+and the same on both sides in every row but the last.
+
+| | interpreted | compiled | bytes a call |
+|---|---|---|---|
+| `count($kids[. != ''])` | 533 → 503 | 608 → 581 | 441,552 |
+| `count($kids[position() > 2])` | 646 → 625 | 610 → 590 | 601,552 |
+| `sum($kids[@currency])` | 815 → 832 | 815 → 825 | 448,320 |
+| `xsl:if test="$kids[2] = 'Laptop Computer'"` | 317 → 317 | 334 → 342 | 367,576 |
+| `xsl:if test="$kids[4] > 100"` | 341 → 341 | 365 → 369 | 392,256 |
+| `xsl:value-of select="$kids[2]"` | 301 → 310 | 342 → 343 | 403,072 |
+| `generate-id($kids[1])` | 346 → 342 | 391 → 376 | 424,752 |
+| `count(*[$kids[@currency]])` | 3,585 → 3,527 | 3,565 → 3,508 | 1,953,560 |
+| `$kids[@currency]/@currency` | 686 → 686 | 676 → 682 | 453,560 |
+| `generate-id() = generate-id(key('cat', category)[1])` | 4,519 → 4,840 | 5,361 → 5,315 | 4,092,401 |
+| the products stylesheet at 1.0, `avg()` spelt out | 3,634 → 3,628 | 3,508 → 3,516 | 973.5 KB |
+| `count(//price[$first[id]])`, once | 182 → 500 | 197 → 497 | 211,824 → 474,402 |
+
+Every row but the last is level within four percent, which is what a process differs from the next
+by, and every row but the last allocates what it allocated: `count()` counts the node-set it was
+copying, the comparison, the `xsl:value-of` and the predicate never took the promise, and the key
+lookup's filter promises through its primary. `generate-id($kids[1])` allocates what it did at 1.0 and
+eighty bytes a call less at 2.0 and 3.0, 504,752 to 424,752, the first node being read from the
+node-set rather than from a list of items laid out to hold it.
+
+The one pair that is not within four percent, the Muenchian idiom interpreted, was taken to six
+processes a side before it was believed, and its compiled twin to twelve on the base before this one,
+where it was that pair that read seven percent apart. It is a path this touches nowhere — `key(…)[1]`
+promises through its primary and is read as it was, and `generate-id()` reaches its node the same way
+on both sides — and both sides run in two bands, interpreted about 4,500 and about 4,850 to 4,910,
+compiled about 5,250 to 5,350 and about 5,750 to 5,950, the quickest process 4,503 before and 4,497
+after, and 5,260 and 5,244: the two rounds of the table happened to fall low on one side and high on
+the other, and the rounds after them fell the other way. `GenerateIdExpr.Evaluate` had grown by a
+third in IL with the branch a variable takes, which was the one plausible cause on the engine's side,
+and that branch is a method of its own now so that the way most calls take is the size it was for the
+JIT to weigh; the bands are there with it as without it, and are the machine's.
+
+Nothing moves on any run: the 3.0 run stands at 8,061 of 8,071, the 2.0 run at 5,678 of 5,701 and the
+schema-aware run at 8,668 of 8,727, each on both backends, and the XPath runs at 18,268 of 18,285 and
+14,553 of 14,577, every failure set identical test for test and message for message with main, the
+suites checked for having stood still under each run — against main at `3f0ee07`, which this was
+written on, and again against `720f83a` and `99647d6`, which landed underneath it with the three
+sections above this one, the last of them being where every figure above was taken. The
+`count($kids[. != ''])` row allocates less than half of what it did on the earlier bases, on both
+sides alike, the comparison having been taught there to ask `.` for its node. Five new unit tests in
+`FilterExpressionRouteTests`, 3,008 in all: a filter that is a number, along a step, under `//`, over a
+sequence and beside another predicate; one that is nodes; a filtered sequence counted and summed; a
+filtered node-set read as it was, by a comparison, `generate-id()`, `format-number()`, `name()`,
+`boolean()` and arithmetic; and a pattern counting again among what a numeric filter left — each at
+1.0, 2.0 and 3.0 on both backends, held to one answer. Three of the five fail against the engine as it
+was, and so does the test in `PatternPredicateTests` that had excused the path from the pattern's
+answer and holds it to that answer now. `XsltCompatibility.md` says what the mode leaves in and what
+that means for a filter.
 
 ### Which results the suite asks for and does not get
 

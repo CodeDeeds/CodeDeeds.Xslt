@@ -868,13 +868,13 @@ namespace CodeDeeds.Xslt.Compiler
         /// <remarks>
         /// <para>
         /// Read from the shape, and only from shapes that cannot answer otherwise whatever the version. It
-        /// is deliberately not <see cref="Expr.ReturnsNodeSet"/>, which a path's own predicates go by:
-        /// under <c>version="1.0"</c> a filter expression promises nodes on the strength of what XPath
-        /// 1.0 allowed, and a 1.0 stylesheet on this processor can break the promise, as it could the
-        /// one <c>current()</c> made until it stopped making it. <c>x[(2, 5)[1]]</c> is the second
-        /// <c>x</c>, the filter's value being the number 2, and a pattern taking the promise would ask
-        /// that 2 for a boolean and match every <c>x</c>. Neither shape is here, so both are evaluated
-        /// and looked at, as anything unrecognised is.
+        /// is deliberately not <see cref="Expr.ReturnsNodeSet"/>, which a path's own predicates go by,
+        /// and which has twice been a promise made on the strength of the version that a 1.0 stylesheet
+        /// on this processor could break: by a filter expression and by <c>current()</c>, until each
+        /// stopped making it. <c>x[(2, 5)[1]]</c> is the second <c>x</c>, the filter's value being the
+        /// number 2, and a pattern taking the promise would have asked that 2 for a boolean and matched
+        /// every <c>x</c>. Neither shape is here, so both are evaluated and looked at, as anything
+        /// unrecognised is, and a list that names what it knows cannot be broken from elsewhere.
         /// </para>
         /// <para>
         /// A pattern's predicates are never compiled: a pattern is parsed by <see cref="PatternParser"/>
