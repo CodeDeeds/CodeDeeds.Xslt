@@ -1009,6 +1009,18 @@ namespace CodeDeeds.Xslt.XPath
 
             XPathValue other = nodesOnLeft ? m_right.Evaluate(ref context) : m_left.Evaluate(ref context);
 
+            // A node-set or a sequence beside the node — '. = current()', at 2.0 — is the general way's to
+            // compare, and it is handed the node as the node-set it would have built for itself, which
+            // is what CompareTypedNodes would do after a list was rented to be laid out again.
+            if (!XPathComparison.IsOneAtomicValue(other))
+            {
+                XPathValue mine = XPathValue.FromNodeSet(NodeSet.Singleton(tree, node));
+
+                return nodesOnLeft
+                    ? XPathComparison.General(mine, other, m_operator, m_version, Comparing)
+                    : XPathComparison.General(other, mine, m_operator, m_version, Comparing);
+            }
+
             // Rented only once there is a node to hold, CompareTypedNodes taking the list emitted code
             // walks a step into; (1 to 1000)[. > 500] declines a thousand times and rents nothing.
             List<int> nodes = NodeListPool.Rent();
