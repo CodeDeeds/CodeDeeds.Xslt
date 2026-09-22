@@ -9686,7 +9686,7 @@ earlier set of rounds on a quieter machine had the same shape, 222 to 100 for th
 One thing the table shows that this does not touch. A positional predicate over the thousand products
 is 266 kilobytes a call of `int[]` at every version, where a value predicate over the same nodes is
 none; that is about an `int[64]` for each candidate node and is a question for the path, not the
-comparison.
+comparison. (It was not per node, and it was not the predicate's: see *A list too large to keep*.)
 
 Nothing moves on any conformance run, every failure set identical test for test: the 3.0 run stands at
 8,061 of 8,071, the 2.0 run at 5,678 of 5,701 and the schema-aware run at 8,668 of 8,727, each on both
@@ -9702,6 +9702,102 @@ quiet, nothing unsettled and single runs of one binary within three percent, and
 rows say what the table says with the noise gone: the first row 183 to 87 interpreted and 183 to 91
 compiled, the sort 505 to 413, `$five = 5` 147 to 64, the compiled positional predicate 480 to 358,
 `position() = (1, 5, 9)` 743 to 528, and `price > 100` 148 to 145. 3,028 unit tests in all.
+
+### A list too large to keep
+
+The section above left a figure it did not explain: `count(//product[position() < 500])` over the
+thousand products allocated 266 kilobytes a call of `int[]`, at every version and on both backends,
+where `count(//product[price > 100])` over the same nodes allocated four. It read the figure as about
+an `int[64]` for each candidate node and pointed at the predicate. Neither held. The predicate was
+settled in that section: it allocates nothing. What differs between the two expressions is that the
+second is folded to `descendant::product[price > 100]`, which visits each node once and holds only
+what it selects, and the first cannot be — `position()` counts among a parent's children, and the fold
+would count among every `product` in the document — so it runs as written,
+`descendant-or-self::node()` and then a child step from each of the 23,991 nodes that gives. The first
+step holds every one of them in a list at once. So does `count(//node())`, and that allocated 363
+kilobytes a call over the same document with no predicate anywhere in it; `count(//*)`, 8,001 nodes,
+102; `count(//text())`, 15,990, 200. The bytes went with the size of the step and not with any count
+of candidates.
+
+**The pool dropped what it could not afford to keep, at every call.** A path's working lists come from
+`NodeListPool`, which keeps up to thirty-two of them per thread and, so that thirty-two lists could not
+be thirty-two large ones, dropped on return any list whose capacity had grown past 4,096. A step over
+the document grew its list from there — 8,192, 16,384, 32,768 ints, which is 224 kilobytes of arrays
+with the smaller doublings on top — and handed it back to be collected, and the next call did the same
+from a fresh list of sixteen. The bound on the pool's footprint was being paid for in full, once a call,
+by every step that was large enough to need it.
+
+**A few large lists are kept now, and no more than a few.** Lists up to 4,096 are kept as they were,
+thirty-two of them. Past that, a list is kept only while fewer than four large ones are held and only
+up to a million ints, four megabytes, past which a document is no longer one whose working lists are
+worth holding between transformations. Four is two with room: a path holds two lists at a time and
+the count of its result a third, so a document-wide step converges on two large ones held — the first
+call grows one, the second grows the other, and from then on nothing grows — and a path evaluated
+inside such a step has two more. A large list rented for a small step costs what a small one would:
+clearing a list of integers sets its count and touches nothing else.
+
+**The first two forms of it made the hot path heavier, and the timing caught both.** The first kept
+a count of the large lists held, per thread, which every rent had to keep honest and every return had
+to read; `count(//product[price > 100])`, which rents two lists for every product and never grows one,
+read eight percent slower in seven pairs of seven on a quiet machine with the bytes the same to the
+byte, and the pool measured on its own through reflection said two nanoseconds a pair of the ten the
+row had lost, so the rest was the methods having grown past what the JIT inlines at their call sites.
+The second put the large list's two paths out of line, which took the row to five percent slower in
+three of three: the one comparison of a capacity left in `Rent`, and the call it guarded, were still
+more than the walk should carry. So there is no count. `Rent` is what it was to the instruction, and
+`Return` differs by where one branch it already made goes; how many large lists the pool holds is
+counted where a large one comes back, over the thirty-two the pool can hold at most, which is once
+per large step where a small one comes back two thousand times a call. The row reads level, 148 to 145
+over five pairs with the signs mixed, and the pool on its own 23.1 to 23.2 nanoseconds a pair.
+
+In bytes a call over the thousand-product document, at `version="3.0"` and the same on both backends,
+which rent from the one pool:
+
+| | was | is |
+|---|---|---|
+| `count(//product[position() < 500])`, `count(//product[last()])`, `count(//product[price > 100][1])` | 266,632 | 4,232 |
+| `count(//node())` | 363,064 | 4,296 |
+| `count(//text())` | 199,704 | 4,296 |
+| `count(//*)` | 102,192 | 4,296 |
+| `count(//product/*)` | 106,424 | 4,328 |
+| `count(//product[price > 100])`, `count(/products/product[position() < 500])`, which never grew a list | 4,304 | 4,304 |
+
+Four kilobytes is what a transformation costs with nothing in it, so a step over the whole document
+allocates nothing now once the lists have grown, which is the second call.
+
+In microseconds a transformation over the same document, parsed once, each figure the mean of three
+runs in fresh processes taken turn about with the engine as it was, warmed for at least eight seconds
+and until time and bytes a call had stopped moving, on a quiet machine with nothing unsettled:
+
+| | interpreted, was | is | compiled, was | is |
+|---|---|---|---|---|
+| `count(//product[position() < 500])` | 327 | 299 | 351 | 321 |
+| `count(//product[last()])` | 294 | 288, one run of three at 328 and the others at 265 and 270 | | |
+| `count(//node())` | 75 | 34 | 75 | 36 |
+| `count(//text())` | 42 | 31 | | |
+| `count(//*)` | 28 | 22 | | |
+| `count(//product/*)` | 74 | 65 | | |
+| `count(//product[price > 100])`, two lists rented a product and none grown | 144 | 139 | | |
+| `count(/products/product[position() < 500])`, two lists a call | 60 | 59 | | |
+| `xsl:for-each` over the products writing the first `id` | 85 | 88 | | |
+
+A step over the whole document is half the time it was, for not allocating and then walking a
+quarter of a megabyte of arrays to hold what it visits; the rows that never grew a list are level,
+the last one three percent the other way on a difference of three microseconds that two rents a call
+cannot be.
+
+Five new unit tests, over a document of twelve thousand nodes built for them. Three ask what a step
+that holds a large part of the document answers — twenty-five positional predicates on the descendant,
+sibling and ancestor axes, with `last()`, nested, after a value predicate and before one; eleven steps
+over the whole document; and a hundred of them in one template, one after another and one inside
+another — of both backends at 1.0, 2.0 and 3.0, and of `XslCompiledTransform` for the 1.0 stylesheet,
+the answer a reused list with the wrong contents would show up in first; all three pass against the
+engine as it was, every answer the oracle's. The other two do not: one rents from the pool by
+reflection on a thread of its own and holds it to keeping a large list, keeping four and not five, and
+dropping one past the largest size; the other transforms the document until warm and requires a call
+to allocate under eight kilobytes, where it was 315 on the engine as it was. An assertion that fails on
+a thread the test started is a crash of the test host and not a failure of the test, and the first
+of the two carries what fails there back to the thread that asked.
 
 ### Which results the suite asks for and does not get
 
