@@ -37,6 +37,17 @@ namespace CodeDeeds.Xslt.Emit
                 return expression;
             }
 
+            // One method for the whole expression means one stack frame for the whole expression, every
+            // local of every operand in it, and a frame is taken in one piece when the method is entered
+            // whatever part of it a call goes on to use. Twenty thousand comparisons joined by 'or' emitted
+            // a method whose frame alone was more than a megabyte, and entering it was a stack overflow
+            // with no recursion anywhere. An expression that size was written by a program; it is left to
+            // the interpreter, which takes stack for the operand it is on and no other.
+            if (CountUpTo(expression, LargestEmitted + 1) > LargestEmitted)
+            {
+                return expression;
+            }
+
             DynamicMethod method = new DynamicMethod(
                 $"xslt<{description}>",
                 typeof(XPathValue),
@@ -55,6 +66,33 @@ namespace CodeDeeds.Xslt.Emit
         }
 
         /// <summary>
+        /// How many nodes an expression may have and still be emitted as one method. Ten thousand
+        /// comparisons of a path with a value joined by <c>or</c>, four nodes apiece, ran on a megabyte of
+        /// stack and twenty thousand did not, so a comparison costs between fifty and a hundred bytes of
+        /// frame and this keeps a frame within some tens of kilobytes.
+        /// </summary>
+        private const int LargestEmitted = 2048;
+
+        /// <summary>Counts the nodes of an expression, predicates apart, and stops counting at a limit.</summary>
+        private static int CountUpTo(Expr expression, int limit)
+        {
+            NestingGuard.DescendExpression();
+            int count = 1;
+
+            foreach (Expr child in expression.Children)
+            {
+                if (count >= limit)
+                {
+                    break;
+                }
+
+                count += CountUpTo(child, limit - count);
+            }
+
+            return count;
+        }
+
+        /// <summary>
         /// Replaces every predicate in an expression tree with a compiled equivalent, in place.
         /// </summary>
         /// <remarks>
@@ -63,6 +101,8 @@ namespace CodeDeeds.Xslt.Emit
         /// </remarks>
         private static void CompilePredicates(Expr expression, string description)
         {
+            NestingGuard.DescendExpression();
+
             switch (expression)
             {
                 case PathExpr path:

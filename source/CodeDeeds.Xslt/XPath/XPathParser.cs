@@ -82,11 +82,25 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         private ComparisonContext Comparing => m_comparing ??= ComparisonContext.For(m_context);
 
+        /// <summary>
+        /// The version the expression is written under, and the syntax version, read once.
+        /// </summary>
+        /// <remarks>
+        /// A stylesheet answers <see cref="IXPathStaticContext.Version"/> by walking up from the element
+        /// the expression stands on to the nearest that says, and the parser asks a dozen times over in
+        /// reading one function call. Every comparison in an expression stands at one element, and so
+        /// does everything else in it, so the walk is made once: compiling <c>xsl:if</c> nested four
+        /// thousand deep took ten seconds, nearly all of it walking, and takes a third of one.
+        /// </remarks>
+        private readonly XsltVersion m_version;
+        private readonly XsltVersion m_syntaxVersion;
+
+        /// <summary>The static base URI and the default collation where the expression is written, once asked.</summary>
+        private (string? BaseUri, string? Collation)? m_written;
+
         private XPathParser(string source, IXPathStaticContext context)
+            : this(XPathScanner.Scan(source), source, context, 0)
         {
-            m_source = source;
-            m_context = context;
-            m_tokens = XPathScanner.Scan(source);
         }
 
         private XPathParser(List<XPathToken> tokens, string source, IXPathStaticContext context, int index)
@@ -95,6 +109,8 @@ namespace CodeDeeds.Xslt.XPath
             m_context = context;
             m_tokens = tokens;
             m_index = index;
+            m_version = context.Version;
+            m_syntaxVersion = context.SyntaxVersion;
         }
 
         /// <summary>
@@ -267,6 +283,170 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
+        /// How many operands a run of one kind of operator may have and still be built as operators nested
+        /// to the left, the way the grammar describes it.
+        /// </summary>
+        /// <remarks>
+        /// A run is read by a loop and not by a call, so the guard above never sees it, and built the
+        /// ordinary way it is a tree as deep as it is long: five thousand terms of <c>1+1+…</c> ran the
+        /// evaluator out of stack, and the walks the compiler makes over an expression before it. Nobody
+        /// writes thirty-two operands of one precedence by hand, so everything anybody wrote is built as
+        /// it always was, and what a program wrote is built flat: see <see cref="ChainExpr"/>, and
+        /// <see cref="Balanced"/> for the operators that may be regrouped. What is left is the depth the
+        /// guard does see, a few dozen levels of tree for each level of nesting it let through.
+        /// </remarks>
+        private const int LongChain = 32;
+
+        /// <summary>
+        /// How many clauses one <c>for</c>, <c>some</c> or <c>every</c> may have.
+        /// </summary>
+        /// <remarks>
+        /// Each clause is a loop inside the one before, so these nest by what they mean and cannot be laid
+        /// flat; a limit is what there is. One that many deep iterates nothing anyone could wait for.
+        /// </remarks>
+        private const int MaximumClauses = 256;
+
+        /// <summary>
+        /// Joins the operands of a run of <c>or</c>, <c>and</c> or <c>|</c>: to the left as the grammar has
+        /// it, or as a balanced tree where the run is long.
+        /// </summary>
+        /// <remarks>
+        /// These three may be grouped any way at all. The operands of a balanced tree are still reached
+        /// left to right, so <c>or</c> and <c>and</c> stop at the operand they always stopped at and an
+        /// error is raised by the operand that always raised it, and a union is a set. The tree is the
+        /// same operators, no deeper than the logarithm of the run, and the compiled backend emits it like
+        /// any other. Arithmetic has no such freedom, addition of doubles not being associative.
+        /// </remarks>
+        private struct Grouping
+        {
+            private int m_operators;
+            private List<Expr>? m_rest;
+
+            /// <summary>Joins one more operand on: to the left, or into the list a long run is balanced from.</summary>
+            public Expr Add(Expr left, Expr right, Func<Expr, Expr, Expr> join)
+            {
+                if (++m_operators < LongChain)
+                {
+                    return join(left, right);
+                }
+
+                (m_rest ??= new List<Expr> { left }).Add(right);
+                return left;
+            }
+
+            /// <summary>What the run comes to.</summary>
+            public Expr Close(Expr left, Func<Expr, Expr, Expr> join)
+            {
+                return m_rest is null ? left : Balanced(m_rest, 0, m_rest.Count, join);
+            }
+        }
+
+        private static readonly Func<Expr, Expr, Expr> s_or =
+            static (left, right) => new BinaryExpr(BinaryOperator.Or, left, right);
+
+        private static readonly Func<Expr, Expr, Expr> s_and =
+            static (left, right) => new BinaryExpr(BinaryOperator.And, left, right);
+
+        private static readonly Func<Expr, Expr, Expr> s_union =
+            static (left, right) => new UnionExpr(left, right);
+
+        private static Expr Balanced(List<Expr> operands, int from, int to, Func<Expr, Expr, Expr> join)
+        {
+            if (to - from == 1)
+            {
+                return operands[from];
+            }
+
+            int middle = from + ((to - from) / 2);
+            return join(Balanced(operands, from, middle, join), Balanced(operands, middle, to, join));
+        }
+
+        /// <summary>
+        /// A run of one kind of operator being read, which goes on being built to the left until it is
+        /// long and as a <see cref="ChainExpr"/> from there.
+        /// </summary>
+        private struct Run
+        {
+            private int m_operators;
+            private Expr? m_head;
+            private List<Expr>? m_links;
+            private RangeVariableExpr? m_soFar;
+            private int m_slot;
+
+            /// <summary>
+            /// Called before an operator is built, with what the run has come to, which it may replace
+            /// by a reference to the run so far; the operator is then built on whatever it leaves.
+            /// </summary>
+            /// <remarks>
+            /// Two calls round the building rather than one taking a delegate, because a delegate that
+            /// reads the operator and the parser is a closure allocated for every operator of every
+            /// expression, and nearly all of them are the first few of a run that never gets long.
+            /// </remarks>
+            /// <param name="parser">The parser reading the run.</param>
+            /// <param name="left">What the run has come to so far.</param>
+            public void Before(XPathParser parser, ref Expr? left)
+            {
+                if (++m_operators < LongChain)
+                {
+                    return;
+                }
+
+                if (m_links is null)
+                {
+                    // The value so far gets a slot of its own among the range variables, under a name
+                    // nothing can be written to refer to, so that a binding inside a later operand takes
+                    // the slot after it.
+                    m_head = left;
+                    m_links = new List<Expr>();
+                    m_slot = parser.m_rangeScope.Count;
+                    m_soFar = new RangeVariableExpr(m_slot, "the run so far");
+                    parser.m_rangeScope.Add((string.Empty, "the run so far"));
+                    parser.m_rangeHighWater = Math.Max(parser.m_rangeHighWater, parser.m_rangeScope.Count);
+                }
+                else if (!ReferenceEquals(left, m_soFar))
+                {
+                    // Something was put round the run so far without coming through here, as a predicate is.
+                    m_links.Add(left!);
+                }
+
+                left = m_soFar;
+            }
+
+            /// <summary>Called with the operator built, and answers what the run has come to.</summary>
+            /// <param name="built">The operator.</param>
+            public Expr After(Expr built)
+            {
+                if (m_links is null)
+                {
+                    return built;
+                }
+
+                m_links.Add(built);
+                return m_soFar!;
+            }
+
+            /// <summary>Ends the run.</summary>
+            /// <param name="parser">The parser reading the run.</param>
+            /// <param name="left">What the run has come to.</param>
+            /// <returns>The expression the run is.</returns>
+            public Expr Close(XPathParser parser, Expr left)
+            {
+                if (m_links is null)
+                {
+                    return left;
+                }
+
+                if (!ReferenceEquals(left, m_soFar))
+                {
+                    m_links.Add(left);
+                }
+
+                parser.m_rangeScope.RemoveAt(m_slot);
+                return new ChainExpr(m_slot, m_head!, m_links.ToArray());
+            }
+        }
+
+        /// <summary>
         /// Parses one expression, which in XPath 2.0 may be a binding or a conditional before it is anything
         /// else.
         /// </summary>
@@ -374,6 +554,16 @@ namespace CodeDeeds.Xslt.XPath
             Expr body = ParseExprSingle();
             m_rangeScope.RemoveRange(depth, m_rangeScope.Count - depth);
 
+            // A let is how an expression names what it has worked out, so a long one is what a program
+            // writes, and nested it is as deep as it is long: see LongChain.
+            if (bindings.Count > LongChain)
+            {
+                return new LetChainExpr(
+                    bindings.ConvertAll(static binding => binding.Slot).ToArray(),
+                    bindings.ConvertAll(static binding => binding.Value).ToArray(),
+                    body);
+            }
+
             for (int i = bindings.Count - 1; i >= 0; i--)
             {
                 body = new LetExpr(bindings[i].Slot, bindings[i].Value, body);
@@ -426,6 +616,14 @@ namespace CodeDeeds.Xslt.XPath
 
                 Expr sequence = ParseExprSingle();
 
+                if (bindings.Count == MaximumClauses)
+                {
+                    throw XsltErrors.Error(
+                        XsltErrorCode.XPST0003,
+                        $"More than {MaximumClauses} variables are bound by one 'for', 'some' or 'every'. "
+                        + "Each is a loop inside the one before, and costs stack to evaluate as well as time.");
+                }
+
                 string uri = variable.Prefix.Length == 0 ? string.Empty : ResolvePrefixOrThrow(variable);
                 bindings.Add((m_rangeScope.Count, sequence));
                 m_rangeScope.Add((uri, variable.Text));
@@ -468,30 +666,36 @@ namespace CodeDeeds.Xslt.XPath
         private Expr ParseOr()
         {
             Expr left = ParseAnd();
+            Grouping grouping = default;
+
             while (Current.Kind == XPathTokenKind.Or)
             {
                 m_index++;
-                left = new BinaryExpr(BinaryOperator.Or, left, ParseAnd());
+                left = grouping.Add(left, ParseAnd(), s_or);
             }
 
-            return left;
+            return grouping.Close(left, s_or);
         }
 
         private Expr ParseAnd()
         {
             Expr left = ParseEquality();
+            Grouping grouping = default;
+
             while (Current.Kind == XPathTokenKind.And)
             {
                 m_index++;
-                left = new BinaryExpr(BinaryOperator.And, left, ParseEquality());
+                left = grouping.Add(left, ParseEquality(), s_and);
             }
 
-            return left;
+            return grouping.Close(left, s_and);
         }
 
         private Expr ParseEquality()
         {
             Expr left = ParseValueComparison();
+            Run run = default;
+
             while (true)
             {
                 BinaryOperator op;
@@ -506,14 +710,15 @@ namespace CodeDeeds.Xslt.XPath
                         break;
 
                     default:
-                        return left;
+                        return run.Close(this, left);
                 }
 
                 m_index++;
-                left = new BinaryExpr(op, left, ParseValueComparison(), m_context.Version)
+                run.Before(this, ref left!);
+                left = run.After(new BinaryExpr(op, left, ParseValueComparison(), m_version)
                 {
                     Comparing = Comparing,
-                };
+                });
 
                 // XPath 1.0 chains these and 2.0 does not: there, ComparisonExpr has room for one
                 // operator and no more, so a second is a syntax error rather than a comparison of
@@ -581,7 +786,7 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             m_index++;
-            return new RangeExpr(left, ParseAdditive(), m_context.Version);
+            return new RangeExpr(left, ParseAdditive(), m_version);
         }
 
         /// <summary>
@@ -624,6 +829,8 @@ namespace CodeDeeds.Xslt.XPath
         private Expr ParseRelational()
         {
             Expr left = ParseStringConcat();
+            Run run = default;
+
             while (true)
             {
                 BinaryOperator op;
@@ -646,14 +853,15 @@ namespace CodeDeeds.Xslt.XPath
                         break;
 
                     default:
-                        return left;
+                        return run.Close(this, left);
                 }
 
                 m_index++;
-                left = new BinaryExpr(op, left, ParseStringConcat(), m_context.Version)
+                run.Before(this, ref left!);
+                left = run.After(new BinaryExpr(op, left, ParseStringConcat(), m_version)
                 {
                     Comparing = Comparing,
-                };
+                });
 
                 // XPath 1.0 chains these and 2.0 does not: there, ComparisonExpr has room for one
                 // operator and no more, so a second is a syntax error rather than a comparison of
@@ -669,6 +877,8 @@ namespace CodeDeeds.Xslt.XPath
         private Expr ParseAdditive()
         {
             Expr left = ParseMultiplicative();
+            Run run = default;
+
             while (true)
             {
                 BinaryOperator op;
@@ -683,17 +893,20 @@ namespace CodeDeeds.Xslt.XPath
                         break;
 
                     default:
-                        return left;
+                        return run.Close(this, left);
                 }
 
                 m_index++;
-                left = new BinaryExpr(op, left, ParseMultiplicative(), m_context.Version);
+                run.Before(this, ref left!);
+                left = run.After(new BinaryExpr(op, left, ParseMultiplicative(), m_version));
             }
         }
 
         private Expr ParseMultiplicative()
         {
             Expr left = ParseUnary();
+            Run run = default;
+
             while (true)
             {
                 BinaryOperator op;
@@ -716,11 +929,12 @@ namespace CodeDeeds.Xslt.XPath
                         break;
 
                     default:
-                        return left;
+                        return run.Close(this, left);
                 }
 
                 m_index++;
-                left = new BinaryExpr(op, left, ParseUnary(), m_context.Version);
+                run.Before(this, ref left!);
+                left = run.After(new BinaryExpr(op, left, ParseUnary(), m_version));
             }
         }
 
@@ -752,20 +966,22 @@ namespace CodeDeeds.Xslt.XPath
                 signs++;
             }
 
-            Expr negated = new NegateExpr(ParseUnion(), m_context.Version);
-            return signs % 2 == 0 ? new NegateExpr(negated, m_context.Version) : negated;
+            Expr negated = new NegateExpr(ParseUnion(), m_version);
+            return signs % 2 == 0 ? new NegateExpr(negated, m_version) : negated;
         }
 
         private Expr ParseUnion()
         {
             Expr left = ParseIntersectExcept();
+            Grouping grouping = default;
+
             while (Current.Kind is XPathTokenKind.Pipe or XPathTokenKind.Union)
             {
                 m_index++;
-                left = new UnionExpr(left, ParseIntersectExcept());
+                left = grouping.Add(left, ParseIntersectExcept(), s_union);
             }
 
-            return left;
+            return grouping.Close(left, s_union);
         }
 
         /// <summary>
@@ -774,15 +990,17 @@ namespace CodeDeeds.Xslt.XPath
         private Expr ParseIntersectExcept()
         {
             Expr left = ParseInstanceOf();
+            Run run = default;
 
             while (Current.Kind is XPathTokenKind.Intersect or XPathTokenKind.Except)
             {
                 bool keepShared = Current.Kind == XPathTokenKind.Intersect;
                 m_index++;
-                left = new NodeSetOperationExpr(left, ParseInstanceOf(), keepShared);
+                run.Before(this, ref left!);
+                left = run.After(new NodeSetOperationExpr(left, ParseInstanceOf(), keepShared));
             }
 
-            return left;
+            return run.Close(this, left);
         }
 
         /// <summary>
@@ -855,7 +1073,7 @@ namespace CodeDeeds.Xslt.XPath
                 return new CastExpr(value, schemaType!, allowEmpty, testOnly: false, m_context.InScopeNamespaces);
             }
 
-            XdmType.RequireLiteralNameBelowThree(builtIn, value, m_context.SyntaxVersion);
+            XdmType.RequireLiteralNameBelowThree(builtIn, value, m_syntaxVersion);
 
             return new CastExpr(
                 value,
@@ -884,55 +1102,59 @@ namespace CodeDeeds.Xslt.XPath
         private Expr ParseArrow()
         {
             Expr left = ParseSignedValue();
+            Run run = default;
 
             while (AllowsFunctionItems && Current.Kind == XPathTokenKind.Arrow)
             {
                 m_index++;
-                XPathToken target = Current;
-
-                switch (target.Kind)
-                {
-                    // A name is the function itself, so the call is built as if it had been written out —
-                    // which is what makes '=> concat(...)' reach the same overload resolution.
-                    case XPathTokenKind.Name:
-                    {
-                        m_index++;
-                        List<Expr?> given = ParseArgumentList(left);
-
-                        // An argument list written here may hold a placeholder like any other, and the
-                        // arrow's own argument is simply one more argument already supplied: '"$" =>
-                        // concat(?)' is concat#2 with the first bound and the second open, which is the
-                        // function of one argument the suite's ArrowPostfix-108 then calls.
-                        left = HasPlaceholder(given)
-                            ? new PartialApplicationExpr(
-                                NamedFunctionItem(target, given.Count), given.ToArray())
-                            : CreateCall(target, new List<Expr>(given!));
-
-                        break;
-                    }
-
-                    // A variable or a parenthesized expression yields the function at run time instead.
-                    case XPathTokenKind.Variable:
-                    case XPathTokenKind.LeftParen:
-                    {
-                        Expr function = ParsePrimaryExpression();
-                        List<Expr?> given = ParseArgumentList(left);
-
-                        left = HasPlaceholder(given)
-                            ? new PartialApplicationExpr(function, given.ToArray())
-                            : new DynamicCallExpr(function, given.ToArray()!);
-
-                        break;
-                    }
-
-                    default:
-                        throw Error(
-                            target, "'=>' is followed by a function name, a variable or a parenthesized "
-                            + "expression.");
-                }
+                run.Before(this, ref left!);
+                left = run.After(ParseArrowTarget(left));
             }
 
-            return left;
+            return run.Close(this, left);
+        }
+
+        /// <summary>Parses what an arrow points at, and builds the call it makes with what is to its left.</summary>
+        private Expr ParseArrowTarget(Expr left)
+        {
+            XPathToken target = Current;
+
+            switch (target.Kind)
+            {
+                // A name is the function itself, so the call is built as if it had been written out —
+                // which is what makes '=> concat(...)' reach the same overload resolution.
+                case XPathTokenKind.Name:
+                {
+                    m_index++;
+                    List<Expr?> given = ParseArgumentList(left);
+
+                    // An argument list written here may hold a placeholder like any other, and the
+                    // arrow's own argument is simply one more argument already supplied: '"$" =>
+                    // concat(?)' is concat#2 with the first bound and the second open, which is the
+                    // function of one argument the suite's ArrowPostfix-108 then calls.
+                    return HasPlaceholder(given)
+                        ? new PartialApplicationExpr(
+                            NamedFunctionItem(target, given.Count), given.ToArray())
+                        : CreateCall(target, new List<Expr>(given!));
+                }
+
+                // A variable or a parenthesized expression yields the function at run time instead.
+                case XPathTokenKind.Variable:
+                case XPathTokenKind.LeftParen:
+                {
+                    Expr function = ParsePrimaryExpression();
+                    List<Expr?> given = ParseArgumentList(left);
+
+                    return HasPlaceholder(given)
+                        ? new PartialApplicationExpr(function, given.ToArray())
+                        : new DynamicCallExpr(function, given.ToArray()!);
+                }
+
+                default:
+                    throw Error(
+                        target, "'=>' is followed by a function name, a variable or a parenthesized "
+                        + "expression.");
+            }
         }
 
         /// <summary>
@@ -971,11 +1193,11 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             Expr signed = innermost == XPathTokenKind.Minus
-                ? new NegateExpr(ParseSimpleMap(), m_context.Version)
+                ? new NegateExpr(ParseSimpleMap(), m_version)
                 : new UnaryPlusExpr(ParseSimpleMap());
 
             int outerMinuses = innermost == XPathTokenKind.Minus ? minuses - 1 : minuses;
-            return outerMinuses % 2 == 1 ? new NegateExpr(signed, m_context.Version) : signed;
+            return outerMinuses % 2 == 1 ? new NegateExpr(signed, m_version) : signed;
         }
 
         /// <summary>
@@ -988,14 +1210,16 @@ namespace CodeDeeds.Xslt.XPath
         private Expr ParseSimpleMap()
         {
             Expr left = ParsePath();
+            Run run = default;
 
             while (IsXPath30 && Current.Kind == XPathTokenKind.Bang)
             {
                 m_index++;
-                left = new SimpleMapExpr(left, ParsePath());
+                run.Before(this, ref left!);
+                left = run.After(new SimpleMapExpr(left, ParsePath()));
             }
 
-            return left;
+            return run.Close(this, left);
         }
 
         /// <summary>
@@ -1437,13 +1661,14 @@ namespace CodeDeeds.Xslt.XPath
         /// </para>
         /// </remarks>
         private bool IsXPath30 =>
-            m_context.Version.CompareTo(XsltVersion.V30) >= 0
-            || m_context.SyntaxVersion.CompareTo(XsltVersion.V30) >= 0;
+            m_version.CompareTo(XsltVersion.V30) >= 0
+            || m_syntaxVersion.CompareTo(XsltVersion.V30) >= 0;
 
         private Expr ParseFilterExpression()
         {
             Expr result = ParsePrimaryExpression();
             List<Expr>? predicates = null;
+            Run run = default;
 
             // Predicates, lookups and argument lists all bind after the primary and can alternate —
             // $a?b[1]?c, $f(1)(2) — so the predicates gathered so far are closed over whenever one of the
@@ -1461,7 +1686,8 @@ namespace CodeDeeds.Xslt.XPath
                 {
                     result = CloseFilter(result, ref predicates);
                     m_index++;
-                    result = ParseLookup(result);
+                    run.Before(this, ref result!);
+                    result = run.After(ParseLookup(result));
                     continue;
                 }
 
@@ -1470,11 +1696,12 @@ namespace CodeDeeds.Xslt.XPath
                 if (Current.Kind == XPathTokenKind.LeftParen && AllowsFunctionItems)
                 {
                     result = CloseFilter(result, ref predicates);
+                    run.Before(this, ref result!);
 
                     List<Expr?> given = ParseArgumentList(null);
-                    result = HasPlaceholder(given)
+                    result = run.After(HasPlaceholder(given)
                         ? new PartialApplicationExpr(result, given.ToArray())
-                        : new DynamicCallExpr(result, given.ToArray()!);
+                        : new DynamicCallExpr(result, given.ToArray()!));
 
                     continue;
                 }
@@ -1482,7 +1709,7 @@ namespace CodeDeeds.Xslt.XPath
                 break;
             }
 
-            return CloseFilter(result, ref predicates);
+            return run.Close(this, CloseFilter(result, ref predicates));
         }
 
         /// <summary>
@@ -1706,7 +1933,7 @@ namespace CodeDeeds.Xslt.XPath
                 return primary;
             }
 
-            Expr filtered = new FilterExpr(primary, predicates.ToArray(), m_context.Version);
+            Expr filtered = new FilterExpr(primary, predicates.ToArray(), m_version);
             predicates = null;
             return filtered;
         }
@@ -1962,7 +2189,7 @@ namespace CodeDeeds.Xslt.XPath
                     // Except where the expression was written for XPath 1.0, which had no integers at
                     // all — the same digits meant a double there, and reading them as one now is what
                     // the compatibility mode is for.
-                    return m_context.Version.IsBackwardsCompatible
+                    return m_version.IsBackwardsCompatible
                         ? new NumberLiteralExpr(token.Number)
                         : new TypedLiteralExpr(
                             XPathValue.FromInteger(System.Numerics.BigInteger.Parse(
@@ -2204,8 +2431,8 @@ namespace CodeDeeds.Xslt.XPath
                     uri,
                     token.Text,
                     arguments.ToArray(),
-                    m_context.Version,
-                    m_context.SyntaxVersion,
+                    m_version,
+                    m_syntaxVersion,
                     m_context.LegacySyntax,
                     m_context.InScopeNamespaces,
                     m_context.DefaultElementNamespace));
@@ -2271,8 +2498,8 @@ namespace CodeDeeds.Xslt.XPath
                     XdmType.FunctionNamespace,
                     localName,
                     arguments,
-                    m_context.Version,
-                    m_context.SyntaxVersion,
+                    m_version,
+                    m_syntaxVersion,
                     m_context.LegacySyntax,
                     m_context.InScopeNamespaces,
                     m_context.DefaultElementNamespace))
@@ -2293,7 +2520,10 @@ namespace CodeDeeds.Xslt.XPath
             // Where the expression is written, for the two kinds of call that ask. A stylesheet has
             // the compiler set this per expression, the module and any xml:base deciding it; an
             // expression evaluated on its own takes whatever its caller put on the static context.
-            if (m_context.StaticBaseUri is string baseUri)
+            // Both are answered by a walk up from the element, as the version is, and asked once.
+            m_written ??= (m_context.StaticBaseUri, m_context.DefaultCollation);
+
+            if (m_written.Value.BaseUri is string baseUri)
             {
                 switch (built)
                 {
@@ -2315,7 +2545,7 @@ namespace CodeDeeds.Xslt.XPath
                 }
             }
 
-            if (m_context.DefaultCollation is not string collation
+            if (m_written.Value.Collation is not string collation
                 || collation == Collation.CodepointUri)
             {
                 return built;
@@ -2361,11 +2591,11 @@ namespace CodeDeeds.Xslt.XPath
                 string name = arguments.Length == 2 ? string.Empty : ((StringLiteralExpr)arguments[2]).Value;
 
                 return new Compiler.FormatNumberExpr(
-                    arguments[0], arguments[1], Resolve(name), m_context.Version, m_context.SyntaxVersion);
+                    arguments[0], arguments[1], Resolve(name), m_version, m_syntaxVersion);
             }
 
             return new NamedDecimalFormatExpr(
-                arguments[0], arguments[1], arguments[2], m_context, m_context.Version);
+                arguments[0], arguments[1], arguments[2], m_context, m_version);
         }
 
         /// <summary>Finds the decimal format a name stands for, or raises <c>FODF1280</c>.</summary>
@@ -2476,6 +2706,8 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="steps">The axis steps gathered so far, which this may add to and clear.</param>
         private Expr ContinuePath(Expr? start, List<AxisStep> steps)
         {
+            Run run = default;
+
             while (true)
             {
                 if (Current.Kind == XPathTokenKind.Slash)
@@ -2494,16 +2726,18 @@ namespace CodeDeeds.Xslt.XPath
 
                 if (StartsPrimaryExpression())
                 {
+                    run.Before(this, ref start);
                     Expr source = new PathExpr(start, steps.ToArray());
                     steps.Clear();
-                    start = new StepMapExpr(source, ParseFilterExpression());
+                    start = run.After(new StepMapExpr(source, ParseFilterExpression()));
                     continue;
                 }
 
                 steps.Add(ParseStep());
             }
 
-            return steps.Count == 0 && start is not null ? start : new PathExpr(start, steps.ToArray());
+            return run.Close(
+                this, steps.Count == 0 && start is not null ? start : new PathExpr(start, steps.ToArray()));
         }
 
         private static AxisStep DescendantOrSelfStep()

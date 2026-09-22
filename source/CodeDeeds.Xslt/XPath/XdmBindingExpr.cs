@@ -78,19 +78,27 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>Makes room for this binding's slot and returns what was in it.</summary>
         protected XPathValue Reserve(ref DynamicContext context)
         {
+            return ReserveSlot(ref context, Slot);
+        }
+
+        /// <summary>Makes room for a slot and returns what was in it.</summary>
+        /// <param name="context">The context whose range variables the slot is among.</param>
+        /// <param name="slot">The slot.</param>
+        internal static XPathValue ReserveSlot(ref DynamicContext context, int slot)
+        {
             if (context.RangeVariables is null)
             {
-                context.RangeVariables = new XPathValue[Math.Max(Slot + 1, 4)];
+                context.RangeVariables = new XPathValue[Math.Max(slot + 1, 4)];
                 return default;
             }
 
-            if (context.RangeVariables.Length <= Slot)
+            if (context.RangeVariables.Length <= slot)
             {
-                Array.Resize(ref context.RangeVariables, Slot + 1);
+                Array.Resize(ref context.RangeVariables, slot + 1);
                 return default;
             }
 
-            return context.RangeVariables[Slot];
+            return context.RangeVariables[slot];
         }
     }
 

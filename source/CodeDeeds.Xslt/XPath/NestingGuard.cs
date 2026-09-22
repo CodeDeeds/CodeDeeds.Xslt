@@ -53,6 +53,29 @@ namespace CodeDeeds.Xslt.XPath
             }
         }
 
+        /// <summary>
+        /// The same question for a walk over an expression's own tree, made while a stylesheet is compiled:
+        /// looking for what reads the focus position, compiling the predicates inside it.
+        /// </summary>
+        /// <remarks>
+        /// An expression is as deep as the parser's own recursion let it be and a few dozen levels for each
+        /// of those, the parser building a long run of operators flat, so this is not expected to refuse
+        /// anything. It is here because what it guards is a recursion over something a stylesheet supplied,
+        /// and costs nothing anyone will notice where it is asked: once per node, once per stylesheet.
+        /// </remarks>
+        /// <exception cref="XsltException">Too little stack is left to go on.</exception>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static void DescendExpression()
+        {
+            if (!RuntimeHelpers.TryEnsureSufficientExecutionStack())
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XPST0003,
+                    "The expression is nested too deeply to compile. Every level of nesting costs stack to "
+                    + "walk, and this one has more levels than there is stack for.");
+            }
+        }
+
         private static void Refuse(string what, string doing)
         {
             throw new XsltException(

@@ -493,22 +493,18 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="element">The element the expression is written at.</param>
         private string ChosenCollation(int element)
         {
-            for (int current = element; current >= 0; current = Above(current))
+            return Inherited(
+                element, CurrentDeclarers().Collation, s_collationDeclaredAt, Collation.CodepointUri, ref m_lastCollation);
+        }
+
+        private static bool CollationDeclaredAt(StylesheetCompiler compiler, int element, out string collation)
+        {
+            string? said = (compiler.IsXsltElement(element, out _)
+                ? compiler.GetAttribute(element, "default-collation")
+                : null) ?? compiler.GetXsltAttribute(element, "default-collation");
+
+            if (said is not null)
             {
-                if (m_tree.KindOf(current) != NodeKind.Element)
-                {
-                    continue;
-                }
-
-                string? said = (IsXsltElement(current, out _)
-                    ? GetAttribute(current, "default-collation")
-                    : null) ?? GetXsltAttribute(current, "default-collation");
-
-                if (said is null)
-                {
-                    continue;
-                }
-
                 foreach (Range candidate in said.AsSpan().Trim().Split(' '))
                 {
                     string uri = said.AsSpan().Trim()[candidate].ToString();
@@ -520,8 +516,9 @@ namespace CodeDeeds.Xslt.Compiler
 
                     try
                     {
-                        Collation.Resolve(uri, m_options.CollationResolver);
-                        return uri;
+                        Collation.Resolve(uri, compiler.m_options.CollationResolver);
+                        collation = uri;
+                        return true;
                     }
                     catch (XsltException)
                     {
@@ -530,7 +527,10 @@ namespace CodeDeeds.Xslt.Compiler
                 }
             }
 
-            return Collation.CodepointUri;
+            // A declaration none of whose candidates can be had is no declaration, as it was: the
+            // question goes on up.
+            collation = string.Empty;
+            return false;
         }
 
         /// <inheritdoc/>
@@ -2513,6 +2513,47 @@ namespace CodeDeeds.Xslt.Compiler
         }
 
         /// <summary>
+        /// Whether there is stack for one more level of the compiler's recursion, and for the expression
+        /// parser under it.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Compiling is a recursion over the stylesheet, a level of it for each level of nesting, and at
+        /// something near a kilobyte a level it is the most expensive recursion in the library: literal
+        /// result elements nested two thousand deep ended the process from inside the first walk made
+        /// over them. A stack overflow cannot be caught, and how much stack a caller compiles on is the
+        /// caller's business, so the question is put to the runtime at each level of the two walks every
+        /// element is reached by, the one for <c>use-when</c> and the one that compiles a sequence
+        /// constructor, and where the answer is no the walk goes on upon a new stack. Running what was
+        /// compiled is a recursion of its own and asks for itself: see <see cref="LevelsBetweenChecks"/>.
+        /// </para>
+        /// <para>
+        /// The parser asks the runtime the same question at every nesting of an expression, and the two
+        /// asked at one threshold were answered in the wrong order: the compiler was let through with a
+        /// little more than the threshold left, spent a level of it reaching a <c>test</c>, and the parser
+        /// was refused reading <c>true()</c>, saying the expression was nested too deeply. So the compiler
+        /// asks from further down, with a margin's worth of stack taken up in front of the question, and
+        /// is the one that moves: nothing it reaches within a level goes deeper than the margin.
+        /// </para>
+        /// </remarks>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static bool HasRoomForALevel()
+        {
+            Span<byte> margin = stackalloc byte[LevelMargin];
+            margin[0] = 0;
+            return System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack();
+        }
+
+        /// <summary>
+        /// How much stack one level of the compiler's recursion may take before the next asks again,
+        /// the parser's own recursion over the expressions of that level included. A level was measured
+        /// at under two kilobytes and an expression nesting at a few hundred bytes; this leaves room
+        /// for an expression nested some tens deep on each level, which is what the parser's threshold
+        /// leaves it anyway.
+        /// </summary>
+        private const int LevelMargin = 32 * 1024;
+
+        /// <summary>
         /// Answers every <c>use-when</c> inside an element, in document order, and remembers each answer.
         /// </summary>
         /// <remarks>
@@ -2522,6 +2563,12 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="element">The element whose content to walk.</param>
         private void SettleUseWhenIn(int element)
         {
+            if (!HasRoomForALevel())
+            {
+                new UseWhenWalkOnFreshStack(this, element).RunToCompletion(TooDeepToCompile);
+                return;
+            }
+
             for (int child = m_tree.FirstChildOf(element); child >= 0; child = m_tree.NextSiblingOf(child))
             {
                 if (m_tree.KindOf(child) == NodeKind.Element && !ExcludedByUseWhen(child))
@@ -8707,6 +8754,83 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="skip">Which XSLT children, by local name, are not part of the constructor.</param>
         private Instruction[] CompileSequenceIn(int element, Func<string, bool>? skip = null)
         {
+            // Running short of stack is not an error: compiling goes on upon a new one, as running does.
+            // See HasRoomForALevel for what the question is, and FreshStack for the rest.
+            if (!HasRoomForALevel())
+            {
+                ConstructorOnFreshStack deferred = new ConstructorOnFreshStack(this, element, skip);
+                deferred.RunToCompletion(TooDeepToCompile);
+                return deferred.Result;
+            }
+
+            m_constructorDepth++;
+
+            try
+            {
+                return CheckedWhereDeep(CompileConstructor(element, skip));
+            }
+            finally
+            {
+                m_constructorDepth--;
+            }
+        }
+
+        private const string TooDeepToCompile =
+            "The stylesheet's elements are nested too deeply to compile, and no further stack could be "
+            + "had to continue on.";
+
+        /// <summary>A sequence constructor waiting to be compiled on a new stack.</summary>
+        private sealed class ConstructorOnFreshStack : FreshStack
+        {
+            private readonly StylesheetCompiler m_compiler;
+            private readonly int m_element;
+            private readonly Func<string, bool>? m_skip;
+
+            public ConstructorOnFreshStack(StylesheetCompiler compiler, int element, Func<string, bool>? skip)
+            {
+                m_compiler = compiler;
+                m_element = element;
+                m_skip = skip;
+            }
+
+            public Instruction[] Result { get; private set; } = Array.Empty<Instruction>();
+
+            /// <inheritdoc/>
+            protected override void Run()
+            {
+                Result = m_compiler.CompileSequenceIn(m_element, m_skip);
+            }
+        }
+
+        /// <summary>A walk for <c>use-when</c> waiting to go on upon a new stack.</summary>
+        private sealed class UseWhenWalkOnFreshStack : FreshStack
+        {
+            private readonly StylesheetCompiler m_compiler;
+            private readonly int m_element;
+
+            public UseWhenWalkOnFreshStack(StylesheetCompiler compiler, int element)
+            {
+                m_compiler = compiler;
+                m_element = element;
+            }
+
+            /// <inheritdoc/>
+            protected override void Run()
+            {
+                m_compiler.SettleUseWhenIn(m_element);
+            }
+        }
+
+        /// <summary>
+        /// How many sequence constructors the one being compiled stands inside, itself included. What
+        /// <see cref="CheckedWhereDeep"/> counts by: a level of it is a level of the recursion that runs
+        /// the stylesheet, which the depth of an element is not, an <c>xsl:choose</c> and its
+        /// <c>xsl:otherwise</c> being two elements and one constructor.
+        /// </summary>
+        private int m_constructorDepth;
+
+        private Instruction[] CompileConstructor(int element, Func<string, bool>? skip)
+        {
             List<Instruction> instructions = new List<Instruction>();
             List<ConditionalSegment>? segments = null;
             int declarations = skip is null ? -1 : LastLeading(element, skip);
@@ -8780,6 +8904,35 @@ namespace CodeDeeds.Xslt.Compiler
             }
 
             return new Instruction[] { new ConditionalSequenceInstruction(segments.ToArray()) };
+        }
+
+        /// <summary>
+        /// How many levels of a stylesheet's nesting go by between one sequence constructor that asks how
+        /// much stack is left before it runs and the next.
+        /// </summary>
+        /// <remarks>
+        /// Running a stylesheet is a recursion over it as compiling is, an instruction's content run from
+        /// inside the instruction, and a level costs between half a kilobyte and two: an
+        /// <c>xsl:for-each</c> inside an <c>xsl:for-each</c> a thousand deep overflowed a megabyte, and
+        /// five hundred deep a quarter of one. The compiler's own guard says nothing about that, since a
+        /// stylesheet is compiled once, on whatever stack its caller had, and run wherever anyone likes.
+        /// Asking at every instruction would be paid for by every stylesheet there is. Asked once in
+        /// thirty-two levels it is paid for by none that anyone wrote, and what runs unasked between two
+        /// askings is some sixty kilobytes at the most, where the runtime's answer is good for twice that.
+        /// </remarks>
+        private const int LevelsBetweenChecks = 32;
+
+        /// <summary>
+        /// A sequence constructor as compiled, or where it stands at a depth that is asked about, inside
+        /// the instruction that asks: see <see cref="LevelsBetweenChecks"/>.
+        /// </summary>
+        /// <param name="body">The constructor.</param>
+        private Instruction[] CheckedWhereDeep(Instruction[] body)
+        {
+            // An empty constructor stays empty: whether there is any content is a question callers ask.
+            return body.Length == 0 || m_constructorDepth % LevelsBetweenChecks != 0
+                ? body
+                : new Instruction[] { new DeepSequenceInstruction(body) };
         }
 
         /// <summary>Whether text is whitespace and nothing else.</summary>
@@ -9414,25 +9567,19 @@ namespace CodeDeeds.Xslt.Compiler
         {
             // The nearest declaration wins, and an empty value puts unprefixed names back in no
             // namespace — which is how a stylesheet turns the attribute off for one subtree.
-            for (int current = element; current >= 0; current = Above(current))
-            {
-                if (m_tree.KindOf(current) != NodeKind.Element)
-                {
-                    continue;
-                }
+            return Inherited(
+                element, CurrentDeclarers().DefaultNamespace, s_defaultNamespaceDeclaredAt, string.Empty, ref m_lastDefaultNamespace);
+        }
 
-                string? declared = (IsXsltElement(current, out _)
-                        ? GetAttribute(current, "xpath-default-namespace")
-                        : null)
-                    ?? GetXsltAttribute(current, "xpath-default-namespace");
+        private static bool DefaultNamespaceDeclaredAt(StylesheetCompiler compiler, int element, out string uri)
+        {
+            string? declared = (compiler.IsXsltElement(element, out _)
+                    ? compiler.GetAttribute(element, "xpath-default-namespace")
+                    : null)
+                ?? compiler.GetXsltAttribute(element, "xpath-default-namespace");
 
-                if (declared is not null)
-                {
-                    return declared;
-                }
-            }
-
-            return string.Empty;
+            uri = declared ?? string.Empty;
+            return declared is not null;
         }
 
         /// <summary>
@@ -9468,6 +9615,135 @@ namespace CodeDeeds.Xslt.Compiler
         /// may say <c>xsl:version="1.0"</c> or <c>xsl:use-when="false()"</c> about its own content without
         /// either reaching in.
         /// </remarks>
+        /// <summary>Whether an element itself settles an inherited property, and what it settles it to.</summary>
+        private delegate bool DeclaredAt<T>(StylesheetCompiler compiler, int element, out T value);
+
+        /// <summary>
+        /// A property an element inherits from the nearest ancestor-or-self that declares it, found once
+        /// for each element and remembered.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The version, the default collation and the default element namespace are all of this kind, and
+        /// each was walked up from the element every time it was asked: once per element for validation,
+        /// and a dozen times per expression by the parser. That is the depth of the element each time,
+        /// which over a stylesheet nested four thousand deep came to ten seconds of compiling, nearly all
+        /// of it walking.
+        /// </para>
+        /// <para>
+        /// What is remembered is which element settled it, one integer per node of the tree, and the value
+        /// is read off that element again when asked: the reading is an attribute lookup, and a table of
+        /// values keyed by node cost a stylesheet of a dozen elements more to fill than its walks had
+        /// cost. The walk stops at the first node already answered for, and what it passed is answered
+        /// for on the way back, so no level is walked twice.
+        /// </para>
+        /// </remarks>
+        /// <param name="element">The element asking.</param>
+        /// <param name="declarers">Which element settles the property, by node of the current tree.</param>
+        /// <param name="declared">Whether an element settles the property itself.</param>
+        /// <param name="atTop">The answer where nothing above declares it.</param>
+        /// <param name="last">
+        /// The last answer read, kept because nearly every asking is answered by the one element, the
+        /// stylesheet's own, and the version is a number to parse each time it is read off it.
+        /// </param>
+        private T Inherited<T>(
+            int element, int[] declarers, DeclaredAt<T> declared, T atTop, ref (XdmTree? Tree, int Declarer, T Value) last)
+        {
+            int settled = NoDeclarer;
+            int current = element;
+
+            for (; current >= 0; current = Above(current))
+            {
+                int known = declarers[current];
+
+                if (known != UnknownDeclarer)
+                {
+                    settled = known;
+                    break;
+                }
+
+                if (m_tree.KindOf(current) == NodeKind.Element && declared(this, current, out _))
+                {
+                    settled = current;
+                    break;
+                }
+            }
+
+            for (int passed = element; passed >= 0 && passed != current; passed = Above(passed))
+            {
+                declarers[passed] = settled;
+            }
+
+            if (settled < 0)
+            {
+                return atTop;
+            }
+
+            if (settled != last.Declarer || !ReferenceEquals(m_tree, last.Tree))
+            {
+                declared(this, settled, out T value);
+                last = (m_tree, settled, value);
+            }
+
+            return last.Value;
+        }
+
+        private (XdmTree? Tree, int Declarer, XsltVersion Value) m_lastVersion;
+        private (XdmTree? Tree, int Declarer, string Value) m_lastCollation;
+        private (XdmTree? Tree, int Declarer, string Value) m_lastDefaultNamespace;
+
+        private const int UnknownDeclarer = -2;
+        private const int NoDeclarer = -1;
+
+        /// <summary>Which element declares each of the three inherited properties, by node of one tree.</summary>
+        private sealed class Declarers
+        {
+            public Declarers(int nodes)
+            {
+                Version = new int[nodes];
+                Collation = new int[nodes];
+                DefaultNamespace = new int[nodes];
+                Array.Fill(Version, UnknownDeclarer);
+                Array.Fill(Collation, UnknownDeclarer);
+                Array.Fill(DefaultNamespace, UnknownDeclarer);
+            }
+
+            public int[] Version { get; }
+
+            public int[] Collation { get; }
+
+            public int[] DefaultNamespace { get; }
+        }
+
+        /// <summary>The declarers of every tree asked about, and the current tree's on hand.</summary>
+        private readonly Dictionary<XdmTree, Declarers> m_declarersByTree = new();
+        private XdmTree? m_declarersTree;
+        private Declarers? m_declarers;
+
+        /// <summary>The current tree's declarers, made on first asking.</summary>
+        /// <remarks>
+        /// Found by comparing the tree with the last one asked about, since a compilation is nearly all
+        /// one module: a lookup by tree for every asking cost a small stylesheet a tenth of its compiling.
+        /// </remarks>
+        private Declarers CurrentDeclarers()
+        {
+            if (!ReferenceEquals(m_tree, m_declarersTree))
+            {
+                if (!m_declarersByTree.TryGetValue(m_tree, out Declarers? declarers))
+                {
+                    declarers = new Declarers(m_tree.NodeCount);
+                    m_declarersByTree[m_tree] = declarers;
+                }
+
+                m_declarersTree = m_tree;
+                m_declarers = declarers;
+            }
+
+            return m_declarers!;
+        }
+
+
+
         /// <param name="element">The element being walked up from.</param>
         private int Above(int element)
         {
@@ -9486,33 +9762,37 @@ namespace CodeDeeds.Xslt.Compiler
                 return m_options.Version;
             }
 
-            for (int current = element; current >= 0; current = Above(current))
+            return Inherited(
+                element, CurrentDeclarers().Version, s_versionDeclaredAt, XsltVersion.V10, ref m_lastVersion);
+        }
+
+        private static readonly DeclaredAt<XsltVersion> s_versionDeclaredAt = VersionDeclaredAt;
+        private static readonly DeclaredAt<string> s_collationDeclaredAt = CollationDeclaredAt;
+        private static readonly DeclaredAt<string> s_defaultNamespaceDeclaredAt = DefaultNamespaceDeclaredAt;
+
+        private static bool VersionDeclaredAt(StylesheetCompiler compiler, int element, out XsltVersion version)
+        {
+            // On xsl:output, version is the version of the output method — HTML 4.01, XML 1.1 — and says
+            // nothing about which XSLT this is. Everywhere else an unprefixed version does, and on a
+            // literal result element the prefixed one does.
+            string? written =
+                (compiler.IsXsltElement(element, out string localName) && localName != "output"
+                    ? compiler.GetAttribute(element, "version")
+                    : null)
+                ?? compiler.GetXsltAttribute(element, "version");
+
+            if (written is null)
             {
-                if (m_tree.KindOf(current) != NodeKind.Element)
-                {
-                    continue;
-                }
-
-                // On xsl:output, version is the version of the output method — HTML 4.01, XML 1.1 — and says
-                // nothing about which XSLT this is. Everywhere else an unprefixed version does, and on a
-                // literal result element the prefixed one does.
-                string? version =
-                    (IsXsltElement(current, out string localName) && localName != "output"
-                        ? GetAttribute(current, "version")
-                        : null)
-                    ?? GetXsltAttribute(current, "version");
-
-                if (version is not null)
-                {
-                    // Checked here rather than with the rest of the attributes, because what it settles is
-                    // whether the rest are checked at all: read as naming a later XSLT, a value that is not a
-                    // version at all would turn every other check off.
-                    RequireDecimal(version);
-                    return XsltVersion.Parse(version);
-                }
+                version = default;
+                return false;
             }
 
-            return XsltVersion.V10;
+            // Checked here rather than with the rest of the attributes, because what it settles is
+            // whether the rest are checked at all: read as naming a later XSLT, a value that is not a
+            // version at all would turn every other check off.
+            RequireDecimal(written);
+            version = XsltVersion.Parse(written);
+            return true;
         }
 
         /// <summary>

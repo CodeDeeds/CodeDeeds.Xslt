@@ -8476,13 +8476,13 @@ none does yet.
   1,000 and 2,000 in a mode declared `on-no-match="shallow-copy"`: an empty stylesheet was enough. Found
   here and fixed by the work that carries a deep recursion on to another stack, which was merged after
   this; see *How deep a recursion may go*.
-- *The shape of a stylesheet.* `1+1+…+1` overflows in `BinaryExpr.Evaluate` between 2,000 and 5,000
-  terms, and an `or` chain between 10,000 and 20,000. Literal result elements nested 2,000 deep overflow
-  the compiler in `SettleUseWhenIn`. `xsl:if` nested 1,000 to 5,000 deep is refused by the XPath parser's
-  guard, the compiler having used the stack up by the time a `test` is read, which is safe and says the
-  wrong thing; at 10,000 it overflows. A pattern of 10,000 steps overflows in `Pattern.MatchStep`. A path
-  of 10,000 steps, a `||` chain and a comma sequence of 20,000 are sound. None of it is input, all of it
-  takes a generated stylesheet, and `BinaryExpr.Evaluate` is not somewhere to add a check unmeasured.
+- *The shape of a stylesheet.* `1+1+…+1` overflowed in `BinaryExpr.Evaluate` between 2,000 and 5,000
+  terms, and an `or` chain between 10,000 and 20,000. Literal result elements nested 2,000 deep overflowed
+  the compiler in `SettleUseWhenIn`. `xsl:if` nested 1,000 to 5,000 deep was refused by the XPath parser's
+  guard, the compiler having used the stack up by the time a `test` was read, which was safe and said the
+  wrong thing; at 10,000 it overflowed. A pattern of 10,000 steps overflowed in `Pattern.MatchStep`. A
+  path of 10,000 steps, a `||` chain and a comma sequence of 20,000 were sound. None of it is input, all
+  of it takes a generated stylesheet. Found here and fixed under *The shape of a stylesheet*.
 
 **What it costs.** Three stylesheets over a parsed document of a thousand records, nine thousand nodes:
 two whole documents compared forty times, a thousand records each compared with the first, and a thousand
@@ -9014,6 +9014,125 @@ here, reading as it does raised three levels down; each kind of runaway recursio
 the built-in rules of both kinds down a document 20,000 deep; and the fields of `DynamicContext.Held`
 compared by name with the fields of the context it copies, since a field left out would be missing only
 where a recursion ran deep.
+
+### The shape of a stylesheet
+
+Three overflows left over from *A tree as deep as it likes*, all of them in the shape of the stylesheet
+rather than of its input, and none reachable by anything anyone writes by hand: a program that writes
+stylesheets reaches them. `1+1+…+1` with five thousand terms ended the process in `BinaryExpr.Evaluate`;
+literal result elements nested two thousand deep ended it in the compiler, and `xsl:if` nested ten
+thousand deep in the compiler as well, having been *refused* at a few thousand by the XPath parser's guard
+saying that `true()` was an expression nested too deeply; a pattern of ten thousand steps ended it in
+`Pattern.MatchStep`. A stack overflow cannot be caught, so none of these was an error the caller saw. The
+rule here is that it never is.
+
+Looking for the three found more of the same shape, each tried in a process of its own at twenty thousand:
+every operator the parser reads in a loop — `-`, `*`, `div`, `or`, `and`, `|`, `intersect`, `except`,
+`!`, `=>`, a lookup after a lookup, a call on what a call gave, a path whose steps are expressions — and
+every instruction that holds a sequence constructor. `let` with twenty thousand clauses. And one with no
+recursion in it at all: on the compiled backend, twenty thousand comparisons joined by `or` in a predicate
+were emitted as one method, whose frame — every local of every operand, taken in one piece on entry —
+was more than a megabyte, and entering it was a stack overflow. Ten thousand were not.
+
+**A run of one operator is built flat.** The parser reads `a + b + c + …` in a loop, so nothing in it
+passes the guard in `ParseExprSingle`, and what the loop built was a tree as deep as the run is long, each
+operator's left operand the whole of the run before it. Evaluating that was a call per operator, and so
+was every walk the compiler makes over an expression's children. Past thirty-two operands a run is now a
+`ChainExpr`: the value so far is kept in a range-variable slot of the run's own, and each further operator
+is built as the ordinary expression it would have been with a reference to that slot for its left operand
+— `head + b + c` is `let $v := head, $v := $v + b, $v := $v + c return $v` with the rebinding XPath has no
+syntax for — so what each operator means is decided where it always was and the loop knows nothing about
+any of them. Subtraction is not associative and is not asked to be. `or`, `and` and `|` may be grouped as
+the parser likes, so a long run of those is a balanced tree of the same operators, no deeper than the
+logarithm of its length, its operands still reached left to right so that the run stops at the operand it
+always stopped at and an error is raised by the operand that always raised it; the compiled backend emits
+it like any other. A long `let` is one `LetChainExpr`, its bindings made in a loop. Below thirty-two
+operands nothing is built differently, and nothing anybody wrote by hand has thirty-two operands of one
+precedence. The clauses of one `for`, `some` or `every` are loops inside loops, which cannot be laid flat,
+and there may be 256 of them; the 257th is `XPST0003`.
+
+**The compiled backend leaves a large expression to the interpreter.** Past two thousand nodes an
+expression is not emitted as a method at all, because one method is one frame and a frame that size is a
+stack overflow with no recursion anywhere; the interpreter takes stack for the operand it is on and no
+other. The predicates inside it are still compiled in their own right, as they always were.
+
+**A stylesheet nested deep is compiled and run on new stacks**, as a deep template recursion now is (see
+*How deep a recursion may go*). Compiling recurses over the stylesheet a level per level of nesting, at
+something near a kilobyte a level, and is the most expensive recursion in the library; each of the two
+walks every element is reached by — the one that answers `use-when`, and the one that compiles a sequence
+constructor — asks the runtime how much stack is left and goes on upon a new one where the answer is no.
+It asks from further down than the XPath parser does, with thirty-two kilobytes of stack taken up in front
+of the question, so that the compiler is the one that moves rather than the parser the one that refuses:
+the two asked at one threshold had been answered in the wrong order. Running what was compiled is a
+recursion of its own — an instruction's content is run from inside the instruction — and a stylesheet is
+compiled once, on whatever stack its caller had, and run on any thread anyone likes, so the running asks
+for itself: one sequence constructor in every thirty-two, counted by constructor and not by element, since
+an `xsl:choose` and its `xsl:otherwise` are two elements and one constructor, is wrapped in an instruction
+that asks before it runs its body and runs it upon a new stack where it must. Thirty-two levels between
+askings is some sixty kilobytes at the most, and the runtime's answer is good for twice that. A stylesheet
+nested a hundred thousand deep compiles and runs, on four stacks. A `for-each` inside a `for-each` a
+thousand deep had overflowed a megabyte, and five hundred a quarter of one; three thousand of each shape
+now compile on a quarter of a megabyte and run on another.
+
+**A pattern's ordinary steps are a loop, and its climbing steps a search that moves.** A step with one
+anchor — `child::`, `attribute::`, `self::` — is followed by moving to it, so `a/a/a/…` of twenty thousand
+steps matches the bottom of a document that deep on a quarter of a megabyte. A step that climbs, written
+`//` or `descendant::`, is a search, one ancestor tried after another until the rest of the pattern holds
+at one, and the rest is a recursion, which goes on upon a new stack where it runs short, as the rest of
+them do; five thousand such steps over a document that deep match on a quarter of a megabyte too. Where no
+new stack can be had the pattern is refused with `XPDY0130`, which `Pattern.Matches` is told to let
+through: an error in matching a pattern ordinarily means the item does not match, and this one is about
+the pattern and not the item, and taken for no match it would be a rule quietly not matching on one
+machine and matching on another.
+
+**What compiling a deep stylesheet cost, and why.** Nested four thousand deep, `xsl:if` took ten and a
+half seconds to compile and forty milliseconds to run. `dotnet-stack` sampled the compiling thread in the
+XPath parser, reading `true()`: the parser asks its static context for the version a dozen times in
+reading one call, and a stylesheet answers by walking up from the element the expression stands on to the
+nearest that says — the depth of the element, every time. The parser reads the version once now, at
+construction, as it already read the comparison context once, and the base URI and default collation
+the first time a call asks; that alone was ten seconds to four. The compiler itself asks the same walk of
+every element for validation, and the two other properties of the kind — the default collation, the
+default element namespace — the same way, so the three are remembered: which element settled each, one
+integer per node of the tree, filled on the way back down so that no level is walked twice, and the value
+read off that element again when asked, the last one read kept because nearly every asking is answered by
+the stylesheet element. Four seconds to under four tenths; twenty thousand deep compiles in two.
+
+**What it costs.** Three workloads over the thousand-record document, the median of six fresh processes
+of each build taken turn about, six seconds of warm-up each, the base being the main these were merged
+onto with the fresh-stack work already in it:
+
+| | was | is |
+|---|---|---|
+| a transformation matching six patterns of several steps, two of them climbing, over twelve thousand nodes | 1,482 μs | 1,488 μs |
+| compiling a stylesheet of eighty expressions, a few operators each | 1,807 μs, 662 KB | 623 μs, 667 KB |
+| compiling one of seven templates and eleven expressions | 47.6 μs, 55.9 KB | 50.6 μs, 57.2 KB |
+
+The first is level, which took two tries: with the search inside `MatchStep` the loop was a fifteenth
+slower than the recursion it replaced, and is not with the search in a method of its own. The second is
+the parser reading the version once, and is what any stylesheet with expressions in it gains. The third
+is the price, three microseconds on the smallest stylesheet the harness has: the three arrays of
+declarers, filled, and the margin of stack the compiler takes up in front of each of its questions. A
+first form remembered the values themselves in a table keyed by node, and cost that stylesheet a tenth of
+its compiling and four kilobytes; the integers cost a fifteenth of the one and a fortieth of the other.
+
+**Found and not fixed.** A climbing pattern that fails only at the top of a deep chain — `a//a//…//b`
+over sixty nested `a`s — is a search of every way up the chain, and there are more of those than there
+are atoms; it was that before and is that now, and would want the anchors each step has been asked at
+remembered. The XPath parser's own nesting, parentheses inside parentheses and `if` inside `else`, is
+still refused at some hundreds of levels rather than carried on, which is what it did before and is not
+a shape a program writes. A stylesheet nested tens of thousands deep still compiles in time that grows
+faster than its depth: twenty thousand in two seconds, fifty in ten, a hundred in thirty-five.
+
+Fourteen new unit tests, 2,993 in all, in `StylesheetShapeTests`: each kind of run twenty thousand long on
+both backends and answered, the answers of a run laid flat held to the run's meaning — precedence,
+subtraction, what a long `or` stops at and which error it raises, a run inside a run, a `let` re-entered
+while in use; each kind of nesting three thousand deep compiled on a quarter of a megabyte and run on
+another, on both backends; an error raised three thousand levels down, on whatever stack that is, caught
+at the top as itself; a call in tail position forty levels down still a loop; a variable's scope closing
+through the wrapping; the 257th clause refused; and the patterns above. Every case ran in a process of
+its own first, on the stacks the tests run it on. All eight conformance runs are unchanged, totals and
+failure sets both, against the main with the fresh-stack work in it.
 
 ### Which results the suite asks for and does not get
 

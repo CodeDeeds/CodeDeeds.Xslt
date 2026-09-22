@@ -344,6 +344,82 @@ namespace CodeDeeds.Xslt.Compiler
         }
     }
 
+    /// <summary>
+    /// A sequence constructor that stands deep inside its stylesheet, and asks how much stack is left
+    /// before it runs.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Running a stylesheet recurses over it as compiling does: an instruction's content is run from
+    /// inside the instruction, so a stylesheet nested a thousand deep is a thousand frames deep when its
+    /// innermost instruction runs, whatever the input. The compiler carries on compiling one it cannot
+    /// compile on the stack it was given; this carries on running one it cannot run on the stack it is
+    /// being run on, which may be another thread's and smaller, upon a new stack, as a template
+    /// invocation does: see <see cref="FreshStack"/>. A stack overflow cannot be caught, so the question
+    /// has to be asked before the frames are taken, and here it is asked by the constructor the compiler
+    /// wrapped for the purpose, one in every so many levels.
+    /// </para>
+    /// <para>
+    /// Not a level in its own right: the body is run as the caller would have run it, with the same
+    /// context, and an instruction that the compiler asks about its shape is never wrapped, an empty
+    /// body being the one shape asked about.
+    /// </para>
+    /// </remarks>
+    internal sealed class DeepSequenceInstruction : Instruction
+    {
+        private readonly Instruction[] m_body;
+
+        /// <summary>Wraps a sequence constructor.</summary>
+        /// <param name="body">The constructor.</param>
+        public DeepSequenceInstruction(Instruction[] body)
+        {
+            m_body = body;
+        }
+
+        /// <inheritdoc/>
+        internal override void MarkTailPosition()
+        {
+            // The last instruction of the body is still the last thing the template does.
+            MarkTailPosition(m_body);
+        }
+
+        /// <inheritdoc/>
+        public override void Execute(ref DynamicContext context, XsltRuntime runtime)
+        {
+            if (!System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
+            {
+                new BodyOnFreshStack(m_body, context.Hold(), runtime).RunToCompletion(
+                    "The stylesheet's instructions are nested too deeply to run, and no further stack "
+                    + "could be had to continue on.");
+                return;
+            }
+
+            ExecuteAll(m_body, ref context, runtime);
+        }
+
+        /// <summary>The body, waiting to be run on a new stack.</summary>
+        private sealed class BodyOnFreshStack : FreshStack
+        {
+            private readonly Instruction[] m_body;
+            private readonly DynamicContext.Held m_context;
+            private readonly XsltRuntime m_runtime;
+
+            public BodyOnFreshStack(Instruction[] body, DynamicContext.Held context, XsltRuntime runtime)
+            {
+                m_body = body;
+                m_context = context;
+                m_runtime = runtime;
+            }
+
+            /// <inheritdoc/>
+            protected override void Run()
+            {
+                DynamicContext context = m_context.Restore();
+                ExecuteAll(m_body, ref context, m_runtime);
+            }
+        }
+    }
+
     /// <summary>One piece of a sequence constructor that holds an <c>xsl:on-empty</c> or <c>xsl:on-non-empty</c>.</summary>
     /// <param name="Body">The instructions of this piece.</param>
     /// <param name="When">

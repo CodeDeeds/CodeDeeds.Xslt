@@ -175,6 +175,8 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         internal static bool DependsOnFocusPosition(Expr expression)
         {
+            NestingGuard.DescendExpression();
+
             if (expression.ReadsFocusPosition)
             {
                 return true;

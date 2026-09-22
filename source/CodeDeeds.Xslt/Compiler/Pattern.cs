@@ -354,7 +354,10 @@ namespace CodeDeeds.Xslt.Compiler
         /// </remarks>
         private static bool IsReported(XsltException failed)
         {
-            return failed.Code is "XTDE0640" or "XTDE1260" or "XTMM9000" or "XTMM9001";
+            // And a refusal to go on for want of stack, which is about the pattern and not about the item:
+            // taken for no match, it would be a rule quietly not matching on one stack and matching on
+            // another, and the stylesheet the wiser only by what it did not produce.
+            return failed.Code is "XTDE0640" or "XTDE1260" or "XTMM9000" or "XTMM9001" or "XPDY0130";
         }
 
         private bool MatchesUnguarded(int node, ref DynamicContext context)
@@ -460,82 +463,184 @@ namespace CodeDeeds.Xslt.Compiler
         /// the node is the second <c>foo</c> under <em>the chapter</em>, and the chapter is not reached
         /// until an anchor is chosen. Asking first, against the parent, answered a different question.
         /// </para>
+        /// <para>
+        /// A step with one anchor is followed by moving to it, in the loop here, so a pattern of ordinary
+        /// steps costs no stack however long it is. A step that climbs is a search, one anchor tried
+        /// after another until the rest of the pattern holds at one, and the rest is asked recursively;
+        /// a pattern of ten thousand such steps over a document that deep would ask ten thousand levels
+        /// of it, so the stack is asked first and the pattern refused rather than the process ended. A
+        /// pattern of ten thousand ordinary steps did the same before the loop, in <c>MatchStep</c>
+        /// calling <c>AnchorHolds</c> calling <c>MatchStep</c>.
+        /// </para>
         /// </remarks>
         /// <param name="node">The candidate for this step.</param>
         /// <param name="stepIndex">Which step, counting inwards from the matched node.</param>
         /// <param name="context">The context used to evaluate any predicates.</param>
         private bool MatchStep(int node, int stepIndex, ref DynamicContext context)
         {
-            if (node < 0)
+            while (true)
             {
-                return false;
-            }
+                if (node < 0)
+                {
+                    return false;
+                }
 
+                PatternStep step = m_steps[stepIndex];
+                NodeKind principal = step.Axis.PrincipalNodeKind();
+
+                if (!step.Test.Matches(context.Tree, node, principal, context.FingerprintMap))
+                {
+                    return false;
+                }
+
+                bool last = stepIndex + 1 == m_steps.Length;
+
+                // Where the step to the left of this one has to hold. child:: and attribute:: look at the
+                // parent and self:: does not move at all; '//' and descendant:: widen either of those from
+                // one candidate to every ancestor of it.
+                int start = step.Reach is PatternReach.Self or PatternReach.AnyAncestorOrSelf
+                    ? node
+                    : context.Tree.ParentOf(node);
+
+                bool wide = step.Reach is PatternReach.AnyAncestor or PatternReach.AnyAncestorOrSelf
+                    || (last && m_rootAnchorAllowsAnyDepth);
+
+                // Whether the sequence a predicate counts within changes as the search climbs. A '//'
+                // written before an ordinary step is a step of its own — a//b is
+                // a/descendant-or-self::node()/child::b — so what a predicate on that step counts within
+                // is still the parent's children, and only what is written to the left of it climbs.
+                // Written as descendant:: there is no step in between, and then the sequence really is
+                // whatever the anchor selects.
+                bool varies = step.Axis is Axis.Descendant or Axis.DescendantOrSelf;
+
+                if (!varies && !PredicatesHold(node, step, start, ref context))
+                {
+                    return false;
+                }
+
+                if (wide)
+                {
+                    return MatchClimbing(node, stepIndex, start, ref context);
+                }
+
+                // One anchor, and the rest of the pattern has to hold there: the next step, asked by
+                // going round again, or what stands beyond the outermost step.
+                if (last)
+                {
+                    return Anchored(start, wide: false, ref context);
+                }
+
+                node = start;
+                stepIndex++;
+            }
+        }
+
+        /// <summary>
+        /// Whether a step that climbs is satisfied at some ancestor, and the rest of the pattern with it.
+        /// </summary>
+        /// <remarks>
+        /// The search, kept out of <see cref="MatchStep"/> so that the loop there stays the small thing
+        /// nearly every pattern needs and nothing else. The recursion is here, and only a pattern that
+        /// climbs pays for it. The step's test has been passed and its anchor-independent predicates
+        /// asked by the time this is reached.
+        /// </remarks>
+        /// <param name="node">The candidate for the step.</param>
+        /// <param name="stepIndex">Which step.</param>
+        /// <param name="start">The first anchor to try, from which the search climbs.</param>
+        /// <param name="context">The context used to evaluate any predicates.</param>
+        private bool MatchClimbing(int node, int stepIndex, int start, ref DynamicContext context)
+        {
             PatternStep step = m_steps[stepIndex];
-            NodeKind principal = step.Axis.PrincipalNodeKind();
-
-            if (!step.Test.Matches(context.Tree, node, principal, context.FingerprintMap))
-            {
-                return false;
-            }
-
             bool last = stepIndex + 1 == m_steps.Length;
-
-            // Where the step to the left of this one has to hold. child:: and attribute:: look at the
-            // parent and self:: does not move at all; '//' and descendant:: widen either of those from one
-            // candidate to every ancestor of it.
-            int start = step.Reach is PatternReach.Self or PatternReach.AnyAncestorOrSelf
-                ? node
-                : context.Tree.ParentOf(node);
-
-            bool wide = step.Reach is PatternReach.AnyAncestor or PatternReach.AnyAncestorOrSelf
-                || (last && m_rootAnchorAllowsAnyDepth);
-
-            // Whether the sequence a predicate counts within changes as the search climbs. A '//' written
-            // before an ordinary step is a step of its own — a//b is a/descendant-or-self::node()/child::b
-            // — so what a predicate on that step counts within is still the parent's children, and only
-            // what is written to the left of it climbs. Written as descendant:: there is no step in
-            // between, and then the sequence really is whatever the anchor selects.
             bool varies = step.Axis is Axis.Descendant or Axis.DescendantOrSelf;
 
-            if (!varies && !PredicatesHold(node, step, start, ref context))
+            // The search is a recursion, and a recursion that runs short of stack goes on upon another
+            // (FreshStack) rather than being refused: what ends it is the pattern, which is finite.
+            if (!last && !System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
             {
-                return false;
+                return MatchClimbingOnFreshStack(node, stepIndex, start, ref context);
             }
 
             for (int anchor = start; ; anchor = context.Tree.ParentOf(anchor))
             {
                 if ((!varies || PredicatesHold(node, step, anchor, ref context))
-                    && AnchorHolds(anchor, stepIndex, last, wide, ref context))
+                    && (last
+                        ? Anchored(anchor, wide: true, ref context)
+                        : MatchStep(anchor, stepIndex + 1, ref context)))
                 {
                     return true;
                 }
 
-                if (anchor < 0 || !wide)
+                if (anchor < 0)
                 {
                     return false;
                 }
             }
         }
 
-        /// <summary>Whether the rest of the pattern holds at a chosen anchor.</summary>
-        /// <param name="anchor">The node this step hangs from, which may be none.</param>
-        /// <param name="stepIndex">Which step was just satisfied.</param>
-        /// <param name="last">Whether that was the outermost step.</param>
-        /// <param name="wide">Whether the anchor was reached by climbing rather than by one move.</param>
-        /// <param name="context">The context used to evaluate any predicates.</param>
-        private bool AnchorHolds(
-            int anchor,
-            int stepIndex,
-            bool last,
-            bool wide,
-            ref DynamicContext context)
+        /// <summary>Goes on with the search upon a new stack, the one in use being nearly spent.</summary>
+        /// <remarks>
+        /// Where no new stack can be had the pattern is refused, with the code <see cref="IsReported"/>
+        /// lets through, so that <see cref="Matches"/> does not take the refusal for a node the pattern
+        /// does not match: taken so, it would be a rule quietly not matching on one machine and matching
+        /// on another.
+        /// </remarks>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private bool MatchClimbingOnFreshStack(int node, int stepIndex, int start, ref DynamicContext context)
         {
-            if (!last)
+            ClimbOnFreshStack search = new ClimbOnFreshStack(this, node, stepIndex, start, context.Hold());
+
+            try
             {
-                return MatchStep(anchor, stepIndex + 1, ref context);
+                search.RunToCompletion("no further stack could be had to continue on");
+            }
+            catch (XsltException failed) when (failed.InnerException is PlatformNotSupportedException or OutOfMemoryException)
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XPDY0130,
+                    "The pattern has more steps that climb ('//' or descendant::) than there is stack to "
+                    + "match, and " + failed.Message + ": each is a search that asks the rest of the "
+                    + "pattern of every ancestor, a level of stack apiece.");
             }
 
+            return search.Result;
+        }
+
+        /// <summary>The search for a climbing step's anchor, waiting to go on upon a new stack.</summary>
+        private sealed class ClimbOnFreshStack : FreshStack
+        {
+            private readonly Pattern m_pattern;
+            private readonly int m_node;
+            private readonly int m_stepIndex;
+            private readonly int m_start;
+            private readonly DynamicContext.Held m_context;
+
+            public ClimbOnFreshStack(Pattern pattern, int node, int stepIndex, int start, DynamicContext.Held context)
+            {
+                m_pattern = pattern;
+                m_node = node;
+                m_stepIndex = stepIndex;
+                m_start = start;
+                m_context = context;
+            }
+
+            public bool Result { get; private set; }
+
+            /// <inheritdoc/>
+            protected override void Run()
+            {
+                DynamicContext context = m_context.Restore();
+                Result = m_pattern.MatchClimbing(m_node, m_stepIndex, m_start, ref context);
+            }
+        }
+
+        /// <summary>Whether what is beyond the outermost step holds at a chosen anchor.</summary>
+        /// <param name="anchor">The node the outermost step hangs from, which may be none.</param>
+        /// <param name="wide">Whether the anchor was reached by climbing rather than by one move.</param>
+        /// <param name="context">The context used to evaluate a key.</param>
+        private bool Anchored(int anchor, bool wide, ref DynamicContext context)
+        {
             // The outermost step, so what is above it is the pattern's anchor rather than another step: a
             // key, the root, or nothing at all.
             if (m_keyAnchor is not null)
