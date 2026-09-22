@@ -71,9 +71,10 @@ namespace CodeDeeds.Xslt.XPath
         /// <remarks>
         /// A hint worth a route and never a promise, which is <see cref="ReturnsNodeSet"/>'s to make.
         /// Whoever acts on it asks <see cref="TryEvaluateNodes"/> each time, and takes the value where
-        /// that declines. True of <c>current()</c> under backwards-compatible behaviour and of nothing
-        /// else: the current item is a node there unless an instruction XSLT 1.0 did not have is walking
-        /// atomic values.
+        /// that declines. True of <c>current()</c> under backwards-compatible behaviour, the current item
+        /// being a node there unless an instruction XSLT 1.0 did not have is walking atomic values, and
+        /// of <c>.</c> at every version, which leaves it to each reader whether the version matters to
+        /// what it does with a node.
         /// </remarks>
         internal virtual bool UsuallyReturnsNodeSet => false;
 
@@ -97,6 +98,31 @@ namespace CodeDeeds.Xslt.XPath
         internal virtual XdmTree? TryEvaluateNodes(ref DynamicContext context, List<int> output)
         {
             return ReturnsNodeSet ? EvaluateNodes(ref context, output) : null;
+        }
+
+        /// <summary>
+        /// Names the one node this expression is in this context, where it is known without evaluating
+        /// it to be exactly one, and declines where it is not.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="TryEvaluateNodes"/> for a reader that wants one node and has no use for a list:
+        /// <c>xsl:value-of</c> writing <c>.</c>, <c>generate-id()</c> naming it. The list has to be rented
+        /// before the question can be put, and handed back whatever the answer, which is paid where the
+        /// expression declines as much as where it answers — and <c>xsl:value-of select="."</c> over a
+        /// thousand integers, where it always declines, was a tenth slower for it. The expressions that
+        /// are usually nodes are each one item, so they answer here with nothing rented; any other
+        /// declines, which sends its reader the way it went before.
+        /// </remarks>
+        /// <param name="context">The evaluation context.</param>
+        /// <param name="node">The node, where the tree returned is not <see langword="null"/>.</param>
+        /// <returns>
+        /// The tree the node belongs to, or <see langword="null"/> with nothing evaluated and nothing
+        /// raised where the expression has to be evaluated as a value to learn what it is.
+        /// </returns>
+        internal virtual XdmTree? TryEvaluateOneNode(ref DynamicContext context, out int node)
+        {
+            node = -1;
+            return null;
         }
 
         /// <summary>
@@ -479,9 +505,9 @@ namespace CodeDeeds.Xslt.XPath
     /// Backwards compatibility does not bring the guarantee back. A 1.0 stylesheet on a 2.0 processor can
     /// write <c>xsl:for-each select="(3,1,2)"</c> and stand on an atomic context item with the mode still
     /// on, so <see cref="ReturnsNodeSet"/> is false whatever the version was: a promise that can be broken
-    /// is not one. What that costs is the comparison fast path for <c>.</c>, and it costs nothing else — the
-    /// context item is a single item, and one node atomized against a value answers what a node-set of one
-    /// answers.
+    /// is not one. What that cost was the comparison fast path for <c>.</c>, a node-set of one built for
+    /// every candidate of <c>[. = 'x']</c>, and <see cref="UsuallyReturnsNodeSet"/> has it back without the
+    /// promise: the node is asked for each time, and the value taken where there is none.
     /// </para>
     /// </remarks>
     public sealed class ContextItemExpr : Expr
@@ -491,6 +517,45 @@ namespace CodeDeeds.Xslt.XPath
         /// the backwards-compatible ones included, so nothing here can be promised to be a node.
         /// </summary>
         public override bool ReturnsNodeSet => false;
+
+        /// <summary>
+        /// True, at every version: the context item is a node wherever a path, a template or an
+        /// <c>xsl:for-each</c> over nodes set it, and only a sequence of atomic values being filtered or
+        /// walked makes it anything else.
+        /// </summary>
+        /// <remarks>
+        /// What acts on it decides for itself what the version changes. <c>xsl:value-of</c> and
+        /// <c>generate-id()</c> read one node's text or identity, which is the same under every version,
+        /// and ask wherever they are written. A comparison has a route for each set of rules, since what
+        /// is compared differs, and <c>[. = 'x']</c> built a node-set of one for every candidate under
+        /// both to compare one node's text.
+        /// </remarks>
+        internal override bool UsuallyReturnsNodeSet => true;
+
+        /// <inheritdoc/>
+        /// <remarks>
+        /// Declines where the context item is an atomic value and where there is none, so that the
+        /// caller goes on to <see cref="Evaluate"/> and meets the value, or <c>XPDY0002</c>, as it would
+        /// have without asking.
+        /// </remarks>
+        internal override XdmTree? TryEvaluateNodes(ref DynamicContext context, List<int> output)
+        {
+            // No node is both cases at once: an atomic context item is held beside a Node that is not one.
+            if (context.Node < 0)
+            {
+                return null;
+            }
+
+            output.Add(context.Node);
+            return context.Tree;
+        }
+
+        /// <inheritdoc/>
+        internal override XdmTree? TryEvaluateOneNode(ref DynamicContext context, out int node)
+        {
+            node = context.Node;
+            return node < 0 ? null : context.Tree;
+        }
 
         /// <inheritdoc/>
         public override XPathValue Evaluate(ref DynamicContext context)
@@ -634,8 +699,8 @@ namespace CodeDeeds.Xslt.XPath
         private readonly ComparisonRoute m_route;
 
         /// <summary>
-        /// What the <see cref="ComparisonRoute.NodesWhereFound"/> route knows of each operand, settled with
-        /// the route and read by no other: whether it is statically nodes, and is then read as
+        /// What the routes that ask an operand for its nodes know of each, settled with the route and read
+        /// by no other: whether it is statically nodes, and is then read as
         /// <see cref="ComparisonRoute.NodesDirectly"/> reads it, and whether it is worth asking for nodes
         /// at all, being that or usually nodes.
         /// </summary>
@@ -665,7 +730,19 @@ namespace CodeDeeds.Xslt.XPath
             /// Under 1.0 rules, an operand is nodes wherever it can be and cannot promise it, so each
             /// operand's nodes are read from a pooled list where it has them and its value taken where not.
             /// </summary>
+            /// <remarks>
+            /// The two routes that ask come last, so that the paths every predicate takes tell them from
+            /// the routes they take by one comparison.
+            /// </remarks>
             NodesWhereFound,
+
+            /// <summary>
+            /// Under 2.0 rules, one operand is nodes wherever it can be and cannot promise it, and the
+            /// other is a value, so the nodes are atomized against the value as
+            /// <see cref="NodesTyped"/> atomizes them where the operand has them, and the pair compared
+            /// as values where it has none.
+            /// </summary>
+            NodesTypedWhereFound,
         }
 
         /// <summary>
@@ -687,8 +764,8 @@ namespace CodeDeeds.Xslt.XPath
 
             if (version.IsBackwardsCompatible)
             {
-                // An operand that is only usually nodes — current() — is asked each time, and must not
-                // be read as nodes on the strength of the other operand being some.
+                // An operand that is only usually nodes — current(), or '.' — is asked each time, and
+                // must not be read as nodes on the strength of the other operand being some.
                 if (left.UsuallyReturnsNodeSet || right.UsuallyReturnsNodeSet)
                 {
                     return ComparisonRoute.NodesWhereFound;
@@ -699,9 +776,20 @@ namespace CodeDeeds.Xslt.XPath
                     : ComparisonRoute.General;
             }
 
-            return left.ReturnsNodeSet != right.ReturnsNodeSet
-                ? ComparisonRoute.NodesTyped
-                : ComparisonRoute.General;
+            if (left.ReturnsNodeSet != right.ReturnsNodeSet)
+            {
+                return ComparisonRoute.NodesTyped;
+            }
+
+            // Neither statically nodes, and one of them usually: '.' against a literal, which is what
+            // [. = 'x'] asks of every candidate. Two that are usually nodes, '. = current()', go the
+            // general way, that route taking a list on one side only.
+            if (!left.ReturnsNodeSet && left.UsuallyReturnsNodeSet != right.UsuallyReturnsNodeSet)
+            {
+                return ComparisonRoute.NodesTypedWhereFound;
+            }
+
+            return ComparisonRoute.General;
         }
 
         /// <summary>
@@ -767,11 +855,11 @@ namespace CodeDeeds.Xslt.XPath
                     return XPathValue.FromBoolean(CompareTypedWithNodeOperand(ref context));
             }
 
-            // Asked for here and not as a third case above, so that the switch the two routes every
-            // predicate takes go through is the one it was: this route is seldom taken, and they are not.
-            if (m_route == ComparisonRoute.NodesWhereFound)
+            // Asked for here and not as cases above, so that the switch the two routes every predicate
+            // takes go through is the one it was: these routes are seldom taken, and they are not.
+            if (m_route >= ComparisonRoute.NodesWhereFound)
             {
-                return XPathValue.FromBoolean(CompareWhereNodesAreFound(ref context));
+                return XPathValue.FromBoolean(CompareWhereFound(ref context));
             }
 
             XPathValue left = m_left.Evaluate(ref context);
@@ -851,8 +939,8 @@ namespace CodeDeeds.Xslt.XPath
 
                 // Beside the general way and not among the cases, for the reason Evaluate gives, and
                 // asked for outright: a boolean by way of a value is what this method is here to spare.
-                _ => m_route == ComparisonRoute.NodesWhereFound
-                    ? CompareWhereNodesAreFound(ref context)
+                _ => m_route >= ComparisonRoute.NodesWhereFound
+                    ? CompareWhereFound(ref context)
                     : Evaluate(ref context).ToBoolean(),
             };
         }
@@ -915,8 +1003,60 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
-        /// A 1.0 comparison with an operand that is nodes wherever it can be, <c>current()</c>: each
-        /// operand is asked for its nodes, and for its value only where it has none to give.
+        /// A comparison by either of the routes that ask an operand for its nodes, the version's own.
+        /// </summary>
+        private bool CompareWhereFound(ref DynamicContext context)
+        {
+            return m_route == ComparisonRoute.NodesWhereFound
+                ? CompareWhereNodesAreFound(ref context)
+                : CompareTypedWhereNodeIsFound(ref context);
+        }
+
+        /// <summary>
+        /// A 2.0 comparison between a value and an operand that is nodes wherever it can be, <c>.</c>:
+        /// the operand is asked for its nodes, which are atomized against the value as
+        /// <see cref="CompareTypedWithNodeOperand"/> atomizes a step's, and the two are compared as
+        /// values where it has none to give.
+        /// </summary>
+        /// <remarks>
+        /// <c>[. = 'x']</c> went the general way for every candidate: a node-set of one built to hold the
+        /// context node, both sides laid out in lists of atomized values, and the pairs asked — five
+        /// hundred bytes to answer one string compare, where a child step beside the same literal answers
+        /// it from a pooled list. What is asked, of which values and in which order, is what the general
+        /// way asks, only of the node itself rather than of a node-set built around it; and where the
+        /// context item is an atomic value the general way is taken as it stands.
+        /// </remarks>
+        private bool CompareTypedWhereNodeIsFound(ref DynamicContext context)
+        {
+            // Exactly one side is usually nodes, and neither is statically so, which the route promises.
+            bool nodesOnLeft = m_asksLeftForNodes;
+            List<int> nodes = NodeListPool.Rent();
+
+            try
+            {
+                XdmTree? tree = nodesOnLeft
+                    ? m_left.TryEvaluateNodes(ref context, nodes)
+                    : m_right.TryEvaluateNodes(ref context, nodes);
+
+                if (tree is null)
+                {
+                    return XPathComparison.General(
+                        m_left.Evaluate(ref context), m_right.Evaluate(ref context), m_operator, m_version, Comparing);
+                }
+
+                XPathValue other = nodesOnLeft ? m_right.Evaluate(ref context) : m_left.Evaluate(ref context);
+
+                return CompareTypedNodes(tree, nodes, other, nodesOnLeft);
+            }
+            finally
+            {
+                NodeListPool.Return(nodes);
+            }
+        }
+
+        /// <summary>
+        /// A 1.0 comparison with an operand that is nodes wherever it can be, <c>current()</c> or
+        /// <c>.</c>: each operand is asked for its nodes, and for its value only where it has none to give.
         /// </summary>
         /// <remarks>
         /// <c>current()</c> is a node in everything XSLT 1.0 could write, and once said so outright, which
@@ -931,8 +1071,9 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         private bool CompareWhereNodesAreFound(ref DynamicContext context)
         {
-            // Only an operand that could answer is asked, and only it has a list rented for it: '.'
-            // beside current() is a value whatever the context, and was read as one before.
+            // Only an operand that could answer is asked, and only it has a list rented for it: the
+            // 'x' of [. = 'x'] is a value whatever the context, and asking it was a list rented and a
+            // virtual call for nothing.
             List<int>? leftNodes = m_asksLeftForNodes ? NodeListPool.Rent() : null;
             List<int>? rightNodes = m_asksRightForNodes ? NodeListPool.Rent() : null;
 

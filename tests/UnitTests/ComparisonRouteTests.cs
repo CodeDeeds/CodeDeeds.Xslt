@@ -357,6 +357,17 @@ namespace CodeDeeds.Xslt.UnitTests
             Assert.AreEqual(
                 "false",
                 Answers("name[1] != 'widget'", "name[1] != 'widget'", "3.0", Source, CaseBlind));
+
+            // The context node inside a predicate, which is asked for its node and compared as a step's
+            // nodes are, by the collation in scope and not by code point.
+            Assert.AreEqual("0,true", Answers("count(name[. = 'WIDGET'])", "count(name[. = 'WIDGET']) = 0", "3.0", Source));
+            Assert.AreEqual(
+                "1,true", Answers("count(name[. = 'WIDGET'])", "count(name[. = 'WIDGET']) = 1", "3.0", Source, CaseBlind));
+            Assert.AreEqual(
+                "1,true", Answers("count(name['GADGET' = .])", "count(name['GADGET' = .]) = 1", "3.0", Source, CaseBlind));
+            Assert.AreEqual(
+                "1,true", Answers("count(name[. &lt; 'H'])", "count(name[. &lt; 'H']) = 1", "3.0", Source, CaseBlind));
+            Assert.AreEqual("1,true", Answers("count(name[. &lt; 'a'])", "count(name[. &lt; 'a']) = 1", "3.0", Source));
         }
 
         [TestMethod]
@@ -386,6 +397,20 @@ namespace CodeDeeds.Xslt.UnitTests
             Assert.AreEqual("true", Typed("t:due &lt; xs:date('2000-01-01')"));
             Assert.AreEqual("true", Typed("t:due &lt; xs:date('2000-01-01') or false()"));
             Assert.AreEqual("false", Typed("xs:date('2000-01-01') &lt; t:due"));
+
+            // The same nodes as the context item of a predicate, asked for and read by their type.
+            Assert.AreEqual("true", Typed("count(t:sizes[. = 5]) = 1"));
+            Assert.AreEqual("true", Typed("count(t:sizes[4 = .]) = 0"));
+            Assert.AreEqual("true", Typed("count(t:sizes[. &gt; 4]) = 1"));
+            Assert.AreEqual("true", Typed("count(t:due[. &lt; xs:date('2000-01-01')]) = 1"));
+            Assert.AreEqual("true", Typed("count(t:due[xs:date('2000-01-01') &lt; .]) = 0"));
+            Assert.AreEqual("true", Typed("count(t:sizes[. = xs:untypedAtomic('5')]) = 1"));
+
+            // A date beside a string is a pair no comparison is defined for, by the general way and by
+            // the route that asks '.' for its node alike.
+            Assert.AreEqual(
+                "XPTY0004",
+                Assert.ThrowsExactly<XsltException>(() => Typed("count(t:due[. = '1990-01-02']) = 0")).Code);
         }
 
         [TestMethod]

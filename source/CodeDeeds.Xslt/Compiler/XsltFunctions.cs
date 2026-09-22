@@ -1954,6 +1954,13 @@ namespace CodeDeeds.Xslt.Compiler
         }
 
         /// <inheritdoc/>
+        internal override XdmTree? TryEvaluateOneNode(ref DynamicContext context, out int node)
+        {
+            node = context.CurrentNode;
+            return node < 0 ? null : context.CurrentTree;
+        }
+
+        /// <inheritdoc/>
         public override XPathValue Evaluate(ref DynamicContext context)
         {
             if (context.CurrentNode >= 0)
@@ -2034,19 +2041,26 @@ namespace CodeDeeds.Xslt.Compiler
         private readonly Expr? m_argument;
 
         /// <summary>
-        /// Whether the argument is worth asking for its nodes before it is asked for its value: one that
-        /// is statically a node-set, or usually one. Settled here, the call being made once for each
-        /// candidate where a stylesheet compares identities.
+        /// Whether the argument is statically a node-set, whose first node is read from a pooled list.
+        /// Settled here, the call being made once for each candidate where a stylesheet compares
+        /// identities.
         /// </summary>
-        private readonly bool m_asksArgumentForNodes;
+        private readonly bool m_argumentIsNodes;
+
+        /// <summary>
+        /// Whether the argument is one node wherever it can be and cannot promise it, <c>.</c> or
+        /// <c>current()</c>, which is asked for that node with nothing rented to ask it.
+        /// </summary>
+        private readonly bool m_argumentIsUsuallyANode;
 
         /// <summary>Initializes a call to <c>generate-id()</c>.</summary>
         /// <param name="argument">The node-set to identify, or <see langword="null"/> for the context node.</param>
         public GenerateIdExpr(Expr? argument)
         {
             m_argument = argument;
-            m_asksArgumentForNodes = argument is not null
-                && (argument.ReturnsNodeSet || argument.UsuallyReturnsNodeSet);
+            m_argumentIsNodes = argument is not null && argument.ReturnsNodeSet;
+            m_argumentIsUsuallyANode = argument is not null
+                && !argument.ReturnsNodeSet && argument.UsuallyReturnsNodeSet;
         }
 
         /// <inheritdoc/>
@@ -2104,10 +2118,11 @@ namespace CodeDeeds.Xslt.Compiler
         /// Reads the first node of an argument that is nodes, from a pooled list and without the node-set.
         /// </summary>
         /// <remarks>
-        /// An argument that is statically a node-set is read so always. One that is only usually nodes,
-        /// <c>current()</c>, is asked: <c>generate-id(.) = generate-id(current())</c> is how a 1.0
-        /// stylesheet says "this very node", once for each candidate, and what it names is a node unless
-        /// atomic values are being walked.
+        /// An argument that is statically a node-set is read so always. One that is only usually a node,
+        /// <c>.</c> or <c>current()</c>, is asked for the one, with no list rented to ask it:
+        /// <c>generate-id(.) = generate-id(current())</c> is how a 1.0 stylesheet says "this very node",
+        /// once for each candidate, and what each side names is a node unless atomic values are being
+        /// walked or filtered.
         /// </remarks>
         /// <param name="context">The evaluation context.</param>
         /// <param name="tree">Set to the node's tree, where there is a node.</param>
@@ -2119,7 +2134,21 @@ namespace CodeDeeds.Xslt.Compiler
         {
             node = -1;
 
-            if (!m_asksArgumentForNodes)
+            if (m_argumentIsUsuallyANode)
+            {
+                XdmTree? one = m_argument!.TryEvaluateOneNode(ref context, out int only);
+
+                if (one is null)
+                {
+                    return false;
+                }
+
+                tree = one;
+                node = only;
+                return true;
+            }
+
+            if (!m_argumentIsNodes)
             {
                 return false;
             }

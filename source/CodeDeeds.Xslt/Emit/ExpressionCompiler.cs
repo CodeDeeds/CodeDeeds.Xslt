@@ -185,6 +185,12 @@ namespace CodeDeeds.Xslt.Emit
         }
 
         /// <inheritdoc/>
+        internal override XdmTree? TryEvaluateOneNode(ref DynamicContext context, out int node)
+        {
+            return m_source.TryEvaluateOneNode(ref context, out node);
+        }
+
+        /// <inheritdoc/>
         internal override void MarkTailPosition()
         {
             // The emitted code holds the very nodes it was compiled from, and calls back into the ones it

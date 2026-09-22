@@ -479,9 +479,11 @@ namespace CodeDeeds.Xslt.Compiler
         private readonly bool m_wholeSequence;
 
         /// <summary>
-        /// Whether the select is nodes wherever it can be and cannot promise it — <c>current()</c> under
-        /// 1.0 behaviour — so that it is asked for a node before it is asked for a value. Settled here
-        /// and not where the instruction runs, which is once for every element most stylesheets write.
+        /// Whether the select is a node wherever it can be and cannot promise it — <c>.</c>, at every
+        /// version, and <c>current()</c> under 1.0 behaviour — so that it is asked for a node before it
+        /// is asked for a value. One node's text is what every version writes for it, so nothing here
+        /// turns on the version. Settled here and not where the instruction runs, which is once for
+        /// every element most stylesheets write.
         /// </summary>
         private readonly bool m_selectIsUsuallyNodes;
 
@@ -531,8 +533,9 @@ namespace CodeDeeds.Xslt.Compiler
             else if (m_selectIsUsuallyNodes && !context.Tree.HasTypeAnnotations
                 && CurrentNodeText(ref context) is string ofTheNode)
             {
-                // A select that is only usually nodes — current() — was asked, and had a node to give.
-                // Where the item it names is an atomic value it declines, and the general way writes it.
+                // A select that is only usually a node — '.', or current() — was asked, and had one to
+                // give. Where the item it names is an atomic value it declines, and the general way
+                // writes it.
                 text = ofTheNode;
             }
             else
@@ -613,39 +616,23 @@ namespace CodeDeeds.Xslt.Compiler
         }
 
         /// <summary>
-        /// The text of a select that is nodes wherever it can be, <c>current()</c>, where in this context
-        /// it is: read from the node as <see cref="SelectedNodesText"/> reads it.
+        /// The text of a select that is a node wherever it can be, <c>.</c> or <c>current()</c>, where in
+        /// this context it is: read from the node as <see cref="SelectedNodesText"/> reads it.
         /// </summary>
+        /// <remarks>
+        /// Asked for the one node and not for a list of them: each such select is a single item, and a
+        /// list rented to put the question is paid for where the answer is no as well — once for every
+        /// integer an <c>xsl:for-each select="1 to 1000"</c> writes with <c>select="."</c>.
+        /// </remarks>
         /// <returns>
-        /// The text, or <see langword="null"/> where the select declined to be read as nodes — an atomic
+        /// The text, or <see langword="null"/> where the select declined to be read as a node — an atomic
         /// value is being walked, and the select has to be evaluated to write it.
         /// </returns>
         private string? CurrentNodeText(ref DynamicContext context)
         {
-            List<int> nodes = NodeListPool.Rent();
+            XdmTree? tree = m_select!.TryEvaluateOneNode(ref context, out int node);
 
-            try
-            {
-                XdmTree? tree = m_select!.TryEvaluateNodes(ref context, nodes);
-
-                if (tree is null)
-                {
-                    return null;
-                }
-
-                if (nodes.Count == 0)
-                {
-                    return string.Empty;
-                }
-
-                return nodes.Count == 1 || !m_wholeSequence
-                    ? tree.StringValueOf(nodes[0])
-                    : Join(XPathValue.FromNodeSet(NodeSet.FromOrderedNodes(tree, nodes)), " ");
-            }
-            finally
-            {
-                NodeListPool.Return(nodes);
-            }
+            return tree?.StringValueOf(node);
         }
     }
 
