@@ -65,59 +65,38 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
-        /// Gets whether this expression produces nodes in every context but one it cannot rule out, so
-        /// that reading its nodes directly is worth trying and cannot be relied on.
+        /// Gets whether this expression is one node in every context but one it cannot rule out, so that
+        /// asking it for the node is worth a route and cannot be relied on.
         /// </summary>
         /// <remarks>
-        /// A hint worth a route and never a promise, which is <see cref="ReturnsNodeSet"/>'s to make.
-        /// Whoever acts on it asks <see cref="TryEvaluateNodes"/> each time, and takes the value where
-        /// that declines. True of <c>current()</c> under backwards-compatible behaviour, the current item
-        /// being a node there unless an instruction XSLT 1.0 did not have is walking atomic values, and
-        /// of <c>.</c> at every version, which leaves it to each reader whether the version matters to
-        /// what it does with a node.
+        /// A hint and never a promise, which is <see cref="ReturnsNodeSet"/>'s to make. Whoever acts on it
+        /// asks <see cref="TryEvaluateOneNode"/> each time, and takes the value where that declines. True
+        /// of <c>current()</c> under backwards-compatible behaviour, the current item being a node there
+        /// unless an instruction XSLT 1.0 did not have is walking atomic values, and of <c>.</c> at every
+        /// version, which leaves it to each reader whether the version matters to what it does with a
+        /// node. Both are one item, which is why the question asks for one: it was first asked for a list,
+        /// rented before the question could be put and handed back whatever the answer, and
+        /// <c>xsl:value-of select="."</c> over a thousand integers, where it always declines, was a tenth
+        /// slower for it. An expression that is usually several nodes would want the list form back,
+        /// which is a method beside this one.
         /// </remarks>
         internal virtual bool UsuallyReturnsNodeSet => false;
-
-        /// <summary>
-        /// Appends the nodes this expression selects to a caller-supplied list where nodes are what it
-        /// yields in this context, and declines where that is not known without evaluating it.
-        /// </summary>
-        /// <remarks>
-        /// <see cref="ReturnsNodeSet"/> answers for every context at once, and an expression that is nodes
-        /// in all but a few has to answer no. This is the same question asked of one context: what
-        /// <see cref="EvaluateNodes"/> gives where the answer is yes, and nothing evaluated, nothing
-        /// appended and nothing raised where it is no, so that the caller can go on to
-        /// <see cref="Evaluate"/> as though it had not asked.
-        /// </remarks>
-        /// <param name="context">The evaluation context.</param>
-        /// <param name="output">The list to append to. Nodes are appended in document order.</param>
-        /// <returns>
-        /// The tree the appended nodes belong to, or <see langword="null"/> where the expression has to
-        /// be evaluated as a value to learn what it is.
-        /// </returns>
-        internal virtual XdmTree? TryEvaluateNodes(ref DynamicContext context, List<int> output)
-        {
-            return ReturnsNodeSet ? EvaluateNodes(ref context, output) : null;
-        }
 
         /// <summary>
         /// Names the one node this expression is in this context, where it is known without evaluating
         /// it to be exactly one, and declines where it is not.
         /// </summary>
         /// <remarks>
-        /// <see cref="TryEvaluateNodes"/> for a reader that wants one node and has no use for a list:
-        /// <c>xsl:value-of</c> writing <c>.</c>, <c>generate-id()</c> naming it. The list has to be rented
-        /// before the question can be put, and handed back whatever the answer, which is paid where the
-        /// expression declines as much as where it answers — and <c>xsl:value-of select="."</c> over a
-        /// thousand integers, where it always declines, was a tenth slower for it. The expressions that
-        /// are usually nodes are each one item, so they answer here with nothing rented; any other
-        /// declines, which sends its reader the way it went before.
+        /// <see cref="ReturnsNodeSet"/> answers for every context at once, and an expression that is a
+        /// node in all but a few has to answer no. This is the same question asked of one context: the
+        /// node where the answer is yes, and nothing evaluated, nothing rented and nothing raised where
+        /// it is no, so that the caller can go on to <see cref="Evaluate"/> as though it had not asked.
         /// </remarks>
         /// <param name="context">The evaluation context.</param>
         /// <param name="node">The node, where the tree returned is not <see langword="null"/>.</param>
         /// <returns>
-        /// The tree the node belongs to, or <see langword="null"/> with nothing evaluated and nothing
-        /// raised where the expression has to be evaluated as a value to learn what it is.
+        /// The tree the node belongs to, or <see langword="null"/> where the expression has to be
+        /// evaluated as a value to learn what it is.
         /// </returns>
         internal virtual XdmTree? TryEvaluateOneNode(ref DynamicContext context, out int node)
         {
@@ -536,21 +515,9 @@ namespace CodeDeeds.Xslt.XPath
         /// <remarks>
         /// Declines where the context item is an atomic value and where there is none, so that the
         /// caller goes on to <see cref="Evaluate"/> and meets the value, or <c>XPDY0002</c>, as it would
-        /// have without asking.
+        /// have without asking. One test tells both cases: an atomic context item is held beside a
+        /// <see cref="DynamicContext.Node"/> that is not one.
         /// </remarks>
-        internal override XdmTree? TryEvaluateNodes(ref DynamicContext context, List<int> output)
-        {
-            // No node is both cases at once: an atomic context item is held beside a Node that is not one.
-            if (context.Node < 0)
-            {
-                return null;
-            }
-
-            output.Add(context.Node);
-            return context.Tree;
-        }
-
-        /// <inheritdoc/>
         internal override XdmTree? TryEvaluateOneNode(ref DynamicContext context, out int node)
         {
             node = context.Node;
@@ -1030,22 +997,25 @@ namespace CodeDeeds.Xslt.XPath
         {
             // Exactly one side is usually nodes, and neither is statically so, which the route promises.
             bool nodesOnLeft = m_asksLeftForNodes;
+            XdmTree? tree = nodesOnLeft
+                ? m_left.TryEvaluateOneNode(ref context, out int node)
+                : m_right.TryEvaluateOneNode(ref context, out node);
+
+            if (tree is null)
+            {
+                return XPathComparison.General(
+                    m_left.Evaluate(ref context), m_right.Evaluate(ref context), m_operator, m_version, Comparing);
+            }
+
+            XPathValue other = nodesOnLeft ? m_right.Evaluate(ref context) : m_left.Evaluate(ref context);
+
+            // Rented only once there is a node to hold, CompareTypedNodes taking the list emitted code
+            // walks a step into; (1 to 1000)[. > 500] declines a thousand times and rents nothing.
             List<int> nodes = NodeListPool.Rent();
 
             try
             {
-                XdmTree? tree = nodesOnLeft
-                    ? m_left.TryEvaluateNodes(ref context, nodes)
-                    : m_right.TryEvaluateNodes(ref context, nodes);
-
-                if (tree is null)
-                {
-                    return XPathComparison.General(
-                        m_left.Evaluate(ref context), m_right.Evaluate(ref context), m_operator, m_version, Comparing);
-                }
-
-                XPathValue other = nodesOnLeft ? m_right.Evaluate(ref context) : m_left.Evaluate(ref context);
-
+                nodes.Add(node);
                 return CompareTypedNodes(tree, nodes, other, nodesOnLeft);
             }
             finally
@@ -1071,60 +1041,89 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         private bool CompareWhereNodesAreFound(ref DynamicContext context)
         {
-            // Only an operand that could answer is asked, and only it has a list rented for it: the
-            // 'x' of [. = 'x'] is a value whatever the context, and asking it was a list rented and a
-            // virtual call for nothing.
-            List<int>? leftNodes = m_asksLeftForNodes ? NodeListPool.Rent() : null;
-            List<int>? rightNodes = m_asksRightForNodes ? NodeListPool.Rent() : null;
+            // Only an operand that could answer is asked: the 'x' of [. = 'x'] is a value whatever the
+            // context, and asking it was a virtual call for nothing. Asking raises nothing and evaluates
+            // nothing, so it comes first whichever side it is on, and nothing is rented to ask: the one
+            // node it answers with is a span of one on the stack, and where it declines the value is
+            // taken in the order the general way takes them.
+            int leftNode = -1;
+            int rightNode = -1;
+            XdmTree? leftTree = m_asksLeftForNodes && !m_leftIsNodes ? m_left.TryEvaluateOneNode(ref context, out leftNode) : null;
+            XdmTree? rightTree = m_asksRightForNodes && !m_rightIsNodes ? m_right.TryEvaluateOneNode(ref context, out rightNode) : null;
+
+            if (m_leftIsNodes)
+            {
+                return CompareNodesWith(m_left, rightTree, rightNode, m_right, nodesOnLeft: true, ref context);
+            }
+
+            if (m_rightIsNodes)
+            {
+                return CompareNodesWith(m_right, leftTree, leftNode, m_left, nodesOnLeft: false, ref context);
+            }
+
+            if (leftTree is not null && rightTree is not null)
+            {
+                return XPathComparison.NodesVersusNode(
+                    leftTree, new ReadOnlySpan<int>(in leftNode), rightTree, rightNode, true, m_operator);
+            }
+
+            if (leftTree is not null)
+            {
+                return CompareNodeWith(leftTree, leftNode, m_right.Evaluate(ref context), nodeOnLeft: true);
+            }
+
+            if (rightTree is not null)
+            {
+                return CompareNodeWith(rightTree, rightNode, m_left.Evaluate(ref context), nodeOnLeft: false);
+            }
+
+            return XPathComparison.General(
+                m_left.Evaluate(ref context), m_right.Evaluate(ref context), m_operator, m_version, Comparing);
+        }
+
+        /// <summary>
+        /// One node, already found, against the other operand's value, by the rules
+        /// <see cref="CompareWithNodeOperand"/> reads a list against one.
+        /// </summary>
+        private bool CompareNodeWith(XdmTree tree, int node, XPathValue other, bool nodeOnLeft)
+        {
+            return XPathComparison.IsOneAtomicValue(other)
+                ? XPathComparison.NodesVersusValue(tree, new ReadOnlySpan<int>(in node), other, nodeOnLeft, m_operator)
+                : XPathComparison.NodeVersusOther(tree, node, other, nodeOnLeft, m_operator);
+        }
+
+        /// <summary>
+        /// An operand that is statically nodes, read into a pooled list, against the operand that was
+        /// asked: the one node it answered with, or its value where it declined.
+        /// </summary>
+        private bool CompareNodesWith(
+            Expr nodes,
+            XdmTree? otherTree,
+            int otherNode,
+            Expr other,
+            bool nodesOnLeft,
+            ref DynamicContext context)
+        {
+            List<int> list = NodeListPool.Rent();
 
             try
             {
-                XdmTree? leftTree = leftNodes is null ? null
-                    : m_leftIsNodes ? m_left.EvaluateNodes(ref context, leftNodes)
-                    : m_left.TryEvaluateNodes(ref context, leftNodes);
+                XdmTree tree = nodes.EvaluateNodes(ref context, list);
 
-                XdmTree? rightTree = rightNodes is null ? null
-                    : m_rightIsNodes ? m_right.EvaluateNodes(ref context, rightNodes)
-                    : m_right.TryEvaluateNodes(ref context, rightNodes);
-
-                if (leftTree is not null && rightTree is not null)
+                if (otherTree is not null)
                 {
-                    return XPathComparison.NodesVersusNodes(
-                        leftTree, leftNodes!, rightTree, rightNodes!, m_operator);
+                    return XPathComparison.NodesVersusNode(tree, list, otherTree, otherNode, nodesOnLeft, m_operator);
                 }
 
-                if (leftTree is not null)
-                {
-                    XPathValue other = m_right.Evaluate(ref context);
+                XPathValue value = other.Evaluate(ref context);
 
-                    return XPathComparison.IsOneAtomicValue(other)
-                        ? XPathComparison.NodesVersusValue(leftTree, leftNodes!, other, true, m_operator)
-                        : XPathComparison.NodesVersusOther(leftTree, leftNodes!, other, true, m_operator);
-                }
-
-                if (rightTree is not null)
-                {
-                    XPathValue other = m_left.Evaluate(ref context);
-
-                    return XPathComparison.IsOneAtomicValue(other)
-                        ? XPathComparison.NodesVersusValue(rightTree, rightNodes!, other, false, m_operator)
-                        : XPathComparison.NodesVersusOther(rightTree, rightNodes!, other, false, m_operator);
-                }
-
-                return XPathComparison.General(
-                    m_left.Evaluate(ref context), m_right.Evaluate(ref context), m_operator, m_version, Comparing);
+                return XPathComparison.IsOneAtomicValue(value)
+                    ? XPathComparison.NodesVersusValue(tree, list, value, nodesOnLeft, m_operator)
+                    : XPathComparison.NodesVersusOther(tree, list, value, nodesOnLeft, m_operator);
             }
             finally
             {
-                if (rightNodes is not null)
-                {
-                    NodeListPool.Return(rightNodes);
-                }
-
-                if (leftNodes is not null)
-                {
-                    NodeListPool.Return(leftNodes);
-                }
+                NodeListPool.Return(list);
             }
         }
 

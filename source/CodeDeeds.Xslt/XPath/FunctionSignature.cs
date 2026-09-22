@@ -563,6 +563,25 @@ namespace CodeDeeds.Xslt.XPath
         /// <inheritdoc/>
         public override bool ReturnsNodeSet => !m_parameter.Atomizes && m_argument.ReturnsNodeSet;
 
+        /// <summary>
+        /// The argument's own answer where the parameter takes a node as it comes — <c>node()?</c>,
+        /// which is <c>generate-id()</c>'s from 2.0 on — since a node passes the check untouched and
+        /// what declines is converted, and refused, exactly as it was.
+        /// </summary>
+        internal override bool UsuallyReturnsNodeSet => !m_parameter.Atomizes && m_argument.UsuallyReturnsNodeSet;
+
+        /// <inheritdoc/>
+        internal override Model.XdmTree? TryEvaluateOneNode(ref DynamicContext context, out int node)
+        {
+            if (m_parameter.Atomizes)
+            {
+                node = -1;
+                return null;
+            }
+
+            return m_argument.TryEvaluateOneNode(ref context, out node);
+        }
+
         /// <inheritdoc/>
         public override XPathValue Evaluate(ref DynamicContext context)
         {

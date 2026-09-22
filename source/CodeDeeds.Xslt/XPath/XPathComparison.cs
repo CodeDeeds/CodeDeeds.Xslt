@@ -37,8 +37,26 @@ namespace CodeDeeds.Xslt.XPath
             // List's enumerator checks at each step that the list has not changed, and this method is
             // large enough that the JIT leaves MoveNext as a call rather than inlining it — two calls,
             // each with its check, to reach the one node a predicate such as price > 100 usually has.
-            ReadOnlySpan<int> list = CollectionsMarshal.AsSpan(nodes);
+            return NodesVersusValue(tree, CollectionsMarshal.AsSpan(nodes), other, nodesOnLeft, op);
+        }
 
+        /// <summary>
+        /// <see cref="NodesVersusValue(XdmTree, List{int}, XPathValue, bool, BinaryOperator)"/> over a span,
+        /// which is how one node is compared with nothing rented to hold it: <c>[. = 'x']</c> asks its
+        /// context node, once for every candidate, and the node is a span of one on the stack.
+        /// </summary>
+        /// <param name="tree">The tree the nodes belong to.</param>
+        /// <param name="list">The nodes forming one operand.</param>
+        /// <param name="other">The other operand, which is one boolean, number or string.</param>
+        /// <param name="nodesOnLeft">Whether the nodes were written on the left of the operator.</param>
+        /// <param name="op">The operator to apply.</param>
+        public static bool NodesVersusValue(
+            XdmTree tree,
+            ReadOnlySpan<int> list,
+            XPathValue other,
+            bool nodesOnLeft,
+            BinaryOperator op)
+        {
             if (op is BinaryOperator.Equal or BinaryOperator.NotEqual)
             {
                 bool equal = op == BinaryOperator.Equal;
@@ -46,7 +64,7 @@ namespace CodeDeeds.Xslt.XPath
                 // Comparison against a boolean converts the whole set rather than testing each node.
                 if (other.Kind == XPathValueKind.Boolean)
                 {
-                    bool asBoolean = nodes.Count != 0;
+                    bool asBoolean = list.Length != 0;
                     return equal ? asBoolean == other.ToBoolean() : asBoolean != other.ToBoolean();
                 }
 
@@ -158,6 +176,34 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
+        /// Compares one node against an operand whose value proved to be a node-set or a sequence.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="NodesVersusOther"/> with the node laid out in a rented list, that being what the
+        /// comparisons it goes on to take. Seldom asked: it is <c>. = (3, 10)</c> with the context item a
+        /// node, and a variable beside <c>.</c> goes the general way from the start.
+        /// </remarks>
+        /// <param name="tree">The tree the node belongs to.</param>
+        /// <param name="node">The one node forming one operand.</param>
+        /// <param name="other">The other operand, which is not one boolean, number or string.</param>
+        /// <param name="nodeOnLeft">Whether the node was written on the left of the operator.</param>
+        /// <param name="op">The operator to apply.</param>
+        public static bool NodeVersusOther(XdmTree tree, int node, XPathValue other, bool nodeOnLeft, BinaryOperator op)
+        {
+            List<int> one = NodeListPool.Rent();
+
+            try
+            {
+                one.Add(node);
+                return NodesVersusOther(tree, one, other, nodeOnLeft, op);
+            }
+            finally
+            {
+                NodeListPool.Return(one);
+            }
+        }
+
+        /// <summary>
         /// Whether a value is one boolean, number or string, which is what <see cref="NodesVersusValue"/>
         /// compares nodes against; anything else is <see cref="NodesVersusOther"/>'s.
         /// </summary>
@@ -187,6 +233,19 @@ namespace CodeDeeds.Xslt.XPath
             if (left.Count == 0 || right.Count == 0)
             {
                 return false;
+            }
+
+            // One node on either side is one string against each of the others, and wants no set: a
+            // join in a 1.0 stylesheet is @ref = current()/@id, one node each side, once for every
+            // candidate, and the set built to hold the one string cost more than the comparison.
+            if (right.Count == 1)
+            {
+                return NodesVersusNode(leftTree, left, rightTree, right[0], nodesOnLeft: true, op);
+            }
+
+            if (left.Count == 1)
+            {
+                return NodesVersusNode(rightTree, right, leftTree, left[0], nodesOnLeft: false, op);
             }
 
             if (op is BinaryOperator.Equal or BinaryOperator.NotEqual)
@@ -231,6 +290,81 @@ namespace CodeDeeds.Xslt.XPath
                     {
                         return true;
                     }
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Compares a list of nodes against one node, without materialising either side or building a set.
+        /// </summary>
+        /// <remarks>
+        /// What <see cref="NodesVersusNodes"/> answers where one side is a single node, which it takes this
+        /// way: the quantification over pairs is over the one node's pairs, and a set of one string is the
+        /// string. It is also how an operand that is usually one node — <c>current()</c>, or <c>.</c> —
+        /// is compared once it has been asked for that node, with nothing rented to hold it.
+        /// </remarks>
+        /// <param name="tree">The tree the nodes belong to.</param>
+        /// <param name="nodes">The nodes forming one operand.</param>
+        /// <param name="otherTree">The tree the one node belongs to.</param>
+        /// <param name="otherNode">The one node forming the other operand.</param>
+        /// <param name="nodesOnLeft">Whether the list was written on the left of the operator.</param>
+        /// <param name="op">The operator to apply.</param>
+        public static bool NodesVersusNode(
+            XdmTree tree,
+            List<int> nodes,
+            XdmTree otherTree,
+            int otherNode,
+            bool nodesOnLeft,
+            BinaryOperator op)
+        {
+            return NodesVersusNode(tree, CollectionsMarshal.AsSpan(nodes), otherTree, otherNode, nodesOnLeft, op);
+        }
+
+        /// <summary>
+        /// <see cref="NodesVersusNode(XdmTree, List{int}, XdmTree, int, bool, BinaryOperator)"/> over a
+        /// span, so that two single nodes — <c>. = current()</c> — are compared with nothing rented.
+        /// </summary>
+        /// <param name="tree">The tree the nodes belong to.</param>
+        /// <param name="list">The nodes forming one operand.</param>
+        /// <param name="otherTree">The tree the one node belongs to.</param>
+        /// <param name="otherNode">The one node forming the other operand.</param>
+        /// <param name="nodesOnLeft">Whether the list was written on the left of the operator.</param>
+        /// <param name="op">The operator to apply.</param>
+        public static bool NodesVersusNode(
+            XdmTree tree,
+            ReadOnlySpan<int> list,
+            XdmTree otherTree,
+            int otherNode,
+            bool nodesOnLeft,
+            BinaryOperator op)
+        {
+            if (op is BinaryOperator.Equal or BinaryOperator.NotEqual)
+            {
+                bool equal = op == BinaryOperator.Equal;
+                string text = otherTree.StringValueOf(otherNode);
+
+                foreach (int node in list)
+                {
+                    bool same = string.Equals(tree.StringValueOf(node), text, StringComparison.Ordinal);
+                    if (equal ? same : !same)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            double scalar = NodeAsDouble(otherTree, otherNode);
+
+            foreach (int node in list)
+            {
+                double value = NodeAsDouble(tree, node);
+                if (nodesOnLeft ? Compare(value, scalar, op) : Compare(scalar, value, op))
+                {
+                    return true;
                 }
             }
 

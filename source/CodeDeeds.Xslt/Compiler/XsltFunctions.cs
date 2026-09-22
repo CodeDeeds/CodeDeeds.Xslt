@@ -1942,18 +1942,6 @@ namespace CodeDeeds.Xslt.Compiler
         internal override bool UsuallyReturnsNodeSet => m_version.IsBackwardsCompatible;
 
         /// <inheritdoc/>
-        internal override XdmTree? TryEvaluateNodes(ref DynamicContext context, List<int> output)
-        {
-            if (context.CurrentNode < 0)
-            {
-                return null;
-            }
-
-            output.Add(context.CurrentNode);
-            return context.CurrentTree;
-        }
-
-        /// <inheritdoc/>
         internal override XdmTree? TryEvaluateOneNode(ref DynamicContext context, out int node)
         {
             node = context.CurrentNode;
@@ -2157,12 +2145,7 @@ namespace CodeDeeds.Xslt.Compiler
 
             try
             {
-                XdmTree? found = m_argument!.TryEvaluateNodes(ref context, nodes);
-
-                if (found is null)
-                {
-                    return false;
-                }
+                XdmTree found = m_argument!.EvaluateNodes(ref context, nodes);
 
                 if (nodes.Count != 0)
                 {

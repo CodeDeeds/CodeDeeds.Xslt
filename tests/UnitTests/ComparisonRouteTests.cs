@@ -291,6 +291,32 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
+        public void OneNodeAgainstSeveralIsComparedWithEachOfThem()
+        {
+            // Two node-sets under 1.0 rules are compared without a set of strings where either side is
+            // one node, which is how a join reads: the quantification is over the one node's pairs, and
+            // '!=' holds where any of the others differs from it. Prices 10, 40, 9 and 3.
+            foreach (string version in new[] { "1.0", "2.0", "3.0" })
+            {
+                Assert.AreEqual("1,true", Count("price = ../product[1]/price", 1, version));
+                Assert.AreEqual("1,true", Count("../product[1]/price = price", 1, version));
+                Assert.AreEqual("3,true", Count("price != ../product[1]/price", 3, version));
+                Assert.AreEqual("3,true", Count("../product[1]/price != price", 3, version));
+                Assert.AreEqual("4,true", Count("price != ../product/price", 4, version));
+                Assert.AreEqual("4,true", Count("../product/price != price", 4, version));
+                Assert.AreEqual("4,true", Count("price = ../product/price", 4, version));
+            }
+
+            // Ordered as numbers under 1.0 and as strings from 2.0: 10 and 40 are over 9, and neither
+            // '10' nor '40' is over '9'.
+            Assert.AreEqual("2,true", Count("price &gt; ../product[3]/price", 2, "1.0"));
+            Assert.AreEqual("2,true", Count("../product[3]/price &lt; price", 2, "1.0"));
+            Assert.AreEqual("3,true", Count("price &lt; ../product[2]/price", 3, "1.0"));
+            Assert.AreEqual("0,true", Count("price &gt; ../product[3]/price", 0, "3.0"));
+            Assert.AreEqual("0,true", Count("../product[3]/price &lt; price", 0, "3.0"));
+        }
+
+        [TestMethod]
         public void AnUntypedNodeAgainstANumberIsCastToADouble()
         {
             // From 2.0 the node is cast to xs:double, whose lexical space is wider than the grammar of an

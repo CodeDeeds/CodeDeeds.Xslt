@@ -179,12 +179,6 @@ namespace CodeDeeds.Xslt.Emit
         internal override bool UsuallyReturnsNodeSet => m_source.UsuallyReturnsNodeSet;
 
         /// <inheritdoc/>
-        internal override XdmTree? TryEvaluateNodes(ref DynamicContext context, List<int> output)
-        {
-            return m_source.TryEvaluateNodes(ref context, output);
-        }
-
-        /// <inheritdoc/>
         internal override XdmTree? TryEvaluateOneNode(ref DynamicContext context, out int node)
         {
             return m_source.TryEvaluateOneNode(ref context, out node);
