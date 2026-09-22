@@ -385,16 +385,19 @@ namespace CodeDeeds.Xslt.XPath
         private static bool QuantifyOverSequences(
             XPathValue left,
             XPathValue right,
-            Func<XPathValue, XPathValue, bool> compare)
+            BinaryOperator op,
+            Func<XPathValue, XPathValue, BinaryOperator, bool> compare)
         {
-            IReadOnlyList<XPathValue> lefts = Atomize(left);
-            IReadOnlyList<XPathValue> rights = Atomize(right);
+            Atomized lefts = new Atomized(left);
+            Atomized rights = new Atomized(right);
 
-            foreach (XPathValue a in lefts)
+            for (int i = 0; i < lefts.Count; i++)
             {
-                foreach (XPathValue b in rights)
+                XPathValue a = lefts[i];
+
+                for (int j = 0; j < rights.Count; j++)
                 {
-                    if (compare(a, b))
+                    if (compare(a, rights[j], op))
                     {
                         return true;
                     }
@@ -402,6 +405,57 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Whether a value is one item that atomization leaves as it is, so that there is nothing to lay
+        /// out before it is compared.
+        /// </summary>
+        /// <remarks>
+        /// A number, a string, a boolean — and a map or a function, which have no typed value and are
+        /// handed on as they are for the comparison to refuse.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static bool AtomizesToItself(XPathValue value)
+        {
+            return value.Kind is not (XPathValueKind.Sequence
+                or XPathValueKind.NodeSet
+                or XPathValueKind.Node
+                or XPathValueKind.Array);
+        }
+
+        /// <summary>
+        /// The atomic items of one operand, read by position.
+        /// </summary>
+        /// <remarks>
+        /// One atomic value is by far the commonest operand there is — <c>position() = 1</c>,
+        /// <c>$n = 5</c> — and is held as itself: a list built to hold it, the array inside the list and
+        /// an enumerator boxed to walk it through an interface came to 208 bytes an operand, 416 for each
+        /// such comparison a 2.0 stylesheet made. Read by position rather than enumerated for the same
+        /// reason, the list being known only by its interface.
+        /// </remarks>
+        private readonly struct Atomized
+        {
+            private readonly XPathValue m_one;
+            private readonly IReadOnlyList<XPathValue>? m_many;
+
+            public Atomized(XPathValue value)
+            {
+                if (AtomizesToItself(value))
+                {
+                    m_one = value;
+                    m_many = null;
+                }
+                else
+                {
+                    m_one = default;
+                    m_many = Atomize(value);
+                }
+            }
+
+            public int Count => m_many is null ? 1 : m_many.Count;
+
+            public XPathValue this[int index] => m_many is null ? m_one : m_many[index];
         }
 
         /// <summary>Reduces a value to the atomic items a comparison sees.</summary>
@@ -419,16 +473,38 @@ namespace CodeDeeds.Xslt.XPath
                 return value.AsSequence();
             }
 
-            List<XPathValue> items = new List<XPathValue>();
+            // Sized to what is known of it: a list left to size itself makes room for four at its first
+            // item, which is three too many for the one node a comparison usually has on a side. Only
+            // up to a point, a count being a guess at what atomizing will give and not a promise.
+            List<XPathValue> items = new List<XPathValue>(Math.Min(1024, value.Kind switch
+            {
+                XPathValueKind.NodeSet => value.AsNodeSet().Count,
+                XPathValueKind.Sequence => value.AsSequence().Count,
+                _ => 1,
+            }));
 
+            AtomizeInto(value, items);
+            return items;
+        }
+
+        /// <summary>Adds the atomic items of a value to a list, into the one list however deep they lie.</summary>
+        /// <remarks>
+        /// Recursing through <see cref="Atomize"/> gave every item of a sequence a list of its own to be
+        /// copied out of — three lists and three arrays to lay out <c>(1, 5, 9)</c>, at every evaluation.
+        /// </remarks>
+        private static void AtomizeInto(XPathValue value, List<XPathValue> items)
+        {
             switch (value.Kind)
             {
                 case XPathValueKind.Sequence:
                 {
                     XdmSequence sequence = value.AsSequence();
+
+                    // A range answers by index and is walked here where it has to be laid out beside
+                    // other items; on its own it is handed back whole, and never reaches this.
                     for (int i = 0; i < sequence.Count; i++)
                     {
-                        items.AddRange(Atomize(sequence[i]));
+                        AtomizeInto(sequence[i], items);
                     }
 
                     break;
@@ -456,7 +532,7 @@ namespace CodeDeeds.Xslt.XPath
 
                     foreach (XPathValue member in value.AsArray().Members)
                     {
-                        items.AddRange(Atomize(member));
+                        AtomizeInto(member, items);
                     }
 
                     break;
@@ -465,8 +541,43 @@ namespace CodeDeeds.Xslt.XPath
                     items.Add(value);
                     break;
             }
+        }
 
-            return items;
+        /// <summary>
+        /// Whether some item on the left stands in the relation to some item on the right, by XPath 2.0's
+        /// rules for a pair.
+        /// </summary>
+        /// <remarks>
+        /// The right operand is atomized once and its items read for every item on the left, which is
+        /// what <see cref="Atomize"/> gives a list for; it had been atomized again for each of them. And
+        /// it is atomized only where the left has an item to compare it with, as it always was, so that
+        /// an operand that cannot be atomized is refused in the same cases as before and in no new one.
+        /// </remarks>
+        private static bool AnyPair(XPathValue left, XPathValue right, BinaryOperator op, ComparisonContext? where)
+        {
+            Atomized lefts = new Atomized(left);
+
+            if (lefts.Count == 0)
+            {
+                return false;
+            }
+
+            Atomized rights = new Atomized(right);
+
+            for (int i = 0; i < lefts.Count; i++)
+            {
+                XPathValue a = lefts[i];
+
+                for (int j = 0; j < rights.Count; j++)
+                {
+                    if (XdmComparison.Pair(a, rights[j], op, where))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         /// <summary>Returns whether either operand is a sequence, which the node-set paths cannot describe.</summary>
@@ -506,18 +617,10 @@ namespace CodeDeeds.Xslt.XPath
         {
             if (!version.IsBackwardsCompatible)
             {
-                foreach (XPathValue a in Atomize(left))
-                {
-                    foreach (XPathValue b in Atomize(right))
-                    {
-                        if (XdmComparison.Pair(a, b, op, where))
-                        {
-                            return true;
-                        }
-                    }
-                }
-
-                return false;
+                // Two atomic values are one pair, and the whole of what 'position() = 1' asks.
+                return AtomizesToItself(left) && AtomizesToItself(right)
+                    ? XdmComparison.Pair(left, right, op, where)
+                    : AnyPair(left, right, op, where);
             }
 
             return op switch
@@ -532,7 +635,7 @@ namespace CodeDeeds.Xslt.XPath
         {
             if (EitherIsSequence(left, right))
             {
-                return QuantifyOverSequences(left, right, static (a, b) => ScalarEqual(a, b));
+                return QuantifyOverSequences(left, right, BinaryOperator.Equal, static (a, b, _) => ScalarEqual(a, b));
             }
 
             bool leftIsNodeSet = left.Kind == XPathValueKind.NodeSet;
@@ -570,7 +673,7 @@ namespace CodeDeeds.Xslt.XPath
         {
             if (EitherIsSequence(left, right))
             {
-                return QuantifyOverSequences(left, right, static (a, b) => !ScalarEqual(a, b));
+                return QuantifyOverSequences(left, right, BinaryOperator.NotEqual, static (a, b, _) => !ScalarEqual(a, b));
             }
 
             bool leftIsNodeSet = left.Kind == XPathValueKind.NodeSet;
@@ -703,8 +806,13 @@ namespace CodeDeeds.Xslt.XPath
         {
             if (EitherIsSequence(left, right))
             {
+                // The operator goes in beside the operands rather than being captured, a lambda that
+                // captures being an object and a delegate made anew for every comparison.
                 return QuantifyOverSequences(
-                    left, right, (a, b) => CompareOrdering(NumericSign(AsDouble(a), AsDouble(b)), op));
+                    left,
+                    right,
+                    op,
+                    static (a, b, by) => CompareOrdering(NumericSign(AsDouble(a), AsDouble(b)), by));
             }
 
             bool leftIsNodeSet = left.Kind == XPathValueKind.NodeSet;

@@ -9572,6 +9572,137 @@ of them fail against the engine as it was at `3f0ee07`; against `f2d2693` every 
 being a matter of cost there and not of answers, and the nested document is what would say so if the
 count by parent ever went wrong.
 
+### What it costs to ask whether two numbers are equal
+
+This began as a question about sorting and the sort had nothing to do with it. Timing *A number to sort
+by, and a number to format* showed one stylesheet allocating 696,440 bytes a call at `version="3.0"` and
+280,440 at 1.0:
+
+```
+<xsl:for-each select="//product">
+  <xsl:sort select="price" data-type="number"/>
+  <xsl:if test="position() = 1"><xsl:value-of select="id"/></xsl:if>
+</xsl:for-each>
+```
+
+The note made of it said "it is the sort and not the iteration", on the strength of a loop without a
+sort that allocated the same at both versions. That loop had no `xsl:if` in it either. Asked properly —
+the runtime's allocation ticks counted by type over three thousand transformations, where guessing at
+`SortKey.Evaluate` had been the plan — the 3.0 run had 116,000 bytes a call of
+`List<XPathValue>.Enumerator`, boxed, and the 1.0 run none; and the same loop with the sort taken out
+and the `xsl:if` left in is 424,328 bytes at 3.0 and 8,328 at 1.0. That is 416 bytes an item, which is
+what the whole difference was. **The sort was innocent, and the cost was `position() = 1`.**
+
+From 2.0 a general comparison is existential over two sequences, and `XPathComparison.General` took
+that at its word for every comparison there is:
+
+```
+foreach (XPathValue a in Atomize(left))
+    foreach (XPathValue b in Atomize(right))
+```
+
+`Atomize` builds a `List<XPathValue>` and hands it back as an `IReadOnlyList`. So for two integers: a
+list for each, 32 bytes; the array inside each, which a list left to size itself makes four slots long
+at its first item, 120; and an enumerator for each, which is a struct on a `List` and an object on the
+heap when the list is known only by its interface, 56. Twice 208. And the right operand was atomized
+inside the loop over the left, once for every item there, which the remarks on `Atomize` say is exactly
+what it returns a list to avoid.
+
+In bytes an evaluation, the same on both backends, the emitted code calling the same method:
+
+| under `version="3.0"` | was | is |
+|---|---|---|
+| `position() = 1`, `position() != last()`, `position() < 10` | 416 | 0 |
+| `$five = 5`, `$word = 'abc'`, `position() mod 2 = 0`, `not(position() = 1)` | 416 | 0 |
+| `string(category) = 'Electronics'` | 494 | 78, the string |
+| `position() = (1, 2, 3)` | 1,110 | 366 |
+| `id = (1, 5, 7)` | 1,190 | 526 |
+| `(1 to 3) = position()` | 725 | 46 |
+| `(1, 2, 3) = (3, 4, 5)` | 3,136 | 736 |
+| `id = $ids`, three nodes in the variable | 494 | 286 |
+| `position() eq 1`, `price > 100`, `category = 'Electronics'`, `price/@currency = 'USD'` | 0 | 0 |
+
+The last row is what had been measured before and is why this went unseen: a value comparison never
+went this way, and a comparison with a path on one side has routes of its own, which *One comparison,
+and three ways into it* made as cheap under 2.0 as under 1.0. What was left is the comparison with no
+node in it — a position, a variable, a count, the result of arithmetic — which is most of what a `test`
+asks that a predicate does not. A positional predicate pays it too, once a node: `//product[position()
+< 4]` over the thousand products was 416,000 bytes to select three of them.
+
+**Two atomic values are one pair, and are compared as one**: `General` asks whether each operand
+atomizes to itself — a number, a string, a boolean; and a map or a function, which the comparison
+refuses as it did — and hands the two to `XdmComparison.Pair` with nothing built. Where either is a
+sequence, a node or an array, the operands are read through a small struct that holds one atomic value
+as itself and anything else as the list it was, by position rather than through an enumerator; the right
+operand is atomized once; and the list is made the size of what it is given. It is atomized only where
+the left has an item to meet it, as it always was, so that an operand that cannot be atomized is refused
+in the cases it was refused in and no others. And a sequence is laid out into the one list however deep
+its items lie: `Atomize` had recursed through itself, so every item of `(1, 5, 9)` was given a list and an
+array of its own to be copied out of, three of each, at every evaluation. What is left in those rows is
+the sequence itself, built by its expression each time it is evaluated.
+
+Under 1.0 the same survey found 24 bytes in every ordering comparison of two atomic values, `position()
+< 10` and the like, where an equality had none. `Relational` handed `QuantifyOverSequences` a lambda that
+captured `op`, for the case where an operand is a sequence — and the compiler makes the object a
+captured *parameter* lives in at the top of the method, not where the lambda is written, so every call
+paid for a closure only one branch used. The operator goes in beside the operands now and the three
+lambdas are static.
+
+**Nothing is answered differently**, and that is a claim the tests were written to be held to: the six
+that ask what a comparison answers — pairs of every type, sequences and ranges and arrays, nodes on one
+side and both, nothing on either, and the order pairs are met in, which decides whether `(1, 'a') = 1`
+is true or `XPTY0004` — pass against the engine as it was, all of them, and the seventh does not. That
+one measures: the same loop run with the test and with `false()`, and the difference an evaluation
+required to be under eight bytes, at all three versions on both backends. It is the first test here
+that asserts an allocation, and it fails against the engine as it was on the first thing it meets, which
+is the 24 bytes under 1.0.
+
+In microseconds a transformation over the thousand-product benchmark document, parsed once, each figure
+the mean of three runs in fresh processes taken turn about with the engine as it was, each warmed for at
+least eight seconds and until time and bytes a call had stopped moving, at `version="3.0"` and
+interpreted but where it says otherwise; and bytes a call beside them:
+
+| | was | is | bytes, was | is |
+|---|---|---|---|---|
+| `xsl:for-each` over the products with `xsl:if test="position() = 1"` | 248 | 114 | 424,264 | 8,264 |
+| the same, compiled | 260 | 114 | 424,264 | 8,264 |
+| the same with `xsl:sort select="price" data-type="number"`, the case that began this | 685 | 555 | 696,472 | 280,472 |
+| `xsl:if test="$five = 5"` for each product | 207 | 88 | 420,272 | 4,272 |
+| `count(//product[position() mod 2 = 0])` | 1,710 | 1,005 | 682,694 | 266,757 |
+| `count(//product[position() < 500])` | 1,618 | 1,171 | 682,684 | 266,739 |
+| the same, compiled | 1,330 | 757 | 682,664 | 266,747 |
+| the same, at `version="1.0"` | 1,104 | 877 | 290,741 | 266,768 |
+| `count(//product[position() = (1, 5, 9)])` | 2,716 | 2,361 | 1,378,760 | 634,624 |
+| `count(//product[position() = (3 to 7)])` | 2,147 | 2,133 | 578,664 | 314,762 |
+| `count(//product[price > 100])`, which none of this touches | 236 | 232 | 4,232 | 4,232 |
+
+The bytes are the finding and the times are what the bytes were costing: a thousand comparisons a
+call made 416 kilobytes of garbage a call, and a loop that does nothing but compare positions is twice
+as fast without it. It was a loaded hour — four runs of the sixty-six never settled and single runs of
+one binary read two to one apart in the predicate rows — so the small figures in the last three rows
+are that and not the change; the large ones hold the same sign in every pair of every round, and an
+earlier set of rounds on a quieter machine had the same shape, 222 to 100 for the first row.
+
+One thing the table shows that this does not touch. A positional predicate over the thousand products
+is 266 kilobytes a call of `int[]` at every version, where a value predicate over the same nodes is
+none; that is about an `int[64]` for each candidate node and is a question for the path, not the
+comparison.
+
+Nothing moves on any conformance run, every failure set identical test for test: the 3.0 run stands at
+8,061 of 8,071, the 2.0 run at 5,678 of 5,701 and the schema-aware run at 8,668 of 8,727, each on both
+backends, and the XPath runs at 18,268 of 18,285 and 14,553 of 14,577. Seven new unit tests.
+
+Everything above was taken against main at `3f0ee07`, and main moved twice before it was merged: first
+by the runtime section above, `720f83a`, and then by the ten commits of the four sections before that,
+`1fe1652`, which are in the comparison's own file — the routes a node-set beside a node takes, none of
+which is the route this is about. Both sides were built again on each, the survey taken again on the
+second, where it reads the same to the byte on both sides, and the eight runs taken again on each,
+identical test for test on both, the suites untouched throughout. The second time the machine was
+quiet, nothing unsettled and single runs of one binary within three percent, and three rounds of seven
+rows say what the table says with the noise gone: the first row 183 to 87 interpreted and 183 to 91
+compiled, the sort 505 to 413, `$five = 5` 147 to 64, the compiled positional predicate 480 to 358,
+`position() = (1, 5, 9)` 743 to 528, and `price > 100` 148 to 145. 3,028 unit tests in all.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error
