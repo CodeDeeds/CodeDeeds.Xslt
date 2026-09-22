@@ -27,6 +27,13 @@ namespace CodeDeeds.Xslt.XPath
 
         /// <summary>Gets the predicates filtering this step's result.</summary>
         public Expr[] Predicates { get; }
+
+        /// <summary>
+        /// Whether this step stands for <c>//x[P]</c> with a first predicate that may answer with a
+        /// number, so that a number is read as a position among the candidate's siblings rather than
+        /// among every descendant: see <see cref="PredicateFilter.ApplyInPlaceAmongSiblings"/>.
+        /// </summary>
+        internal bool PositionsAmongSiblings { get; init; }
     }
 
     /// <summary>The root of the document, written as a leading <c>/</c>.</summary>
@@ -257,9 +264,18 @@ namespace CodeDeeds.Xslt.XPath
         /// <para>
         /// The two are the same set in document order except where a predicate on the child step counts:
         /// <c>//x[1]</c> is the first <c>x</c> child of each node, and <c>descendant::x[1]</c> the first
-        /// <c>x</c> anywhere. So the fold is made only where every predicate is known to be a boolean and
-        /// to read nothing of the focus position, which is what makes it the same test on the same nodes
-        /// whichever way they were reached.
+        /// <c>x</c> anywhere. So the fold is made only where no predicate reads the focus position, and
+        /// where one might still answer with a number — a variable, a filter over one, a call to a
+        /// function of the stylesheet, none of which says what it is until it is evaluated — the folded
+        /// step is marked to read that number as the unfolded one would have, as a position among the
+        /// candidate's siblings. Only a first predicate is given that reading: a later one that might be
+        /// a number would count among the survivors of the ones before it, and the fold is not made.
+        /// </para>
+        /// <para>
+        /// It was once made only where every predicate was known to be a boolean or a node-set, which
+        /// took a filter expression's word for it under <c>version="1.0"</c>, and <c>//x[$n[1]]</c> was
+        /// then the first <c>x</c> whatever <c>$n</c> held. The filter promises nothing now, and this
+        /// fold no longer needs it to.
         /// </para>
         /// </remarks>
         private static AxisStep[] Simplify(AxisStep[] steps)
@@ -268,7 +284,7 @@ namespace CodeDeeds.Xslt.XPath
 
             for (int i = 0; i + 1 < steps.Length; i++)
             {
-                if (IsAbbreviatedDescendant(steps[i], steps[i + 1]))
+                if (IsAbbreviatedDescendant(steps[i], steps[i + 1], out _))
                 {
                     any = true;
                     break;
@@ -284,10 +300,13 @@ namespace CodeDeeds.Xslt.XPath
 
             for (int i = 0; i < steps.Length; i++)
             {
-                if (i + 1 < steps.Length && IsAbbreviatedDescendant(steps[i], steps[i + 1]))
+                if (i + 1 < steps.Length && IsAbbreviatedDescendant(steps[i], steps[i + 1], out bool amongSiblings))
                 {
                     AxisStep child = steps[i + 1];
-                    folded.Add(new AxisStep(Axis.Descendant, child.Test, child.Predicates));
+                    folded.Add(new AxisStep(Axis.Descendant, child.Test, child.Predicates)
+                    {
+                        PositionsAmongSiblings = amongSiblings,
+                    });
                     i++;
                 }
                 else
@@ -299,8 +318,16 @@ namespace CodeDeeds.Xslt.XPath
             return folded.ToArray();
         }
 
-        private static bool IsAbbreviatedDescendant(AxisStep first, AxisStep second)
+        /// <param name="first">The step that may be <c>descendant-or-self::node()</c>.</param>
+        /// <param name="second">The step that may be the child step after it.</param>
+        /// <param name="amongSiblings">
+        /// Set where the fold can be made only by reading a numeric first predicate as a position among
+        /// siblings.
+        /// </param>
+        private static bool IsAbbreviatedDescendant(AxisStep first, AxisStep second, out bool amongSiblings)
         {
+            amongSiblings = false;
+
             if (first.Axis != Axis.DescendantOrSelf
                 || !ReferenceEquals(first.Test, NodeTest.AnyNode)
                 || first.Predicates.Length != 0
@@ -309,13 +336,26 @@ namespace CodeDeeds.Xslt.XPath
                 return false;
             }
 
-            foreach (Expr predicate in second.Predicates)
+            Expr[] predicates = second.Predicates;
+
+            for (int i = 0; i < predicates.Length; i++)
             {
-                if (!(predicate.ReturnsNodeSet || predicate.IsBooleanValued)
-                    || Expr.DependsOnFocusPosition(predicate))
+                if (Expr.DependsOnFocusPosition(predicates[i]))
                 {
                     return false;
                 }
+
+                if (predicates[i].ReturnsNodeSet || predicates[i].IsBooleanValued)
+                {
+                    continue;
+                }
+
+                if (i != 0)
+                {
+                    return false;
+                }
+
+                amongSiblings = true;
             }
 
             return true;
@@ -771,7 +811,15 @@ namespace CodeDeeds.Xslt.XPath
                 {
                     int mark = next.Count;
                     AxisWalker.Collect(walk.Tree, origin, step.Axis, step.Test, walk.FingerprintMap, next);
-                    PredicateFilter.ApplyInPlace(step.Predicates, next, mark, ref walk);
+
+                    if (step.PositionsAmongSiblings)
+                    {
+                        PredicateFilter.ApplyInPlaceAmongSiblings(step.Predicates, next, mark, ref walk);
+                    }
+                    else
+                    {
+                        PredicateFilter.ApplyInPlace(step.Predicates, next, mark, ref walk);
+                    }
                 }
 
                 if (singleOrigin)

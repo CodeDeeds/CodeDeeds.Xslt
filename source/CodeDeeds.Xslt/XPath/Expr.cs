@@ -1701,7 +1701,7 @@ namespace CodeDeeds.Xslt.XPath
         private readonly Expr[] m_predicates;
 
         /// <summary>Initializes a filter expression.</summary>
-        /// <param name="primary">The expression producing the node-set to filter.</param>
+        /// <param name="primary">The expression producing the node-set or the sequence to filter.</param>
         /// <param name="predicates">The predicates, applied left to right.</param>
         /// <param name="version">
         /// The version this was compiled against. Nothing a filter does depends on it any longer — see
@@ -1745,6 +1745,55 @@ namespace CodeDeeds.Xslt.XPath
         /// <inheritdoc/>
         public override bool MaySpanDocuments => m_primary.MaySpanDocuments;
 
+        /// <inheritdoc/>
+        /// <remarks>
+        /// <para>
+        /// The primary's nodes go into the caller's list and are filtered where they lie, so that a
+        /// filter counted, compared or identified — <c>count($k[1])</c>, or
+        /// <c>generate-id(key('k', @ref)[1])</c> once for each candidate of a grouping — builds neither
+        /// a node-set nor a list of its own. Only a primary known to be nodes of one document is read
+        /// so: one that may hold two has each node's own tree to filter it in, which a list of ids
+        /// cannot say, and one that may not be nodes at all is the value it is.
+        /// </para>
+        /// <para>
+        /// A filter over what is <em>usually</em> one node, <c>.[…]</c> or <c>current()[…]</c>, makes no
+        /// such claim for itself and is evaluated as a value: the one-node question a reader asks of
+        /// <see cref="UsuallyReturnsNodeSet"/> has no way to answer "a node, and the predicate kept it
+        /// out", which is the answer a filter can give.
+        /// </para>
+        /// </remarks>
+        public override XdmTree EvaluateNodes(ref DynamicContext context, List<int> output)
+        {
+            if (!m_primary.ReturnsNodeSet || m_primary.MaySpanDocuments)
+            {
+                return base.EvaluateNodes(ref context, output);
+            }
+
+            int start = output.Count;
+            XdmTree tree = m_primary.EvaluateNodes(ref context, output);
+
+            FilterInPlace(tree, output, start, ref context);
+            return tree;
+        }
+
+        /// <summary>
+        /// Applies the predicates to the nodes a list holds from <paramref name="start"/> onwards, which
+        /// are in document order and of one tree, leaving the survivors where they were.
+        /// </summary>
+        private void FilterInPlace(XdmTree tree, List<int> nodes, int start, ref DynamicContext context)
+        {
+            if (nodes.Count == start)
+            {
+                return;
+            }
+
+            DynamicContext walk = ReferenceEquals(tree, context.Tree)
+                ? context
+                : context.SwitchTree(tree, context.Node);
+
+            PredicateFilter.ApplyInPlace(m_predicates, nodes, start, ref walk);
+        }
+
         /// <summary>Gets this filter's predicates, which may be rewritten in place.</summary>
         internal Expr[] Predicates => m_predicates;
 
@@ -1779,29 +1828,38 @@ namespace CodeDeeds.Xslt.XPath
                 return XPathValue.FromNodeSet(FilterAcrossDocuments(ref context, nodes));
             }
 
-            DynamicContext walk = ReferenceEquals(nodes.Tree, context.Tree) || nodes.Count == 0
-                ? context
-                : context.SwitchTree(nodes.Tree, context.Node);
+            // Filtered in a list from the pool, where they lie, and only the survivors laid out: a list
+            // of every candidate and another of every survivor, for each predicate, were most of what
+            // '$nodes[...]' allocated, and it is evaluated once for each candidate wherever it is itself
+            // inside a predicate.
+            List<int> current = NodeListPool.Rent();
 
-            List<int> current = new List<int>(nodes.Count);
-            for (int i = 0; i < nodes.Count; i++)
+            try
             {
-                current.Add(nodes[i]);
-            }
+                // Room for all of them at once: a set too large for the pool to keep its list is given
+                // a new one each time, which must not then be grown to size by doubling.
+                current.EnsureCapacity(nodes.Count);
 
-            foreach (Expr predicate in m_predicates)
+                for (int i = 0; i < nodes.Count; i++)
+                {
+                    current.Add(nodes[i]);
+                }
+
+                FilterInPlace(nodes.Tree, current, 0, ref context);
+
+                NodeSet result = new NodeSet(nodes.Count == 0 ? context.Tree : nodes.Tree, current.Count);
+                foreach (int node in current)
+                {
+                    result.Add(node);
+                }
+
+                result.SortAndDeduplicate();
+                return XPathValue.FromNodeSet(result);
+            }
+            finally
             {
-                current = PredicateFilter.Apply(predicate, current, ref walk);
+                NodeListPool.Return(current);
             }
-
-            NodeSet result = new NodeSet(walk.Tree, current.Count);
-            foreach (int node in current)
-            {
-                result.Add(node);
-            }
-
-            result.SortAndDeduplicate();
-            return XPathValue.FromNodeSet(result);
         }
 
         /// <summary>
@@ -1819,7 +1877,7 @@ namespace CodeDeeds.Xslt.XPath
                 // A predicate that is simply a number names the one position it keeps, so the filter
                 // is an index rather than a walk. Over a range that is the difference between reading
                 // one item and reading ten million of them to reach it.
-                if (LiteralPosition(predicate, ref context) is double at)
+                if (PredicateFilter.LiteralPosition(predicate, ref context) is double at)
                 {
                     items = at >= 1 && at <= items.Count && at == Math.Floor(at)
                         ? new[] { items[(int)at - 1] }
@@ -1862,26 +1920,6 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             return XdmSequence.Concatenate(items);
-        }
-
-        /// <summary>
-        /// The position a predicate picks where it is simply a number, or <see langword="null"/> where
-        /// it is anything else.
-        /// </summary>
-        /// <remarks>
-        /// Only the two literal forms are asked, because only they are known to give the same answer at
-        /// every position without being evaluated there — which is the whole of what makes the filter
-        /// an index. Anything else, <c>last()</c> and <c>position() - 1</c> included, is walked.
-        /// </remarks>
-        private static double? LiteralPosition(Expr predicate, ref DynamicContext context)
-        {
-            if (predicate.Unwrapped is not (NumberLiteralExpr or TypedLiteralExpr))
-            {
-                return null;
-            }
-
-            XPathValue value = predicate.Evaluate(ref context);
-            return value.Kind == XPathValueKind.Number ? value.ToNumber() : null;
         }
 
         /// <summary>
@@ -2041,46 +2079,238 @@ namespace CodeDeeds.Xslt.XPath
         {
             foreach (Expr predicate in predicates)
             {
-                int size = nodes.Count - start;
-                if (size == 0)
+                if (nodes.Count == start)
                 {
                     return;
                 }
 
-                bool booleanOnly = IsNeverPositional(predicate);
+                ApplyInPlace(predicate, nodes, start, ref context);
+            }
+        }
 
-                int write = start;
-                for (int i = 0; i < size; i++)
+        /// <summary>
+        /// Filters the tail of a list in place by one predicate: the one step of <see cref="ApplyInPlace(Expr[], List{int}, int, ref DynamicContext)"/>.
+        /// </summary>
+        /// <param name="predicate">The predicate.</param>
+        /// <param name="nodes">The list to filter, which holds at least one node from <paramref name="start"/>.</param>
+        /// <param name="start">The index at which this origin's results begin.</param>
+        /// <param name="context">The context the predicate is evaluated against.</param>
+        public static void ApplyInPlace(Expr predicate, List<int> nodes, int start, ref DynamicContext context)
+        {
+            int size = nodes.Count - start;
+
+            // A predicate that is simply a number names the one position it keeps, so the filter is an
+            // index rather than a walk: '$nodes[1]' over a thousand nodes is the first of them, not a
+            // thousand evaluations of the literal 1. Asked once for the origin and not once per candidate.
+            if (LiteralPosition(predicate, ref context) is double at)
+            {
+                if (at >= 1 && at <= size && at == Math.Floor(at))
                 {
-                    int node = nodes[start + i];
+                    nodes[start] = nodes[start + (int)at - 1];
+                    nodes.RemoveRange(start + 1, size - 1);
+                }
+                else
+                {
+                    nodes.RemoveRange(start, size);
+                }
 
-                    DynamicContext inner = context;
-                    inner.Node = node;
-                    inner.Position = i + 1;
-                    inner.Size = size;
+                return;
+            }
 
-                    bool keep;
-                    if (booleanOnly)
-                    {
-                        keep = predicate.EvaluateAsBoolean(ref inner);
-                    }
-                    else
-                    {
-                        XPathValue value = predicate.Evaluate(ref inner);
-                        keep = value.Kind == XPathValueKind.Number
-                            ? value.ToNumber() == i + 1
-                            : value.ToBoolean();
-                    }
+            bool booleanOnly = IsNeverPositional(predicate);
 
-                    if (keep)
+            int write = start;
+            for (int i = 0; i < size; i++)
+            {
+                int node = nodes[start + i];
+
+                DynamicContext inner = context;
+                inner.Node = node;
+                inner.Position = i + 1;
+                inner.Size = size;
+
+                bool keep;
+                if (booleanOnly)
+                {
+                    keep = predicate.EvaluateAsBoolean(ref inner);
+                }
+                else
+                {
+                    XPathValue value = predicate.Evaluate(ref inner);
+                    keep = value.Kind == XPathValueKind.Number
+                        ? value.ToNumber() == i + 1
+                        : value.ToBoolean();
+                }
+
+                if (keep)
+                {
+                    // write never runs ahead of the read position, so compaction is safe in place.
+                    nodes[write++] = node;
+                }
+            }
+
+            nodes.RemoveRange(write, nodes.Count - write);
+        }
+
+        /// <summary>
+        /// Filters the tail of a list in place, as <see cref="ApplyInPlace(Expr[], List{int}, int, ref DynamicContext)"/>
+        /// does, for a step folded from <c>//x</c> whose first predicate may answer with a number: the
+        /// number is then a position among the candidate's siblings, which is what the unfolded step
+        /// counts.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <c>//x[P]</c> abbreviates <c>descendant-or-self::node()/child::x[P]</c>, which asks <c>P</c> of
+        /// each node's <c>x</c> children with the position counted among them, where <c>descendant::x[P]</c>
+        /// counts every <c>x</c> below the origin. The two agree wherever <c>P</c> is not a number, and
+        /// the fold used to be made only where that was known when the path was built. It is made now for
+        /// any <c>P</c> that reads no position — <c>$n</c>, <c>$v[…]</c>, a call to a function of the
+        /// stylesheet — and the candidates whose <c>P</c> turns out to be a number are held to the count
+        /// the unfolded step would have made for them.
+        /// </para>
+        /// <para>
+        /// That count is had without the tree. Every child of a parent that passes the test is among the
+        /// candidates, being a descendant of the origin that passes it, and the candidates stand in
+        /// document order; so a candidate's position among its parent's matching children is one more
+        /// than the number of earlier candidates with the same parent. From the first number on, the
+        /// candidates are counted by parent as they go by, at a dictionary lookup each, and the ones
+        /// before the first number are counted then, once. It was first walked off the tree, each
+        /// candidate's earlier siblings for that candidate alone, which is the square of the siblings:
+        /// <c>//product[1]</c> over a thousand products under one parent was two milliseconds where the
+        /// unfolded step was a fifth of one. Until a number is seen nothing is counted, and every
+        /// candidate costs what it costs the plain fold.
+        /// </para>
+        /// <para>
+        /// Only the first predicate is asked this way. The caller has established that every later one
+        /// can never be a number, so what position they are handed is not read.
+        /// </para>
+        /// </remarks>
+        /// <param name="predicates">The predicates, applied left to right.</param>
+        /// <param name="nodes">The list to filter, holding the candidates in document order.</param>
+        /// <param name="start">The index at which this origin's results begin.</param>
+        /// <param name="context">The context the predicates are evaluated against.</param>
+        public static void ApplyInPlaceAmongSiblings(
+            Expr[] predicates,
+            List<int> nodes,
+            int start,
+            ref DynamicContext context)
+        {
+            int size = nodes.Count - start;
+            if (size == 0)
+            {
+                return;
+            }
+
+            Expr predicate = predicates[0];
+            XdmTree tree = context.Tree;
+            int write = start;
+
+            // How many candidates have gone by under each parent, kept from the first number on.
+            Dictionary<int, int>? counted = null;
+
+            for (int i = 0; i < size; i++)
+            {
+                int node = nodes[start + i];
+
+                DynamicContext inner = context;
+                inner.Node = node;
+                inner.Position = i + 1;
+                inner.Size = size;
+
+                XPathValue value = predicate.Evaluate(ref inner);
+                bool keep;
+
+                if (AsPosition(value) is double at)
+                {
+                    counted ??= CountByParent(tree, nodes, start, i);
+                    keep = at == CountOneMore(counted, tree.ParentOf(node));
+                }
+                else
+                {
+                    keep = value.ToBoolean();
+
+                    if (counted is not null)
                     {
-                        // write never runs ahead of the read position, so compaction is safe in place.
-                        nodes[write++] = node;
+                        CountOneMore(counted, tree.ParentOf(node));
                     }
                 }
 
-                nodes.RemoveRange(write, nodes.Count - write);
+                if (keep)
+                {
+                    nodes[write++] = node;
+                }
             }
+
+            nodes.RemoveRange(write, nodes.Count - write);
+
+            for (int p = 1; p < predicates.Length && nodes.Count > start; p++)
+            {
+                ApplyInPlace(predicates[p], nodes, start, ref context);
+            }
+        }
+
+        /// <summary>
+        /// The number a predicate's value is where it selects by position — a number, or a sequence of
+        /// exactly one — and <see langword="null"/> where it is read as a boolean instead.
+        /// </summary>
+        private static double? AsPosition(XPathValue value)
+        {
+            if (value.Kind == XPathValueKind.Number)
+            {
+                return value.ToNumber();
+            }
+
+            if (value.Kind == XPathValueKind.Sequence
+                && XdmSequence.Items(value) is { Count: 1 } items
+                && items[0].Kind == XPathValueKind.Number)
+            {
+                return items[0].ToNumber();
+            }
+
+            return null;
+        }
+
+        /// <summary>Counts the candidates before <paramref name="upTo"/> by their parent.</summary>
+        private static Dictionary<int, int> CountByParent(XdmTree tree, List<int> nodes, int start, int upTo)
+        {
+            Dictionary<int, int> counted = new Dictionary<int, int>();
+
+            for (int i = 0; i < upTo; i++)
+            {
+                CountOneMore(counted, tree.ParentOf(nodes[start + i]));
+            }
+
+            return counted;
+        }
+
+        /// <summary>Counts one more candidate under a parent, and returns the count it makes.</summary>
+        private static int CountOneMore(Dictionary<int, int> counted, int parent)
+        {
+            counted.TryGetValue(parent, out int count);
+            counted[parent] = ++count;
+            return count;
+        }
+
+        /// <summary>
+        /// The position a predicate picks where it is simply a number, or <see langword="null"/> where
+        /// it is anything else.
+        /// </summary>
+        /// <remarks>
+        /// Only the two literal forms are asked, because only they are known to give the same answer at
+        /// every position without being evaluated there — which is the whole of what makes the filter
+        /// an index. Anything else, <c>last()</c> and <c>position() - 1</c> included, is walked. The
+        /// shape is read through <see cref="Expr.Unwrapped"/>, the compiled backend handing over a
+        /// literal in the emitted form of itself.
+        /// </remarks>
+        internal static double? LiteralPosition(Expr predicate, ref DynamicContext context)
+        {
+            if (predicate.Unwrapped is not (NumberLiteralExpr or TypedLiteralExpr))
+            {
+                return null;
+            }
+
+            XPathValue value = predicate.Evaluate(ref context);
+            return value.Kind == XPathValueKind.Number ? value.ToNumber() : null;
         }
     }
 }

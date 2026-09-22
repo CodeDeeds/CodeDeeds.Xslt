@@ -9434,6 +9434,143 @@ filtered node-set read as it was, by a comparison, `generate-id()`, `format-numb
 was, and so does the test in `PatternPredicateTests` that had excused the path from the pattern's
 answer and holds it to that answer now. `XsltCompatibility.md` says what the mode leaves in and what
 that means for a filter.
+### A filter read where it stands, and the fold made without the promise
+
+What the section above left. A filter over nodes that promise — `key('k', @ref)[1]`, `(//x)[P]` — was read
+by `count()`, `generate-id()` and the comparison through a copy: the node-set the filter builds, its
+candidates laid out in one list and the survivors in another for each predicate, and the survivors
+copied again into the pooled list the reader wanted. A filter over a variable, which is every
+`$nodes[…]`, built the same three for every reader. `$products[1]` evaluated the literal 1 against each
+of a thousand products to keep the first. And `//x[P]` with a `P` that might be a number was walked as
+`descendant-or-self::node()/child::x[P]`, every node gathered and each one's children taken, where a `P`
+known to be a boolean is one sweep: at 1.0 that was the one thing the promise had bought, wrongly, and
+giving it up cost `count(//price[$first[id]])` half as much again. This section was written against
+`3f0ee07`, alongside the one above, and landed on top of it; the promise is withdrawn there, and what is
+here is the rest.
+
+**Filtered where they lie.** `FilterExpr.EvaluateNodes` is the filter's own now: where the primary is
+nodes of one document, its nodes go into the caller's pooled list — a path walks straight into it — and
+`PredicateFilter.ApplyInPlace`, which is what a step's predicates go through, filters them there. So
+`count($k[1])`, `generate-id(key('k', @ref)[1])` once for each candidate of a grouping, and
+`(//product)[price > 100] = 'x'` build neither a node-set nor a list. `Evaluate`, the road every
+`$nodes[…]` written as a value takes, filters in one pooled list and lays out the survivors alone. A
+filter over what is *usually* one node, `.[…]` or `current()[…]`, claims nothing for itself: the
+one-node question a reader asks of `UsuallyReturnsNodeSet` has no way to answer "a node, and the
+predicate kept it out", which is an answer a filter can give, so it is evaluated as a value, as it was.
+
+**A literal predicate is an index.** `ApplyInPlace` asks first whether the predicate is simply a number,
+as `FilterSequence` already asked over a range, and keeps the one node at that position: `$products[1]`
+over a thousand products is the first of them, and `a/b[1]`, the commonest positional step there is, has
+the same.
+
+**The fold, made for any predicate that reads no position.** `//x[P]` folds into `descendant::x[P]`
+wherever the two agree, which is wherever `P` is not a number and reads no position: `//x[1]` is the
+first `x` child of each node and `descendant::x[1]` the first `x` anywhere. The fold was made only where
+`P` was known when the path was built to be a boolean or a node-set. A first predicate that might be a
+number — a variable, a filter over one, a call to a stylesheet function, a literal — no longer stops it:
+the folded step is marked, `AxisStep.PositionsAmongSiblings`, and `PredicateFilter.ApplyInPlaceAmongSiblings`
+evaluates that predicate as a value and, where the value is a number, holds the candidate to the count
+the unfolded step would have made for it, its position among its parent's children that pass the step's
+test. Only a first predicate is read so, a later numeric one counting among the survivors of the ones
+before it; the fold is not made for that shape. `//price[1]` is four prices, each the first of its
+product, `//price[$n]` none, `//product[number('2')]` the second product, `//product[$n][@id]` the second
+product with an id, and over `<r><x id="a"><x id="a1"/><x id="a2"/></x><x id="b"/><x id="c"/></r>`,
+where one parent's children stand between another's, `//x[2]` is `a2` and `b` — at every version, on
+both backends. `//x[$n]` and `//x[f:test(.)]` are folded at 3.0 now, where they never were.
+
+The count is had without the tree, and the first way of having it was the fault found on the way. Every
+child of a parent that passes the test is among the candidates, being a descendant of the origin that
+passes it, and the candidates stand in document order, so a candidate's position among its parent's
+matching children is one more than the number of earlier candidates with the same parent: from the
+first number on, the candidates are counted by parent as they go by, at a dictionary lookup each, and
+the ones before the first number are counted then, once. It was first walked off the tree, each
+candidate's earlier siblings for that candidate alone, which is the square of the siblings, and
+`//product[1]` — a thousand products under one parent, and the `$first` the fold row reads — was 2,940
+microseconds where the unfolded step it replaced was 1,023, with the whole tree in a list. Until a
+number is seen nothing is counted, and every other candidate costs what it costs the plain fold.
+
+**Measured against main at `f2d2693`, which is the section above.** In microseconds a transformation over
+the thousand-product benchmark document, parsed once, at `version="1.0"`, `$products` bound to
+`//product`, `$few` to three of them and `$first`, where a row reads it, to `//product[1]`. One case and
+one build to a fresh process, the builds taken turn about, each warmed for at least five seconds and until
+three 400 ms windows in a row agreed within 3% on time and 0.5% on bytes; what is quoted is the quickest
+of a process's twelve windows, averaged over three processes interpreted and two compiled. Bytes a call
+are the same to the byte in every process of a build. The machine was quieter than for the section
+above: one process differs from the next by two or three percent here.
+
+| | interpreted, main | this | compiled, main | this | bytes a call, main | this |
+|---|---|---|---|---|---|---|
+| `count($products[price > 100])` | 305 | 274 | 210 | 201 | 17,504 | 9,392 |
+| `$products[category = 'Audio'] = 'x'` | 287 | 253 | 192 | 188 | 55,552 | 47,440 |
+| `<xsl:value-of select="$products[1]/name"/>`, fifty times | 757 | 275 | 931 | 230 | 455,456 | 41,744 |
+| `<xsl:value-of select="$few[2]"/>` for each product | 579 | 513 | | | 1,298,096 | 1,154,109 |
+| `count($products[generate-id(.) = generate-id($few[1])])` | 393 | 349 | 347 | 304 | 312,336 | 160,224 |
+| `format-number($few[2]/price, '0.00')` for each product | 545 | 494 | | | 449,968 | 305,968 |
+| `count(//product[generate-id(.) = generate-id(key('cat', category)[1])])` | 5,116 | 1,444 | 6,162 | 1,373 | 4,092,857 | 689,656 |
+| `count((//product)[price > 100])` | 320 | 285 | | | 21,656 | 8,000 |
+| `(//product)[category = 'Audio'] = 'x'` | 305 | 268 | | | 59,704 | 47,288 |
+| `count(//product[$few[name = 'USB-C Cable']])` | 1,094 | 550 | 735 | 411 | 494,701 | 88,120 |
+| `count(/products/product[$few[name = 'USB-C Cable']])` | 583 | 546 | | | 232,128 | 88,128 |
+| `count(//price[$first[id]])`, the section above's fold row | 966 | 359 | 927 | 318 | 741,243 | 88,536 |
+| `count(//price[1])` | 492 | 185 | | | 270,424 | 81,168 |
+| `.[price > 100] = 'x'` for each product | 528 | 485 | | | 672,648 | 544,648 |
+| `<xsl:value-of select="current()[. != '']"/>` for each name | 366 | 341 | | | 335,544 | 207,544 |
+| `count(current()[price > 100])` for each product | 478 | 451 | | | 298,000 | 170,000 |
+| `count(//product[price > 100])`, no filter in it | 308 | 279 | 209 | 204 | 8,000 | 8,000 |
+| `<xsl:value-of select="name"/>` for each product | 317 | 286 | 246 | 260 | 47,520 | 47,520 |
+
+Every row with a filter in it allocates less, from a tenth to five sixths less, and the two without
+allocate what they did. `$products[1]/name` is three times quicker interpreted and four times compiled,
+the literal no longer evaluated against each of a thousand products; the Muenchian row, a node-set and
+two lists for each of a thousand candidates, three and a half and four and a half times; the fold row
+the section above gave up is back below where it had been, 966 to 359 against the 182 it once read on a
+quieter machine with the same 88 KB the unfolded step at 3.0 never had; and `//price[1]`, which was
+never folded at any version, is two and a half times quicker for being folded now.
+
+**The guard rows moved, and were made to say why.** `count(//product[price > 100])` and
+`value-of select="name"` read nine and ten percent quicker interpreted, on code this does not reach, in
+every one of three rounds; a fourth build, main's library copied under another name and run between the
+two, read what main read, and the order turned round changed nothing. The tier-1 listings under
+`DOTNET_JitDisasm` say what it is. `PredicateFilter.ApplyInPlace` took the array of predicates and held
+the loop over the candidates inside it, 6,862 bytes of code with the predicate's three ways of being
+asked, and `PathExpr.WalkSteps` called it for every origin of every step, predicates or none. It takes
+the array and calls a method for each predicate now, 78 bytes, and `WalkSteps` — 325 bytes to 496 — has
+it inlined: a step with no predicates, which is most steps, makes no call, and `//product` walked for
+a thousand origins of `name` is a thousand calls fewer. Compiled, where the child step is emitted
+inline and walks no `WalkSteps`, the two rows are 209 to 204 and 246 to 260 over two rounds and 210 to
+210 and 248 to 249 over four more, which is level.
+
+**A regression caught on the way, three times over.** With the fold widened, every row that read
+`$first` was three times slower than main — `count(//price[$first[id]])` 2,939 to 1,023 — and so was
+`//price[1]`, which reads nothing. `//product[1]` was the cause both times: a thousand products under
+one parent, and the first way of counting a candidate's position walked its earlier siblings for that
+candidate alone, half a million steps where the unfolded step had counted along one list. The count is
+taken from the candidates now, as the text above says, and the row is 359. A global is evaluated
+whether or not the template reads it, which is how `//price[1]` came to pay for it: the harness had put
+`$first` in every stylesheet, and every row on main was reading 500 microseconds and 260 KB slower
+than it does — the guard row 881 against its 308 — until the variable was moved into the rows that use
+it. A "was" column that has moved on unchanged code is the harness, not the engine.
+
+**The suites are silent.** Nothing moves on any of the eight runs against main at `f2d2693`, every
+failure set identical test for test and message for message, the two checkouts verified to have stood
+still and clean around each run, and main's own sets the ones the section on `current()` records: the
+3.0 run stands at 8,061 of 8,071, the 2.0 run at 5,678 of 5,701 and the schema-aware run at 8,668 of
+8,727, each on both backends, and the XPath runs at 18,268 of 18,285 and 14,553 of 14,577.
+`call-template-1001` passed all sixteen times.
+
+Thirteen unit tests in `FilteredSequenceRouteTests`, 3,021 in all, each asking its expression as a
+value, in an `xsl:when` and in an `xsl:if`, on both backends, at 1.0, 2.0 and 3.0, and requiring one
+answer or one error code — and, where an expression writes one thing, that `string(it) = 'that'` is
+true by every one of those roads. They were written against `3f0ee07` beside the section above's
+five, and hold the roads that section's do not: what `count()`, a comparison, `xsl:value-of`,
+`format-number()` and `generate-id()` make of a filter over a sequence and over nodes, the item being
+walked filtered as what it is, a sequence compared with nodes item by item, a one-number sequence a
+position, a filter that is nodes keeping every candidate or none, what is refused where a node is
+required, and the folded step — `//price[1]` four prices and `//price[$n]` none, and over nested
+`x` elements, where one parent's children stand between another's, `//x[2]` being `a2` and `b`. Eight
+of them fail against the engine as it was at `3f0ee07`; against `f2d2693` every one passes, the fold
+being a matter of cost there and not of answers, and the nested document is what would say so if the
+count by parent ever went wrong.
 
 ### Which results the suite asks for and does not get
 
