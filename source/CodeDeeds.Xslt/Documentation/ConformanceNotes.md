@@ -9302,6 +9302,22 @@ round. All of those pass against the engine as it was, being what must not chang
 against it are the range beside a node-set, in `BackwardsCompatibleNodeComparisonTests` beside the
 `(3, 10)` that never reached the fault, and beside `current()` in `CurrentItemRouteTests`.
 
+Everything above was taken against main at `3f0ee07`, and main moved while it was: the two sections
+above this one landed underneath, with a runtime that carries a deep recursion on to another stack.
+Both sides were built again, `cd51836` and `cd51836` with this, and taken again. The eight runs stand
+where they stood on both, identical test for test and message for message, the suites verified still
+and clean around all sixteen runs, `call-template-1001` passing every time, and main's own failure sets
+identical to `3f0ee07`'s. Twenty-seven rows taken again over three processes a side say what the tables
+say, every row that moved moving in three rounds of three and the bytes eight higher on both sides
+alike, which is the new runtime's and not this: `category = current()` 217 to 161 interpreted and 193
+to 118 compiled, `. = current()` 149 to 63 and 161 to 78, `[. = 'Electronics']` 71 to 49 and 76 to 62
+at 1.0 and 161 to 67 and 187 to 83 at 3.0, `[. > 100]` 79 to 56 at 1.0 and 228 to 71 at 3.0,
+`price < current()` 202 to 183 and 182 to 141, the `generate-id()` row 174 to 128 and 190 to 144 at
+1.0 and 341 to 298 at 3.0, `value-of select="."` 109 to 86 and 115 to 91, and 114 to 84 at 3.0,
+`select="current()"` 105 to 84; the guards `price > 100` 151 to 153 and 105 to 102 at 1.0 and 156 to
+155 at 3.0, `select="name"` 136 to 136 and 136 to 138, `1 to 1000` written 75 to 74, `. = current()`
+at 3.0 196 to 192; and `sum((1 to 1000)[. > 500])` 69 to 74 once more, in three rounds of three.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error
