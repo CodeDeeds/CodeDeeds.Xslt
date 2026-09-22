@@ -1444,6 +1444,21 @@ namespace CodeDeeds.Xslt.XPath
                 context.IL.LoadInt(nodesOnLeft ? 1 : 0);
                 context.IL.Call(s_compareTypedNodes);
             }
+            else if (other.UsuallyReturnsNodeSet && !other.ReturnsNodeSet)
+            {
+                // The other operand is nodes wherever it can be — current(), or '.' — and emits as a call
+                // to its own Evaluate, which answers with a node-set of one built for the purpose: eighty
+                // bytes for every candidate of [category = current()], which the interpreter's route had
+                // stopped paying. So the helper is handed the operand and not its value, and asks it for
+                // its node first, as CompareWhereNodesAreFound does, taking the value where it declines.
+                context.IL.LoadLocal(tree);
+                context.IL.LoadLocal(list);
+                context.LoadConstant(other.Unwrapped, typeof(Expr));
+                context.LoadContext();
+                context.IL.LoadInt(nodesOnLeft ? 1 : 0);
+                context.IL.LoadInt((int)m_operator);
+                context.IL.Call(EmitHelpers.Method(nameof(EmitHelpers.CompareNodesWithOperand)));
+            }
             else
             {
                 context.IL.LoadLocal(tree);

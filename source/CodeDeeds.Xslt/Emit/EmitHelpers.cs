@@ -122,6 +122,53 @@ namespace CodeDeeds.Xslt.Emit
                 : XPathComparison.NodesVersusOther(tree, nodes, other, nodesOnLeft, (BinaryOperator)op);
         }
 
+        /// <summary>
+        /// Compares collected nodes against an operand that is nodes wherever it can be and cannot promise
+        /// it — <c>current()</c>, or <c>.</c> — asking it for its nodes before it is asked for its value.
+        /// </summary>
+        /// <remarks>
+        /// The emitted counterpart of what the interpreter's 1.0 route does for such an operand, and by
+        /// the same two questions: <see cref="Expr.TryEvaluateNodes"/>, which appends the node to a pooled
+        /// list where the item is one, and <see cref="Expr.Evaluate"/> where it declines, whose value goes
+        /// the way <see cref="CompareNodes"/> sends any other. What is compared, and by which rules, is
+        /// the same either way; what differs is that a node is not wrapped as a node-set of one to be
+        /// laid out in a list again.
+        /// </remarks>
+        /// <param name="tree">The tree the nodes belong to.</param>
+        /// <param name="nodes">The nodes forming one operand.</param>
+        /// <param name="operand">The other operand, as the interpreter holds it.</param>
+        /// <param name="context">The evaluation context.</param>
+        /// <param name="nodesOnLeft">Whether the nodes were written on the left of the operator.</param>
+        /// <param name="op">The operator, as its <see cref="BinaryOperator"/> value.</param>
+        public static bool CompareNodesWithOperand(
+            Model.XdmTree tree,
+            List<int> nodes,
+            Expr operand,
+            ref Runtime.DynamicContext context,
+            bool nodesOnLeft,
+            int op)
+        {
+            List<int> operandNodes = NodeListPool.Rent();
+
+            try
+            {
+                Model.XdmTree? operandTree = operand.TryEvaluateNodes(ref context, operandNodes);
+
+                if (operandTree is null)
+                {
+                    return CompareNodes(tree, nodes, operand.Evaluate(ref context), nodesOnLeft, op);
+                }
+
+                return nodesOnLeft
+                    ? XPathComparison.NodesVersusNodes(tree, nodes, operandTree, operandNodes, (BinaryOperator)op)
+                    : XPathComparison.NodesVersusNodes(operandTree, operandNodes, tree, nodes, (BinaryOperator)op);
+            }
+            finally
+            {
+                NodeListPool.Return(operandNodes);
+            }
+        }
+
         /// <summary>Looks up one of this class's methods.</summary>
         /// <param name="name">The method name.</param>
         public static MethodInfo Method(string name)
