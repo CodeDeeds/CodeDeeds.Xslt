@@ -9134,6 +9134,174 @@ through the wrapping; the 257th clause refused; and the patterns above. Every ca
 its own first, on the stacks the tests run it on. All eight conformance runs are unchanged, totals and
 failure sets both, against the main with the fresh-stack work in it.
 
+### The context item, asked for its node
+
+The section on the current item left two gains lying: `.` is a node in every context but the ones it
+cannot rule out, and said nothing, so `[. = 'x']` under `version="1.0"` built a node-set of one and its
+array for every candidate to compare one node's text; and the emitted form of `category = current()`
+walked the step inline and took `current()` as a value, a node-set of one, where the interpreter had
+stopped paying for it. Both are taken here, and three things were found on the way that cost more than
+either: a wrong answer, a list rented for nothing, and a set built to hold one string.
+
+**A range beside a node-set was read as one string.** The first thing done was a probe and not a
+change: sixty expressions over `.`, `current()` and a child step, each written as a value and as a
+test, on both backends, at 1.0, 2.0 and 3.0, inside a `for-each` over numbers, over strings, over
+elements, and inside a function with no focus, run against main so that everything after could be
+diffed against it. The diff was meant to be empty, and one row of it was not empty on main. Under
+`version="1.0"`, over the four products priced 10, 40, 9 and 3 with a fifth at `1e1`:
+
+| | was, both backends | is |
+|---|---|---|
+| `count(//product[price = (1 to 10)])` | `0` | `4`, what `string(price) = (1 to 10)` counts |
+| `count(//product[(9 to 10) < price])` | `0` | `3` |
+| `count(//product[category = (5 to 1)])` | `1`, the empty category | `0` |
+| `count(//product[category != (5 to 1)])` | `4` | `0` |
+| `current() = (1 to 10)`, `current() > (9 to 10)`, over the prices | `false` for every price | `true` where the number is |
+
+`NodesVersusValue` reads the operand beside the nodes as one boolean, number or string, and a sequence
+handed to it was read as a string: its items joined by spaces, `1 2 3 4 5 6 7 8 9 10`, equal to no price
+and no number, and an empty one the empty string, equal to every empty element. The route it serves is
+guarded by `MaySpanDocuments`, and a sequence written out, `(3, 10)`, says so, as `tokenize()` and
+every 2.0 function do, which is what kept them off it — `BackwardsCompatibleNodeComparisonTests` had
+`plain = (3, 10)` and never reached the fault. A range does not say so, having no document in it, and
+was the one shape that reached the route as a sequence. The comparison a sequence calls for is the one
+the general way makes, each item an operand in its turn, so the value is asked what it is, by one test
+of its kind where there was one before: one boolean, number or string goes to `NodesVersusValue`, and a
+node-set or a sequence to `NodesVersusOther`, which lays the nodes out as the node-set they would have
+been and asks the general comparison. `EmitHelpers.CompareNodes` reads by the same test, so the two
+backends cannot part over it, and `BinaryExpr`'s own copy of the node-set case is gone. This is its own
+commit, before anything else, and every probe row after it is diffed against the engine with it.
+
+**`.` says it is usually a node, at every version.** `ContextItemExpr.ReturnsNodeSet` is false and
+stays so, for the reason its remarks give. It answers `UsuallyReturnsNodeSet` with `true` whatever the
+version, where `current()` answers only under 1.0 behaviour: the hint carries no version, and each
+reader decides for itself whether the version matters to what it does with a node. `xsl:value-of` and
+`generate-id()` read one node's text or identity, which is the same at every version, and ask wherever
+they are written; `ValueOfInstruction` had the branch already and `GenerateIdExpr` the flag. A
+comparison has a route for each set of rules, since what is compared differs. Under 1.0 rules the
+route that asked `current()` asks `.` the same way. Under 2.0 rules there was none, and the brief left
+it to a measurement whether one was worth having: `count(//category[. = 'Electronics'])` at
+`version="3.0"` over the thousand products allocates 499,424 bytes a call and takes 200 µs, where the
+1.0 route with `.` asked takes 78 and allocates 3,488 — a node-set of one, both sides laid out in
+lists of atomized values and the pairs asked, five hundred bytes to answer one string compare that a
+child step beside the same literal answers from a pooled list. So `NodesTypedWhereFound` is the fourth
+route: one operand usually a node and the other a value, the node atomized against the value by
+`CompareTypedNodes`, which the emitted form already hands a step's nodes to, and the general way taken
+as it stands where the operand declines, and where the value beside the node proves to be a node-set or
+a sequence, `. = current()` at 2.0, the node goes to the general way as the node-set it would have
+built, since that comparison is the general way's to make. Both asking routes sit beside the switch
+`Evaluate` and `EvaluateAsBoolean` begin with, for the reason the previous section gives, and are told
+from it by the one comparison the first already cost, the enum putting them last.
+
+**Asked for a list, and a list rented to ask.** The first form asked `TryEvaluateNodes`, as
+`current()` was asked, and a list had to be rented before the question could be put and handed back
+whatever the answer — paid where the expression declines as much as where it answers. Where it always
+declines it showed at once: `xsl:value-of select="."` inside `xsl:for-each select="1 to 1000"` was a
+tenth slower in every round, 107 to 120 µs at 1.0 and 82 to 97 at 3.0, and the same question put
+without a list was level. `xsl:value-of` and `generate-id()` were then asking one way and the
+comparisons the other, and the comparisons paid it too: `sum((1 to 1000)[. > 500])`, which declines a
+thousand times, was 91 to 106 µs at 1.0 and 257 to 277 at 3.0 over two rounds. The two expressions that
+make the hint are each one item, so the question asks for one: `Expr.TryEvaluateOneNode` names the
+node or declines, with nothing evaluated, nothing rented and nothing raised, and `TryEvaluateNodes` is
+gone, nothing reading it. The node found is a span of one on the stack, and `NodesVersusValue` takes a
+span now, the list form calling it; where a list is what the comparing method takes,
+`CompareTypedNodes` for the emitted code's sake, it is rented once there is a node to put in it.
+
+**One node against one node built a set.** With `.` asked, `count(//category[. = current()])` fell
+from 259,656 bytes a call to 179,656, and stopped there — as `count(//product[category = current()])`
+had stood at 179,656 in the section before, on the interpreter where `current()` was already read from
+a list. A hundred and seventy-six bytes for every candidate, in what was meant to be the allocation-free
+comparison, is `NodesVersusNodes`: asked whether some string on the left is some string on the right, it
+builds a `HashSet<string>` of one side, which for `@ref = current()/@id`, the join every 1.0 stylesheet
+makes, is a set of one string built once for every candidate. `NodesVersusNode` compares a list against
+one node, string against string, or number against number, and `NodesVersusNodes` takes it wherever
+either side is one node, so a path beside a path of one gains as much as `.` and `current()` do, on both
+backends: it is the one method both compare with. The many-against-many case keeps its set.
+
+**The emitted comparison asks the operand.** `TryEmitNodeComparison` emitted the other operand as a
+value; where that operand is usually a node and cannot promise it, it now hands the helper the operand
+itself, as it hands `CompareTypedNodes` the expression, and `EmitHelpers.CompareNodesWithOperand` asks
+it for its node first and takes its value where it declines — the two questions
+`CompareWhereNodesAreFound` asks, and the same comparison once the node is found.
+
+**`generate-id(.)` at 3.0 arrives wrapped.** From 2.0 the argument is held to `node()?` by a
+`CheckedArgumentExpr`, and the wrapper did not pass the hint on, so at 3.0 the call took the value as it
+always had and the row did not move. A node passes that check untouched, and what declines is converted
+and refused exactly as it was, so the wrapper answers for its argument wherever the parameter takes a
+node as it comes.
+
+In microseconds a transformation over the thousand-product benchmark document, parsed once, taken as
+the previous section took it: one case and one build to a fresh process, the builds turn about, each
+warmed for at least five seconds and until three 400 ms windows in a row agreed within 3% on time and
+0.5% on bytes, the quickest of twelve windows quoted and averaged over three processes a side. *Was* is
+the engine with the range fixed and nothing else; main was run beside it on seven of the rows and is the
+same to the byte and within a process of it on every one, so the range fix costs nothing anywhere. The
+machine was quieter than for the previous section's tables, so *was* here is lower than *is* was there
+for the same code. Every row that was meant to move moved in all three rounds, and every guard is
+within a process of where it stood.
+
+| `version="1.0"` | interpreted, was | is | compiled, was | is | bytes a call, was | is |
+|---|---|---|---|---|---|---|
+| `count(//product[category = current()])` | 228 | 164 | 198 | 114 | 179,656 / 259,656 | 3,656 |
+| `count(//category[. = current()])` | 157 | 64 | 168 | 77 | 259,656 | 3,656 |
+| `count(//category[. = 'Electronics'])` | 75 | 47 | 80 | 59 | 83,488 | 3,488 |
+| `count(//price[. > 100])` | 87 | 61 | | | 107,488 | 3,488 |
+| `count(//product[price < current()])` | 204 | 185 | 180 | 145 | 3,656 / 83,656 | 3,656 |
+| `count(//category[generate-id(.) = generate-id(current())])` | 179 | 130 | 184 | 143 | 243,776 | 83,776 |
+| `<xsl:value-of select="."/>` for each product name | 110 | 85 | 117 | 84 | 87,520 | 7,520 |
+| `<xsl:value-of select="current()"/>` for each product name | 105 | 86 | | | 7,520 | 7,520 |
+| `count(//product[price > 100])`, a guard | 150 | 153 | 105 | 108 | 3,488 | 3,488 |
+| `<xsl:value-of select="name"/>` for each product, a guard | 137 | 133 | 140 | 140 | 7,496 | 7,496 |
+| `<xsl:value-of select="."/>` for each of `1 to 1000`, a guard | 76 | 76 | | | 49,872 | 49,872 |
+| `sum((1 to 1000)[. > 500])` | 69 | 74 | | | 75,760 | 75,760 |
+| `count(//product[category = current()/category])` | 220 | 217 | 177 | 176 | 83,592 / 131,592 | the same |
+
+| `version="3.0"` | interpreted, was | is | compiled, was | is | bytes a call, was | is |
+|---|---|---|---|---|---|---|
+| `count(//category[. = 'Electronics'])` | 165 | 63 | 189 | 81 | 499,424 | 3,424 |
+| `count(//price[. > 100])` | 228 | 75 | 255 | 93 | 499,456 | 3,456 |
+| `<xsl:value-of select="."/>` for each product name | 114 | 87 | | | 87,520 | 7,520 |
+| `count(//category[generate-id(.) = generate-id(current())])` | 343 | 305 | 375 | 326 | 819,728 | 659,728 |
+| `count(//category[. = current()])` | 196 | 199 | | | 579,592 | 579,592 |
+| `count(//product[price > 100])`, a guard | 155 | 157 | | | 3,456 | 3,456 |
+| `<xsl:value-of select="."/>` for each of `1 to 1000`, a guard | 75 | 74 | | | 49,872 | 49,872 |
+| `sum((1 to 1000)[. > 500])` | 210 | 207 | | | 479,776 | 479,776 |
+
+Where the bytes column has two figures, the second is the compiled backend's. The bytes left in every
+row that moved are the transformation's own — the runtime, the writer, the one list the first
+`for-each` builds — and are what `price > 100` costs. Two rows want a word. `. = current()` at 3.0 goes
+the general way as it did, `current()` being usually a node under 1.0 behaviour only, which the
+previous section settled and this one does not reopen; its first form on the new route was seven percent
+slower than that in three rounds of three, rebuilding a node-set the general way builds once, and it
+was given to the general way from the start — 196 to 199 is what that measured after. And
+`sum((1 to 1000)[. > 500])` under `version="1.0"` is eight percent slower in three rounds of three, with
+nothing to set against it: the hint is wrong for every candidate there, and what a wrong hint costs is
+one virtual call to be told so, five nanoseconds an item on a predicate over atomic values, which is a
+shape the mode all but never sees; at 3.0 the same row is level, the comparison costing enough for the
+call to be lost in it. `category = current()/category` did not move and was not expected to: its eighty
+bytes a candidate are the path's start, `current()` evaluated as a value to be walked from, and its
+comparison is made some way that builds no set on any of the three builds, which was noticed and not
+looked into.
+
+**The suites are silent.** Nothing moves on any of the eight runs, every failure set identical test for
+test and message for message, the two checkouts verified to have stood still and clean around each of
+the sixteen runs: the 3.0 run at 8,061 of 8,071, the 2.0 run at 5,678 of 5,701 and the schema-aware run
+at 8,668 of 8,727, each on both backends, and the XPath runs at 18,268 of 18,285 and 14,553 of 14,577.
+`call-template-1001` passed all sixteen times. No test in either suite compares a node-set with a range
+under `version="1.0"`, which is how the wrong answer stood.
+
+Ten new unit tests, 2,973 in all. `ContextItemRouteTests` is `CurrentItemRouteTests` for `.`: each
+expression as a value, in an `xsl:when` and in an `xsl:if`, on both backends at 1.0, 2.0 and 3.0,
+inside a `for-each` over `(3, 0)`, over `('', 'x')`, over prices, over categories, and inside a
+function with no focus — compared with a number, a string, a boolean, a sequence, a range, a path and
+`current()`; as the candidate of a predicate and beside a child step in one; written, counted,
+identified, and refused with `XPDY0002` where there is nothing to ask. `ComparisonRouteTests` asks its
+collation and its schema-typed questions of `.` inside a predicate as it asked them of a step, a date
+beside a string being `XPTY0004` by either road, and one node against several under `!=` both ways
+round. All of those pass against the engine as it was, being what must not change; the two that fail
+against it are the range beside a node-set, in `BackwardsCompatibleNodeComparisonTests` beside the
+`(3, 10)` that never reached the fault, and beside `current()` in `CurrentItemRouteTests`.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error
