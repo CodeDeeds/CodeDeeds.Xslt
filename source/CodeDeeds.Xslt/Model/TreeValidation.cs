@@ -1,3 +1,4 @@
+using System.Xml;
 using System.Xml.Schema;
 
 namespace CodeDeeds.Xslt.Model
@@ -29,13 +30,29 @@ namespace CodeDeeds.Xslt.Model
         /// <param name="strict">Whether a document element with no declaration is an error rather than untyped.</param>
         /// <param name="typeIds">What numbers a type the validator settled on, for the tree's annotation.</param>
         /// <param name="annotate">Whether the tree records what was found, or is validated and left untyped.</param>
-        public TreeValidation(XmlSchemaSet schemas, bool strict, Func<XmlSchemaType, ushort> typeIds, bool annotate)
+        /// <param name="followHints">
+        /// What fetches the schemas a document names with <c>xsi:schemaLocation</c>, or null to follow none.
+        /// A hint then adds to a copy of <paramref name="schemas"/> made for each read, which is compiled
+        /// again, and never to the set itself.
+        /// </param>
+        public TreeValidation(
+            XmlSchemaSet schemas, bool strict, Func<XmlSchemaType, ushort> typeIds, bool annotate, XmlResolver? followHints = null)
         {
+            FollowHints = followHints;
             Schemas = schemas;
             Strict = strict;
             TypeIds = typeIds;
             Annotate = annotate;
         }
+
+        private const string XsiNamespace = "http://www.w3.org/2001/XMLSchema-instance";
+
+        // The reader whose document element is undeclared under lax validation, so that the complaints it
+        // goes on to make about the content are let by; compared by identity, so another read is unaffected.
+        private XmlReader? m_undeclaredRoot;
+
+        /// <summary>What fetches the schemas a document names for itself, or null where its hints are not followed.</summary>
+        public XmlResolver? FollowHints { get; }
 
         /// <summary>The compiled schemas the document is validated against.</summary>
         public XmlSchemaSet Schemas { get; }
@@ -63,13 +80,39 @@ namespace CodeDeeds.Xslt.Model
                 return;
             }
 
+            // A document element no top-level declaration names, in a namespace the schemas do cover, is
+            // an error to .NET's reader and not a warning as it is in a namespace they know nothing of.
+            // Strict validation wants the declaration (XTTE1512); lax leaves the element and all it holds
+            // untyped, which is not an error however many complaints the reader makes about what is inside.
+            if (sender is XmlReader reader)
+            {
+                if (ReferenceEquals(m_undeclaredRoot, reader))
+                {
+                    return;
+                }
+
+                if (FollowHints is null
+                    && reader is { NodeType: XmlNodeType.Element, Depth: 0 }
+                    && Schemas.GlobalElements[new XmlQualifiedName(reader.LocalName, reader.NamespaceURI)] is null
+                    && reader.GetAttribute("type", XsiNamespace) is null)
+                {
+                    if (Strict)
+                    {
+                        throw Undeclared(reader.NamespaceURI, reader.LocalName);
+                    }
+
+                    m_undeclaredRoot = reader;
+                    return;
+                }
+            }
+
             string where = e.Exception is { LineNumber: > 0 } at
                 ? $" (line {at.LineNumber}, column {at.LinePosition})"
                 : string.Empty;
 
             throw XsltErrors.Error(
                 Strict ? XsltErrorCode.XTTE1510 : XsltErrorCode.XTTE1515,
-                $"The document is not valid against the schemas in scope{where}: {e.Message}",
+                $"The document is not valid against the schemas in scope{where}: {SchemaMessages.Explain(e.Message)}",
                 e.Exception);
         }
 

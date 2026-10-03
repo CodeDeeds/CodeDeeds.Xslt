@@ -2516,6 +2516,20 @@ namespace CodeDeeds.Xslt.XPath
             // Both are answered by a walk up from the element, as the version is, and asked once.
             m_written ??= (m_context.StaticBaseUri, m_context.DefaultCollation);
 
+            if (m_context is XPathStaticContext { TypedSchemas: { } typed })
+            {
+                switch (built)
+                {
+                    case JsonFunctionExpr validating:
+                        validating.StaticSchemas = typed.Components;
+                        break;
+
+                    case NodeBuildingFunctionExpr analyzing:
+                        analyzing.StaticSchemas = typed.Components;
+                        break;
+                }
+            }
+
             if (m_written.Value.BaseUri is string baseUri)
             {
                 switch (built)

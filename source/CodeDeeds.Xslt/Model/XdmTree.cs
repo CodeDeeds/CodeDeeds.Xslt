@@ -318,7 +318,7 @@ namespace CodeDeeds.Xslt.Model
         /// The question every typed path asks first, so that a tree nothing validated — every tree, until
         /// a caller asks for validation — takes the path it always took and pays nothing for the option.
         /// </remarks>
-        internal bool HasTypeAnnotations => m_nodeType is not null || m_attributeType is not null;
+        public bool HasTypeAnnotations =>m_nodeType is not null || m_attributeType is not null;
 
         /// <summary>
         /// The number of the type a node was validated as, or 0 for a node that carries no annotation:
@@ -347,9 +347,31 @@ namespace CodeDeeds.Xslt.Model
             return XPath.XdmSchemaType.ById(TypeIdOf(nodeId));
         }
 
+        /// <summary>
+        /// The name of the type a node was validated as, or <see langword="null"/> for a node with no
+        /// annotation: any node of an unvalidated tree, which the data model reads as <c>xs:untyped</c> for
+        /// an element and <c>xs:untypedAtomic</c> for an attribute, and an element or attribute validation
+        /// found no declaration for.
+        /// </summary>
+        /// <param name="nodeId">The node.</param>
+        /// <returns>
+        /// The type's namespace URI and local name; the local name is empty for an anonymous type.
+        /// </returns>
+        /// <example>
+        /// <code>
+        /// XdmTree order = schemas.Parse("&lt;order qty='3'/&gt;");
+        /// var type = order.TypeNameOf(order.FirstChildOf(XdmTree.RootNode));
+        /// // ("http://www.w3.org/2001/XMLSchema", "int") for an element declared as xs:int.
+        /// </code>
+        /// </example>
+        public (string NamespaceUri, string LocalName)? TypeNameOf(int nodeId)
+        {
+            return TypeAnnotationOf(nodeId) is { } type ? (type.NamespaceUri, type.LocalName) : null;
+        }
+
         /// <summary>Whether an element was validated as nilled: <c>xsi:nil="true"</c> under a nillable declaration.</summary>
         /// <param name="nodeId">The node.</param>
-        internal bool IsNilled(int nodeId)
+        public bool IsNilled(int nodeId)
         {
             return m_nilled is not null && !IsAttribute(nodeId) && m_nilled.Contains(nodeId);
         }
@@ -716,7 +738,15 @@ namespace CodeDeeds.Xslt.Model
                 type = type.Content == System.Xml.Schema.XmlSchemaContentType.TextOnly ? type.SimpleContent : null;
             }
 
-            return type is not null && (reference ? type.IsIdrefType : type.IsIdType);
+            if (type is null)
+            {
+                return false;
+            }
+
+            // An atomic type says it without looking at the text; a list or a union is decided by the text.
+            return type.Variety == XPath.XdmSchemaVariety.Atomic
+                ? (reference ? type.IsIdrefType : type.IsIdType)
+                : type.HoldsIdValue(StringValueOf(nodeId), reference);
         }
 
         /// <summary>

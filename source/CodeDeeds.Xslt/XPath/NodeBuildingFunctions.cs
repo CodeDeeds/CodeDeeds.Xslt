@@ -116,6 +116,12 @@ namespace CodeDeeds.Xslt.XPath
         internal string? StaticBaseUri { get; set; }
 
         /// <summary>
+        /// The schemas in scope where the call was written, for an expression evaluated with no stylesheet
+        /// round it; null where there are none.
+        /// </summary>
+        internal Compiler.SchemaComponents? StaticSchemas { get; set; }
+
+        /// <summary>
         /// Refuses a fragment whose text declaration is not one.
         /// </summary>
         /// <remarks>
@@ -264,6 +270,22 @@ namespace CodeDeeds.Xslt.XPath
             // The result is the element, not the document node holding it, which the signature says: this is
             // the one of the three that answers with an element.
             XdmTree tree = builder.Finish();
+
+            // A schema-aware processor gives the result the types F&O 3.1 declares for it, whether or not
+            // the stylesheet imported them: the built-in schema is used where the schemas in scope do not
+            // have the namespace, as fn:json-to-xml() does.
+            Compiler.SchemaComponents? schemas = context.Runtime?.Schemas ?? StaticSchemas;
+
+            if (schemas is not null)
+            {
+                if (schemas.FindElement(Compiler.SchemaComponents.JsonNamespace, "analyze-string-result") is null)
+                {
+                    schemas = Compiler.SchemaComponents.Json;
+                }
+
+                tree = tree.WithTypeAnnotations(new Compiler.NodeValidator(schemas).ValidateDocument(tree, strict: true));
+            }
+
             return XPathValue.FromNodeSet(NodeSet.Singleton(tree, XdmTree.RootNode + 1));
         }
 

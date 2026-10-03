@@ -277,6 +277,12 @@ namespace CodeDeeds.Xslt.Compiler
             }
         }
 
+        /// <summary>
+        /// What fetches a schema by location through the caller's <see cref="XsltOptions.SchemaResolver"/>,
+        /// or null where the caller gave none.
+        /// </summary>
+        public XmlResolver? LocationResolver => m_locations;
+
         /// <summary>The number a node validated as a type is annotated with; see <see cref="XdmSchemaType.Id"/>.</summary>
         /// <param name="definition">The type the validator settled on.</param>
         public ushort TypeIdOf(XmlSchemaType definition)
@@ -720,7 +726,24 @@ namespace CodeDeeds.Xslt.Compiler
             + "<xs:anyAttribute processContents=\"skip\" namespace=\"##other\"/></xs:complexType>"
             + "<xs:attributeGroup name=\"key-group\"><xs:attribute name=\"key\" type=\"xs:string\" use=\"required\"/>"
             + "<xs:attribute name=\"escaped-key\" type=\"xs:boolean\" use=\"optional\" default=\"false\"/></xs:attributeGroup>"
+            + AnalyzeStringSchema
             + "</xs:schema>";
+
+        /// <summary>
+        /// The declarations for the element <c>fn:analyze-string()</c> returns, as F&amp;O 3.1 §5.6.2 publishes
+        /// them, which share the functions namespace with the JSON ones and so share their schema document.
+        /// </summary>
+        private const string AnalyzeStringSchema =
+            "<xs:element name=\"analyze-string-result\" type=\"j:analyze-string-result-type\"/>"
+            + "<xs:complexType name=\"analyze-string-result-type\"><xs:choice minOccurs=\"0\" maxOccurs=\"unbounded\">"
+            + "<xs:element ref=\"j:non-match\"/><xs:element ref=\"j:match\"/></xs:choice></xs:complexType>"
+            + "<xs:element name=\"non-match\" type=\"xs:string\"/>"
+            + "<xs:element name=\"match\" type=\"j:match-type\"/>"
+            + "<xs:complexType name=\"match-type\" mixed=\"true\"><xs:choice minOccurs=\"0\" maxOccurs=\"unbounded\">"
+            + "<xs:element ref=\"j:group\"/></xs:choice></xs:complexType>"
+            + "<xs:element name=\"group\" type=\"j:group-type\"/>"
+            + "<xs:complexType name=\"group-type\" mixed=\"true\"><xs:choice minOccurs=\"0\" maxOccurs=\"unbounded\">"
+            + "<xs:element ref=\"j:group\"/></xs:choice><xs:attribute name=\"nr\" type=\"xs:positiveInteger\"/></xs:complexType>";
 
         /// <summary>
         /// The schema for the <c>xml</c> namespace, as the W3C publishes it: the four attributes every

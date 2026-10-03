@@ -80,7 +80,7 @@ namespace CodeDeeds.Xslt.Conformance
             }
 
             Catalog catalog = Catalog.Load(root);
-            Runner runner = new Runner(catalog, version);
+            Runner runner = new Runner(catalog, version, schemaAware);
 
             int passed = 0;
             int failed = 0;

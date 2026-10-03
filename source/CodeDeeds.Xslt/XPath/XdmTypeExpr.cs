@@ -1051,6 +1051,13 @@ namespace CodeDeeds.Xslt.XPath
         {
             List<XPathValue> items = XdmSequence.Items(m_value.Evaluate(ref context));
 
+            // The operand is atomized (XPath 3.1 §3.18.3), which for an array is its members, flattened,
+            // and for a map or a function is FOTY0013 — an error under castable as too, not a false.
+            if (items.Count > 0 && items.Exists(static item => item.Kind is XPathValueKind.Array or XPathValueKind.Map or XPathValueKind.Function))
+            {
+                items = XdmSequence.Atomize(items);
+            }
+
             if (items.Count != 1)
             {
                 if (items.Count == 0 && m_allowEmpty)

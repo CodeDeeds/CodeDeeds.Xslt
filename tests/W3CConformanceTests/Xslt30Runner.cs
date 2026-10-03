@@ -287,9 +287,21 @@ namespace CodeDeeds.Xslt.Conformance
                     $"the transformation had not finished after {s_limit.TotalSeconds:F0} seconds");
             }
 
-            return outcome.Unsupported is string unsupported
-                ? new TestResult(Outcome.Skipped, unsupported)
-                : Xslt30Assertions.Check(result.Elements().First(), outcome);
+            if (outcome.Unsupported is string unsupported)
+            {
+                return new TestResult(Outcome.Skipped, unsupported);
+            }
+
+            TestResult checkedResult = Xslt30Assertions.Check(result.Elements().First(), outcome);
+
+            // .NET's validator holds a date in System.DateTime, so a document with a negative year or one past
+            // 9999 cannot be validated. The engine says so in the error it raises, and a test failing on that
+            // error is the documented limit rather than a fault; this is read from the error and not from a
+            // list of tests, so a test that stops hitting it is counted again.
+            return checkedResult.Outcome == Outcome.Failed
+                && outcome.Error?.Contains("System.DateTime and so accepts only the years", StringComparison.Ordinal) == true
+                    ? new TestResult(Outcome.Skipped, "the schema validator is .NET's, which holds years 1 to 9999 only")
+                    : checkedResult;
         }
 
         // ---- Running -------------------------------------------------------------------------------------

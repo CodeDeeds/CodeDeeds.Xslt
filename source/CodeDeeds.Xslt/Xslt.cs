@@ -267,7 +267,10 @@ namespace CodeDeeds.Xslt
 
         /// <summary>Refuses options that contradict one another before anything is compiled with them.</summary>
         /// <param name="options">The options.</param>
-        /// <exception cref="ArgumentException">Input validation is asked for without schema awareness.</exception>
+        /// <exception cref="ArgumentException">
+        /// Input validation is asked for without schema awareness, or schema hints are to be followed with
+        /// no schema awareness or no resolver to fetch them through.
+        /// </exception>
         private static void CheckOptions(XsltOptions options)
         {
             if (options.InputValidation is XsltValidation.Strict or XsltValidation.Lax && !options.SchemaAware)
@@ -276,6 +279,14 @@ namespace CodeDeeds.Xslt
                     "XsltOptions.InputValidation asks for the documents read to be validated, which needs "
                     + "XsltOptions.SchemaAware: the schemas to validate against are the ones a schema-aware "
                     + "stylesheet imports and the caller supplies.",
+                    nameof(options));
+            }
+
+            if (options.FollowSchemaLocation && (!options.SchemaAware || options.SchemaResolver is null))
+            {
+                throw new ArgumentException(
+                    "XsltOptions.FollowSchemaLocation fetches the schemas a document names, which needs "
+                    + "XsltOptions.SchemaAware and an XsltOptions.SchemaResolver to fetch them through.",
                     nameof(options));
             }
         }

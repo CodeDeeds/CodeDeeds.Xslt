@@ -10288,3 +10288,86 @@ would mean asking this engine's own `instance of` whether the result is of the a
 circular in precisely the wrong direction: those tests are a test *of* the type matcher.
 
 
+
+### What the QT3 schema environments found
+
+The QT3 driver skipped every environment that declares a schema, 140 tests, and every test that depends on
+`schemaImport` or `schemaValidation`, on the ground that it had no way to load a schema. It had one once the
+engine gave a caller a public way to validate: `XdmSchemas` compiles an environment's schemas, `Parse` reads a
+source the environment marks `validation="strict"` with its nodes typed, and `XPathStaticContext.TypedSchemas`
+puts the same schemas in scope for the expression, so that the type a cast names and the type a node was
+validated as are one object. Under `--schema` that is what the driver does; without it nothing changed, and
+both plain runs are identical test for test on both backends (18,268 of 18,285 and 14,553 of 14,577).
+
+196 tests came into the 3.1 run and 83 into the 2.0 run, and seventeen of the 3.1 ones failed at first. Each
+was a fault, and none was in what the schema did:
+
+- **`cast as` and `castable as` did not atomize an array.** `[5] castable as xs:integer` is true, and an array
+  of arrays flattens (XPath 3.1 3.18.3); a map or a function is `FOTY0013`, an error under `castable as` as
+  well and not a `false`. The operand had to be one item to be anything, and an array is one item. Not a schema
+  question at all: the tests were skipped because their environment declared a schema.
+- **An element of a list type was never an ID, and neither was a union's ID member.** `id()` and
+  `element-with-id()` asked whether the element's *type* derived from `xs:ID`, which a list of `xs:ID` does not
+  and a union of `xs:ID` and `xs:integer` does not either. What decides it is the value: a list holds an ID only
+  with one item, a union only when the member that accepts the text is an ID type, so `omicron` is one and `853`
+  is not. `XdmSchemaType.HoldsIdValue` asks with the text; an atomic type still answers without it.
+- **`element(*, xs:numeric)` matched nothing.** `xs:numeric` is XPath 3.1's union of three types that no
+  schema declares, so there were no members to walk, and an element validated as `xs:float` is an instance of
+  it by the pure-union rule. It is a special case of `DerivesFrom`, asked only where nothing else matched.
+- **`fn:analyze-string()` was untyped.** F&O 3.1 declares the types of its result and a schema-aware
+  processor gives them. The declarations share the XPath functions namespace with the JSON ones, so they are
+  added to the one built-in schema document for that namespace, and the result is validated against it where
+  the processor is schema-aware, with no import, as `fn:json-to-xml()` is. A processor that is not
+  schema-aware leaves it untyped, so nothing moves for an ordinary caller.
+- **`fn:json-to-xml(validate)` had no schemas outside a stylesheet.** It read them off the transformation, and
+  an expression evaluated on its own has none; it reads them off the static context too now.
+- **Two `serialize()` parameters took what they should refuse.** `standalone` is a boolean or exactly `omit`,
+  so `" omit "` is `XPTY0004` where it was read as the omit it was not, and, worse, the element form of the
+  parameter never set it at all. A character map key of two characters is `SEPM0016`, the code bug 29030
+  changed it to, where it was the `SEPM0017` of a malformed parameter document.
+
+### What .NET's dates cost, and how it is reported
+
+The 46 tests that failed on a year in the schema-aware XSLT run (see *What the schema-aware run found in a
+negative year*) are accepted as a limit and not worked around. The alternatives were to catch the validator's
+complaint about a date and carry on, which would also let through a date that fails a `minInclusive` facet
+and so a wrong answer, or to validate every simple type ourselves, which is the beginning of replacing
+`System.Xml.Schema` and was not asked for. So the engine says what is wrong in the one place it can be told:
+a validation error whose value is a negative year or one of more than four digits, and whose message says it
+is not a valid date, is followed by an account that the validator is .NET's, holds a date in `System.DateTime`
+and accepts only years 1 to 9999, and that the engine's own dates reach further. A date that is wrong by any
+reckoning, `2020-13-45`, is not given the excuse. The code stays `XTTE1510`, `XTTE1515` or `XTTE1540` by what
+was being validated, since the text is what is out of range and not the kind of fault.
+
+The driver reads that account out of the error and skips the test with the reason named, 44 of them. It does
+not carry a list of test names, because such a list is something nothing checks (see *When the driver is behind
+the engine*): a test that stops meeting the limit is counted again. `type-functions-0101` and `-0401` want a
+typed date out of the same documents and complete without raising, having validated nothing, so nothing marks
+them and they stay in the failures.
+
+The schema-aware XSLT run is **8,668 of 8,683, 99.8%** with 44 skipped for it, 15 failures: nine that fail in
+the headline run too or have nothing to do with schemas, four that are the suite's own mistakes (argued above
+for `validation-0006`, `-1702`, `-0201` and `import-schema-137`), and those two. The headline runs are
+unchanged: XSLT 3.0 8,061 of 8,071, 2.0 5,678 of 5,701, both on both backends, with the same failures.
+
+### Hints, and what an inline schema includes
+
+`xsi:schemaLocation` is followed only where `XsltOptions.FollowSchemaLocation` says so. A hint names a file
+the document chose, which is why it is a setting with a resolver to go through and not something validation
+does; and it adds to the set it is validated against, which is the one thing a set shared by every
+transformation over the stylesheet must never have done to it. So each validated read makes a copy of the
+compiled set, lets the reader add what the document names to the copy, and compiles it again, and the shared
+set is as it was. The cost is a compilation of the schemas for each document that is read this way, and the
+setting says so. The types a hint supplies annotate the nodes and are matched by name, so
+`element(*, my:type)` finds them when the stylesheet imported `my:type` too, but a stylesheet cannot name a
+type only a hint supplied, being compiled before any document is read.
+
+A relative `xs:include` in an inline schema was listed as not fetched, and is: it resolves against the module's
+base URI through the schema resolver, as an include in a schema fetched by location does. The page saying
+otherwise was written before a resolver was in the path; a test now includes one.
+
+One more rule came with it. A document element no top-level declaration names, in a namespace the schemas
+*do* cover, is an error to .NET's reader, where in a namespace they know nothing of it is a warning. The reader
+reported it as an invalid document (`XTTE1510`) where strict validation means `XTTE1512`, and under lax
+validation it would have been refused when it should be left untyped, with everything inside it. Under strict
+it is `XTTE1512` now, and under lax the reader's complaints about that element and its content are let by.

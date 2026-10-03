@@ -365,6 +365,7 @@ namespace CodeDeeds.Xslt.Model
         /// <param name="entityResolver">What fetches what a document type declaration names, or null for nothing.</param>
         /// <param name="baseUri">The document's base URI.</param>
         /// <param name="validation">What to validate against, and how.</param>
+        /// <param name="nameTable">The table used to intern names, or <see langword="null"/> to create one.</param>
         /// <returns>The parsed tree, its nodes annotated.</returns>
         /// <exception cref="XsltException">The document is not valid; see <see cref="TreeValidation"/>.</exception>
         internal static XdmTree FromXmlValidated(
@@ -372,12 +373,13 @@ namespace CodeDeeds.Xslt.Model
             WhitespaceControl? whitespace,
             IXsltResolver? entityResolver,
             string? baseUri,
-            TreeValidation validation)
+            TreeValidation validation,
+            NameTable? nameTable = null)
         {
             EntityResolverAdapter? entities = entityResolver is null ? null : new EntityResolverAdapter(entityResolver, baseUri);
             using XmlReader xmlReader = XmlReader.Create(reader, HardenedSettings(entities, validation));
             return Build(
-                xmlReader, null, whitespace, false, entities, baseUri,
+                xmlReader, nameTable, whitespace, false, entities, baseUri,
                 InitialNodeCapacity, InitialAttributeCapacity, trackEntityBases: entities is not null, validation: validation);
         }
 
@@ -674,6 +676,45 @@ namespace CodeDeeds.Xslt.Model
             return false;
         }
 
+        /// <summary>
+        /// Serves what a validated read asks for under one resolver when it follows schema hints and the
+        /// caller has an entity resolver too: the schema resolver first, and the entity resolver where the
+        /// schema resolver has nothing of that name.
+        /// </summary>
+        private sealed class HintsThenEntities : XmlResolver
+        {
+            private readonly XmlResolver m_hints;
+            private readonly XmlResolver m_entities;
+
+            public HintsThenEntities(XmlResolver hints, XmlResolver entities)
+            {
+                m_hints = hints;
+                m_entities = entities;
+            }
+
+            public override Uri ResolveUri(Uri? baseUri, string? relativeUri)
+            {
+                return m_entities.ResolveUri(baseUri, relativeUri);
+            }
+
+            public override bool SupportsType(Uri absoluteUri, Type? type)
+            {
+                return m_hints.SupportsType(absoluteUri, type) || m_entities.SupportsType(absoluteUri, type);
+            }
+
+            public override object? GetEntity(Uri absoluteUri, string? role, Type? ofObjectToReturn)
+            {
+                try
+                {
+                    return m_hints.GetEntity(absoluteUri, role, ofObjectToReturn);
+                }
+                catch (XsltException)
+                {
+                    return m_entities.GetEntity(absoluteUri, role, ofObjectToReturn);
+                }
+            }
+        }
+
         private static XmlReaderSettings HardenedSettings(EntityResolverAdapter? entities, TreeValidation? validation = null)
         {
             XmlReaderSettings settings = new XmlReaderSettings
@@ -699,6 +740,24 @@ namespace CodeDeeds.Xslt.Model
                 settings.ValidationFlags = System.Xml.Schema.XmlSchemaValidationFlags.ProcessIdentityConstraints
                     | System.Xml.Schema.XmlSchemaValidationFlags.AllowXmlAttributes;
                 settings.ValidationEventHandler += validation.Report;
+
+                if (validation.FollowHints is { } hints)
+                {
+                    // Asked to follow what the document names: the hints are added to a copy of the set,
+                    // made for this read, so that the shared set is still the one nothing changes. The
+                    // copy is compiled again by the reader, which is the cost of a hint. The caller's
+                    // schema resolver fetches them, and so fetches any external subset the document names
+                    // when no entity resolver was given: it is the one resolver the caller opened for this.
+                    System.Xml.Schema.XmlSchemaSet copy = new System.Xml.Schema.XmlSchemaSet(validation.Schemas.NameTable)
+                    {
+                        XmlResolver = hints,
+                    };
+
+                    copy.Add(validation.Schemas);
+                    settings.Schemas = copy;
+                    settings.ValidationFlags |= System.Xml.Schema.XmlSchemaValidationFlags.ProcessSchemaLocation;
+                    settings.XmlResolver = entities is null ? hints : new HintsThenEntities(hints, entities);
+                }
             }
 
             return settings;

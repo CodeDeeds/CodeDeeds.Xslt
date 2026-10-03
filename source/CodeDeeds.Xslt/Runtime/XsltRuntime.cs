@@ -905,7 +905,7 @@ namespace CodeDeeds.Xslt.Runtime
                 // Read as it stands unless the resolver that supplied it says otherwise. What the caller
                 // asked to be validated is the document it handed in; a document the stylesheet goes and
                 // fetches is not that, and is validated only where whoever supplies it says so.
-                TreeValidation? validation = m_stylesheet.ValidationFor(resolved.Validation);
+                TreeValidation? validation = m_stylesheet.ValidationFor(resolved.Validation, m_options);
 
                 tree = validation is not null
                     ? XdmTreeBuilder.FromXmlValidated(

@@ -51,10 +51,68 @@ namespace CodeDeeds.Xslt.Conformance
         /// </remarks>
         private string? m_testSetDirectory;
 
-        public Runner(Catalog catalog, XsltVersion version)
+        private readonly bool m_schemaAware;
+        private XdmSchemas? m_noSchemas;
+
+        /// <summary>The schema components built for one set of environment schemas, by the files that make them up.</summary>
+        private readonly Dictionary<string, XdmSchemas> m_components = new(StringComparer.Ordinal);
+
+        public Runner(Catalog catalog, XsltVersion version, bool schemaAware = false)
         {
             m_catalog = catalog;
             m_version = version;
+            m_schemaAware = schemaAware;
+        }
+
+        /// <summary>
+        /// The schema components of an environment, built once for the files it declares, or null where it
+        /// declares none or the run is not schema-aware.
+        /// </summary>
+        private XdmSchemas? ComponentsOf(Environment? environment)
+        {
+            if (!m_schemaAware)
+            {
+                return null;
+            }
+
+            // A schema-aware processor with no schemas in scope is still one: the built-in ones, for the
+            // result of fn:analyze-string() and fn:json-to-xml(), are in use whatever the environment says.
+            if (environment is null || environment.Schemas.Count == 0)
+            {
+                return m_noSchemas ??= new XdmSchemas(new System.Xml.Schema.XmlSchemaSet());
+            }
+
+            string key = environment.Directory + "|" + string.Join("|", environment.Schemas.Select(schema => schema.File ?? "ns:" + schema.Uri));
+
+            if (m_components.TryGetValue(key, out XdmSchemas? known))
+            {
+                return known;
+            }
+
+            System.Xml.Schema.XmlSchemaSet set = new System.Xml.Schema.XmlSchemaSet
+            {
+                XmlResolver = new System.Xml.XmlUrlResolver(),
+            };
+
+            List<string> imports = new();
+
+            foreach ((string? uri, string? file) in environment.Schemas)
+            {
+                if (file is not null)
+                {
+                    set.Add(null, Path.GetFullPath(Path.Combine(m_catalog.Root, environment.Directory, file)));
+                }
+                else if (uri is not null)
+                {
+                    imports.Add(uri);
+                }
+            }
+
+            set.Compile();
+
+            XdmSchemas components = new(set, imports);
+            m_components.Add(key, components);
+            return components;
         }
 
         /// <summary>Features a test may declare that this run cannot offer.</summary>
@@ -68,7 +126,8 @@ namespace CodeDeeds.Xslt.Conformance
         /// <para>
         /// The first group below is the driver's limit rather than the engine's, which is why taking one out
         /// measures nothing. <c>schemaImport</c> and <c>schemaValidation</c> need an environment's schemas
-        /// loaded, which this driver has no way to do. <c>higherOrderFunctions</c>, <c>fn-transform-XSLT</c>
+        /// loaded, which the opt-in <c>--schema</c> run does and the plain one does not.
+        /// <c>higherOrderFunctions</c>,<c>fn-transform-XSLT</c>
         /// and <c>fn-transform-XSLT30</c> name <c>function-lookup()</c> and <c>transform()</c>, which the
         /// engine has inside a stylesheet: here an expression is evaluated on its own, with no
         /// <c>XsltOptions</c> and no stylesheet to carry a scope, so neither is in the static context this
@@ -139,6 +198,22 @@ namespace CodeDeeds.Xslt.Conformance
                 return new TestResult(Outcome.Skipped, environmentProblem);
             }
 
+            if (environment is { Schemas.Count: > 0 } && !m_schemaAware)
+            {
+                return new TestResult(Outcome.Skipped, "environment declares a schema");
+            }
+
+            XdmSchemas? components;
+
+            try
+            {
+                components = ComponentsOf(environment);
+            }
+            catch (Exception exception)
+            {
+                return new TestResult(Outcome.Skipped, $"environment's schema would not compile: {Short(exception)}");
+            }
+
             // The suite's own collations are always on offer, since a test may name one without its
             // environment declaring it; a declaration marked default puts that collation in force.
             XPathStaticContext staticContext = new XPathStaticContext
@@ -146,6 +221,7 @@ namespace CodeDeeds.Xslt.Conformance
                 Version = m_version,
                 CollationResolver = SuiteCollations.Instance,
                 StaticBaseUri = StaticBaseUriFor(environment),
+                TypedSchemas = components,
             };
 
             if (environment is not null)
@@ -181,8 +257,8 @@ namespace CodeDeeds.Xslt.Conformance
 
             try
             {
-                tree = LoadContext(environment);
-                globals = BindVariables(environment, staticContext);
+                tree = LoadContext(environment, components);
+                globals = BindVariables(environment, staticContext, components);
             }
             catch (Exception exception)
             {
@@ -257,7 +333,9 @@ namespace CodeDeeds.Xslt.Conformance
                         break;
 
                     case "feature":
-                        if (satisfied && s_unsupportedFeatures.Contains(value))
+                        if (satisfied
+                            && s_unsupportedFeatures.Contains(value)
+                            && !(m_schemaAware && value is "schemaImport" or "schemaValidation"))
                         {
                             why = $"needs feature '{value}'";
                             return false;
@@ -504,7 +582,10 @@ namespace CodeDeeds.Xslt.Conformance
             }
         }
 
-        private XPathValue[] BindVariables(Environment? environment, XPathStaticContext staticContext)
+        private XPathValue[] BindVariables(
+            Environment? environment,
+            XPathStaticContext staticContext,
+            XdmSchemas? components)
         {
             if (environment is null || environment.Variables.Count == 0)
             {
@@ -519,7 +600,7 @@ namespace CodeDeeds.Xslt.Conformance
 
                 staticContext.DeclareGlobalVariable(name, slot);
                 globals[slot] = XPathValue.FromNodeSet(
-                    NodeSet.Singleton(LoadDocument(environment.Directory, file), XdmTree.RootNode));
+                    NodeSet.Singleton(LoadDocument(environment.Directory, file, ValidatingFor(environment, file, components)), XdmTree.RootNode));
             }
 
             return globals;
@@ -598,7 +679,17 @@ namespace CodeDeeds.Xslt.Conformance
                 .AbsoluteUri;
         }
 
-        private XdmTree LoadContext(Environment? environment)
+        /// <summary>
+        /// The schemas a source file the environment asks to have validated is validated against, or null
+        /// where it is read as it stands: the run is not schema-aware, or the environment declares no
+        /// schema, or it does not ask for this file to be validated.
+        /// </summary>
+        private static XdmSchemas? ValidatingFor(Environment environment, string file, XdmSchemas? schemas)
+        {
+            return schemas is not null && environment.ValidatedFiles.Contains(file) ? schemas : null;
+        }
+
+        private XdmTree LoadContext(Environment? environment, XdmSchemas? components)
         {
             if (environment?.ContextFile is null)
             {
@@ -606,32 +697,51 @@ namespace CodeDeeds.Xslt.Conformance
                 return XdmTreeBuilder.FromXml(new StringReader("<empty/>"), m_names);
             }
 
-            return LoadDocument(environment.Directory, environment.ContextFile);
+            return LoadDocument(
+                environment.Directory,
+                environment.ContextFile,
+                ValidatingFor(environment, environment.ContextFile, components));
         }
 
         /// <summary>Loads a document named by the catalog, once per run.</summary>
         /// <param name="directory">Where the environment names its files from, under the catalog root.</param>
         /// <param name="file">The file as the environment wrote it.</param>
-        private XdmTree LoadDocument(string directory, string file)
+        /// <param name="validateAgainst">The schemas to validate it against, or null to read it as it stands.</param>
+        private XdmTree LoadDocument(string directory, string file, XdmSchemas? validateAgainst = null)
         {
             string path = Path.GetFullPath(Path.Combine(m_catalog.Root, directory, file));
 
             // The same name means a different file in two test sets, so the resolved path is what is
-            // remembered rather than what was written.
-            if (m_documents.TryGetValue(path, out XdmTree? cached))
+            // remembered rather than what was written. A validated read is a different tree from a plain
+            // one, and from one validated against other schemas, so it is remembered by the set too.
+            string key = validateAgainst is null
+                ? path
+                : path + "|" + System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(validateAgainst);
+
+            if (m_documents.TryGetValue(key, out XdmTree? cached))
             {
                 return cached;
             }
 
-            using FileStream stream = File.OpenRead(path);
-            XdmTree tree = XdmTreeBuilder.FromXml(stream, m_names);
+            XdmTree tree;
+
+            if (validateAgainst is null)
+            {
+                using FileStream stream = File.OpenRead(path);
+                tree = XdmTreeBuilder.FromXml(stream, m_names);
+            }
+            else
+            {
+                using StreamReader reader = new StreamReader(path);
+                tree = validateAgainst.Parse(reader, XsltValidation.Strict, m_names, new Uri(path).AbsoluteUri);
+            }
 
             // Where it came from, which fn:document-uri() and fn:base-uri() answer with. A document
             // read from a file has one; a driver that does not say so leaves both of them empty.
             tree.DocumentUri = new Uri(path).AbsoluteUri;
             tree.BaseUri = tree.DocumentUri;
 
-            m_documents.Add(path, tree);
+            m_documents.Add(key, tree);
             return tree;
         }
 

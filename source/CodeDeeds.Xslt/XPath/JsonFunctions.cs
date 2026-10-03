@@ -48,6 +48,12 @@ namespace CodeDeeds.Xslt.XPath
         /// </summary>
         internal string? StaticBaseUri { get; set; }
 
+        /// <summary>
+        /// Gets or sets the schemas in scope where the call was written, for an expression evaluated on its
+        /// own, which has no stylesheet to carry them. Null where there are none.
+        /// </summary>
+        internal Compiler.SchemaComponents? StaticSchemas { get; set; }
+
         private JsonFunctionExpr(JsonFunction function, Expr[] arguments, string name)
         {
             m_function = function;
@@ -182,7 +188,7 @@ namespace CodeDeeds.Xslt.XPath
                 // that the containing stylesheet should import the relevant schema". So the stylesheet's own
                 // schemas are used where they have the namespace — an import, or the caller, put it there —
                 // and the built-in schema, kept apart from them, where they do not.
-                Compiler.SchemaComponents? schemas = validate ? context.Runtime?.Schemas : null;
+                Compiler.SchemaComponents? schemas = validate ? context.Runtime?.Schemas ?? StaticSchemas : null;
 
                 if (validate && schemas is null)
                 {

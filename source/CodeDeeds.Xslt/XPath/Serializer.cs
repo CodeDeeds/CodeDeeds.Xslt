@@ -407,7 +407,23 @@ namespace CodeDeeds.Xslt.XPath
                     break;
 
                 case "standalone":
-                    settings.Standalone = value.Kind == XPathValueKind.Boolean ? value.ToBoolean() : null;
+                    // A boolean, or the string "omit" (F&O 3.1 section 14.1.1): written exactly in a map,
+                    // where " omit " is a type error and not a way of saying it; trimmed in the element form.
+                    if (value.Kind == XPathValueKind.Sequence && value.AsSequence().Count == 0)
+                    {
+                        settings.Standalone = null;
+                    }
+                    else if (value.Kind != XPathValueKind.Boolean
+                        && value.ToStringValue() is { } written
+                        && (element ? written.Trim() : written) == "omit")
+                    {
+                        settings.Standalone = null;
+                    }
+                    else
+                    {
+                        settings.Standalone = Boolean(name, value, element);
+                    }
+
                     break;
 
                 case "item-separator":
@@ -449,7 +465,11 @@ namespace CodeDeeds.Xslt.XPath
                         if (character.Length == 0
                             || character.Length != (char.IsHighSurrogate(character[0]) ? 2 : 1))
                         {
-                            throw Bad($"'{character}' is not one character to map");
+                            // SEPM0016 and not the SEPM0017 of a malformed parameter document: this is a value
+                            // a parameter may not take (F&O 3.1 §14.1.1, as amended by bug 29030).
+                            throw XsltErrors.Error(
+                                XsltErrorCode.SEPM0016,
+                                $"A character map in the serialization parameters maps '{character}', which is not one character.");
                         }
 
                         mappings[char.ConvertToUtf32(character, 0)] = replacement;

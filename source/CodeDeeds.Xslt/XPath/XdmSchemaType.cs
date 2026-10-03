@@ -232,6 +232,51 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
+        /// Whether an element of this type, holding this text, is an ID or a reference to one: its typed
+        /// value is one <c>xs:ID</c> (XDM 3.1 §5.2), or for a reference a value of <c>xs:IDREF</c> or a list
+        /// of them.
+        /// </summary>
+        /// <remarks>
+        /// What a list type or a union type makes of its text decides it. A list of <c>xs:ID</c> holds an ID
+        /// only when it has one item, which the schema's author is told as "the ID is recognized only if the
+        /// list is a singleton"; a union holds one only when the member type that accepts the text is an ID
+        /// type, so <c>omicron</c> is one and <c>853</c> in a union with <c>xs:integer</c> is not.
+        /// </remarks>
+        /// <param name="text">The element's string value.</param>
+        /// <param name="reference">Whether to ask about IDREF rather than ID.</param>
+        public bool HoldsIdValue(string text, bool reference)
+        {
+            switch (Variety)
+            {
+                case XdmSchemaVariety.Atomic:
+                    return reference ? IsIdrefType : IsIdType;
+
+                case XdmSchemaVariety.List:
+                    if (reference)
+                    {
+                        return IsIdrefType;
+                    }
+
+                    string[] tokens = text.Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                    return tokens.Length == 1 && ItemType is not null && ItemType.HoldsIdValue(tokens[0], false);
+
+                case XdmSchemaVariety.Union:
+                    foreach (XdmSchemaType member in MemberTypes)
+                    {
+                        if (member.Refuses(text.Trim(), null) is null)
+                        {
+                            return member.HoldsIdValue(text, reference);
+                        }
+                    }
+
+                    return false;
+
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
         /// Whether a value of this type may be a name, so that its typed value needs the namespaces in
         /// scope where it was written to be made.
         /// </summary>
@@ -667,6 +712,15 @@ namespace CodeDeeds.Xslt.XPath
                 }
             }
 
+            // xs:numeric is XPath 3.1's pure union of xs:double, xs:float and xs:decimal, which no schema
+            // declares and so has no members here to walk.
+            if (other.IsBuiltIn && other.LocalName == "numeric")
+            {
+                return DerivesFrom(BuiltInNamed("double")!)
+                    || DerivesFrom(BuiltInNamed("float")!)
+                    || DerivesFrom(BuiltInNamed("decimal")!);
+            }
+
             // A union with a list among its members is not its members' supertype: a value of the list
             // type is several values, and the union is what was validated against, not what the value is.
             if (other.IsPureUnion)
@@ -912,7 +966,7 @@ namespace CodeDeeds.Xslt.XPath
             catch (Exception failed)
                 when (failed is XmlSchemaException or XmlException or FormatException or OverflowException or ArgumentException)
             {
-                return failed.Message;
+                return CodeDeeds.Xslt.Model.SchemaMessages.Explain(failed.Message);
             }
         }
 

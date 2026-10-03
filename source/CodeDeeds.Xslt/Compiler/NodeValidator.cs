@@ -329,7 +329,7 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 if (e.Severity == XmlSeverityType.Error)
                 {
-                    problems.Add(e.Message);
+                    problems.Add(SchemaMessages.Explain(e.Message));
                 }
             };
 

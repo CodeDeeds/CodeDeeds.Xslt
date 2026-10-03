@@ -60,7 +60,7 @@ var xslt = new Xslt(stylesheet, new XsltOptions
 | Read `xsl:include`, `document()`, `collection()` | `StylesheetResolver`, `DocumentResolver`, `CollectionResolver` (`FileResolver` for a directory, `UriResolver` for HTTP(S) too) |
 | Capture `xsl:message` | `MessageWriter` |
 | Write secondary results (`xsl:result-document`) | `ResultResolver` or `ResultStreamResolver` |
-| Use XSD types | `SchemaAware`, `Schemas`, `InputValidation` |
+| Use XSD types | `SchemaAware`, `Schemas`, `SchemaResolver`, `InputValidation`, `FollowSchemaLocation`; `XdmSchemas` to validate outside a transformation |
 
 ### Other entry points
 
@@ -103,8 +103,9 @@ Check these before adopting the library; each is a place where a stylesheet writ
 - **Schema awareness is optional and XSD 1.0 only.** Off by default; turn it on with
   `XsltOptions.SchemaAware`. Without it, `xsl:import-schema` is `XTSE1650`, `validation="strict"` and `type` are
   `XTSE1660`, and nothing carries a type annotation. With it, validation is done by .NET's XSD 1.0 implementation:
-  there is no XSD 1.1, `xsi:schemaLocation` is not followed, and a scatter of validation edge cases remain
-  (the schema-aware tests stand at about 99.3%).
+  there is no XSD 1.1, `xsi:schemaLocation` is followed only if you set `XsltOptions.FollowSchemaLocation`, and a
+  validated date must have a year from 1 to 9999 (.NET holds dates in `DateTime`; the error says so). The
+  schema-aware tests stand at 99.8% (8,668 of 8,683 in the XSLT suite; 44 more are skipped for the date range).
 - **No extension mechanism.** Only EXSLT's Common module (`exsl:node-set`, `exsl:object-type`, `exsl:document`)
   is provided; you cannot register your own extension functions or elements. An unknown function is
   `XPST0017`; an unknown extension instruction takes its `xsl:fallback` or is `XTDE1450`.

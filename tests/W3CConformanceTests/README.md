@@ -139,6 +139,34 @@ be read without them. That took the run to **8,204 of 8,280, 99.1%**, both backe
 Of the 76 left, 15 fail in the headline run too and have nothing to do with schema awareness. Four name
 schema files the suite does not contain. The rest are small individual rules.
 
+The run now stands at **8,668 of 8,683, 99.8%** (3 October 2026), both backends. What changed is a decision
+rather than a fix: .NET's validator holds a date in `System.DateTime`, so a source document in a negative
+year, 44 tests of them, cannot be validated, and that is accepted and documented. The engine's error says
+the validator is the cause, and the driver reads that sentence in the error and skips the test with the
+reason named; it is not a list of test names, so a test that stops meeting the limit is counted again. Two
+tests (`type-functions-0101`, `-0401`) want a typed date out of the same documents and fail without the
+error, so they still show. Fifteen are left: nine have nothing to do with schemas, four are suite mistakes
+or contradictions argued in `ConformanceNotes.md`, and those two.
+
+### The QT3 run
+
+`--schema` applies to the QT3 run too (`--31 --schema` or `--schema` for 2.0). An environment's
+`<schema>` elements are compiled into an `XdmSchemas`, put in scope for the expression with
+`XPathStaticContext.TypedSchemas`, and each `<source validation="strict|lax">` is read through
+`XdmSchemas.Parse`, so the nodes carry types; a schema with a namespace and no file (`role="import"`) is
+imported by name, which is how the built-in schema for the XPath functions namespace is reached. A
+schema-aware run with no environment schema still has the built-in ones in scope, since
+`fn:analyze-string()` types its result with no import. The `schemaImport` and `schemaValidation`
+features are judged rather than skipped, and an environment that declares a schema is read rather than
+skipped. The 3.1 run goes from 18,268 of 18,285 to **18,464 of 18,481** (196 tests came in, all of which
+pass, and the 17 failures are the plain run's own), and the 2.0 run from 14,553 of 14,577 to
+**14,636 of 14,660**. Without the flag a run is what it was. The tests read through it found six real
+faults, all fixed: `cast as` and `castable as` did not atomize an array, an element of a list type was
+never an ID and neither was a union's ID member, `element(*, xs:numeric)` matched nothing,
+`fn:analyze-string()` was untyped, `fn:json-to-xml(validate)` had no schemas outside a stylesheet, and
+`serialize()` took a `standalone` of `" omit "` and a character-map key of two characters as other
+errors than it should.
+
 ## When the driver is behind the engine
 
 Each driver keeps a list of the suite's feature names it does not claim, and every test declaring one is

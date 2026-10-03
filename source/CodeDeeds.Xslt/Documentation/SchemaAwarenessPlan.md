@@ -1,9 +1,13 @@
 # Schema awareness: a plan
 
-Status: phases 0 to 4 done, September 2026, and the `xs:NOTATION` corner with them. The engine reads
-schemas, types its input, validates what it constructs, and validates the result of `fn:json-to-xml()`,
-behind `XsltOptions.SchemaAware` and `XsltOptions.InputValidation`. What is left is a scatter of edge
-cases. This is the plan the work followed.
+Status: done, 3 October 2026. Phases 0 to 4 and the `xs:NOTATION` corner were done in September, and the
+completion plan ([SchemaAwarenessCompletionPlan.md](SchemaAwarenessCompletionPlan.md)) finished the rest: the
+date-range limit accepted and reported, the QT3 schema environments read, a public API to validate and read
+types, and opt-in `xsi:schemaLocation`. The engine reads schemas, types its input, validates what it
+constructs, and types the results of `fn:json-to-xml()` and `fn:analyze-string()`, behind
+`XsltOptions.SchemaAware` and `XsltOptions.InputValidation`; the schema-aware XSLT run stands at 8,668 of
+8,683 (99.8%). XSD 1.1 and streaming are out of scope. This is the plan the work followed, kept as it was
+written apart from the notes marked *Since*; the figures in it are those of the day each phase landed.
 
 ## Where the engine stands
 
@@ -410,10 +414,11 @@ feed it.
   where the suite declares validation per source: an environment validating its principal source
   strictly and reading an unvalidated secondary one through `doc()` is judged wrong by two tests
   (`attr/validation` 1201 and 1203). A per-document choice would need the document resolver to say so,
-  which is a larger change than the two tests are worth for now.
-- **`xsi:schemaLocation` hints** are not followed: following one would add to the compiled set every
-  transformation over the stylesheet shares. A per-transformation copy of the set would allow it, at
-  the cost of compiling the schemas again per transformation.
+  which is a larger change than the two tests are worth for now. *Since:* done, through
+  `ResolvedResource.Validation`.
+- **`xsi:schemaLocation` hints** are not followed by default: following one would add to the compiled set
+  every transformation over the stylesheet shares. *Since:* `XsltOptions.FollowSchemaLocation` follows them
+  on a copy of the set made for each validated read, at the cost of compiling the schemas again each time.
 - **PSVI fidelity.** Union member types and list item types come through as the spike showed;
   `xs:NOTATION`, `xsi:type` and the date range limit above still need checking against what the tests
   expect.
@@ -430,15 +435,12 @@ feed it.
 
 ## Next steps
 
-1. The validation edge cases left: nested strict validation not catching what it should
-   (`import-schema` 118-120, 137), `xsl:output item-separator` applied when a result document is built
-   rather than serialized (`attr/validation` 0214), and validating an element against `xs:untypedAtomic`
-   (`attr/validation` 0109). Each is its own small rule rather than a theme.
-2. **Done.** `SchemaAwareBenchmarks` measures what schema awareness costs, each measurement paired
-   with the same work done without it: validating the input roughly doubles the read (1.89x, 2.49x the
-   allocation) and validating what the stylesheet builds costs about as much again (2.68x, 7.07x),
-   while the untyped rows are what they were before any of this was built. The DocBook benchmarks stay
-   as the check that an untyped transformation has not slowed; their allocation has not moved.
-3. The QT3 driver still skips its 140 schema environments: it evaluates XPath outside a stylesheet, and
-   validating a source there needs the tree builder's validated entry point reached through something
-   public. A small addition now that the entry point stands.
+None of the original ones remain.
+
+1. **Done.** The validation edge cases were settled one by one; the four left are suite mistakes argued in
+   ConformanceNotes.md, and the date-range tests are accepted as a limit and skipped by what the error says.
+2. **Done.** `SchemaAwareBenchmarks` measures what schema awareness costs, each measurement paired with the
+   same work done without it: validating the input roughly doubles the read (1.89x, 2.49x the allocation) and
+   validating what the stylesheet builds costs about as much again (2.68x, 7.07x), while the untyped rows are
+   what they were before any of this was built.
+3. **Done.** The QT3 driver reads its schema environments through `XdmSchemas`; see the completion plan.

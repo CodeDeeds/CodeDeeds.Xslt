@@ -183,6 +183,24 @@ namespace CodeDeeds.Xslt.XPath
         private Compiler.SchemaComponents? m_schemas;
 
         /// <summary>
+        /// Gets or sets the schemas a caller has compiled, whose types an expression may name and whose
+        /// validated trees it may be evaluated against. Used in place of <see cref="Schemas"/>, so that the
+        /// type an expression names and the type a tree was validated as are one. Set before the first
+        /// expression is parsed.
+        /// </summary>
+        public Model.XdmSchemas? TypedSchemas
+        {
+            get => m_typed;
+            set
+            {
+                m_typed = value;
+                m_schemas = value?.Components;
+            }
+        }
+
+        private Model.XdmSchemas? m_typed;
+
+        /// <summary>
         /// Gets or sets the schemas whose types an expression may name: in <c>instance of</c>, a cast, a
         /// constructor function or a sequence type. Set before the first expression is parsed.
         /// </summary>
@@ -190,7 +208,7 @@ namespace CodeDeeds.Xslt.XPath
 
         XdmSchemaType? ISchemaTypeProvider.ResolveSchemaType(string namespaceUri, string localName)
         {
-            if (Schemas is null && namespaceUri != XdmType.SchemaNamespace)
+            if (Schemas is null && m_schemas is null && namespaceUri != XdmType.SchemaNamespace)
             {
                 return null;
             }
@@ -201,7 +219,7 @@ namespace CodeDeeds.Xslt.XPath
 
         XdmSchemaDeclaration? ISchemaTypeProvider.ResolveElementDeclaration(string namespaceUri, string localName)
         {
-            if (Schemas is null)
+            if (Schemas is null && m_schemas is null)
             {
                 return null;
             }
@@ -212,7 +230,7 @@ namespace CodeDeeds.Xslt.XPath
 
         XdmSchemaDeclaration? ISchemaTypeProvider.ResolveAttributeDeclaration(string namespaceUri, string localName)
         {
-            if (Schemas is null)
+            if (Schemas is null && m_schemas is null)
             {
                 return null;
             }

@@ -256,13 +256,16 @@ namespace CodeDeeds.Xslt
         /// scope for <c>as</c>, <c>instance of</c>, casts, constructor functions and <c>type-available()</c>.
         /// </para>
         /// <para>
-        /// What is in place so far is the type system — user-defined atomic, list and union types, with
+        /// A schema-aware processor has the type system — user-defined atomic, list and union types, with
         /// their facets enforced by a cast — and typed input: a document validated as it is read, which
         /// <see cref="InputValidation"/> asks for, carries the types validation settled on, and
         /// atomization, the kind tests, <c>schema-element()</c>, <c>nilled()</c> and <c>id()</c> read
-        /// them. <c>validation</c> and <c>type</c> on the instructions that construct nodes are not yet
-        /// honoured, so those remain refused; a schema-aware transformation is otherwise the same
-        /// transformation.
+        /// them. <c>validation</c> and <c>type</c> on the instructions that construct nodes validate what
+        /// they build, and <c>fn:analyze-string()</c> and <c>fn:json-to-xml()</c> type their results by the
+        /// schema built in for the XPath functions namespace. A document or a tree outside a
+        /// transformation is validated with <see cref="Model.XdmSchemas"/>. Validation is XSD 1.0, by
+        /// .NET's validator, which holds a date in <see cref="DateTime"/>: a year before 1 or after 9999 is
+        /// refused as invalid, with a message that says why.
         /// </para>
         /// </remarks>
         public bool SchemaAware { get; init; }
@@ -316,14 +319,41 @@ namespace CodeDeeds.Xslt
         /// </para>
         /// <para>
         /// The schemas in scope are the whole of what a document is validated against: an
-        /// <c>xsi:schemaLocation</c> in the document is not followed, and an inline schema not read, since
-        /// either would let a document add to a set every transformation over the stylesheet shares. A
+        /// <c>xsi:schemaLocation</c> in the document is not followed unless <see cref="FollowSchemaLocation"/>
+        /// says so, and an inline schema not read, since either would let a document add to a set every
+        /// transformation over the stylesheet shares. A
         /// stylesheet declaring <c>input-type-annotations="strip"</c> is still validated, and then reads
         /// its documents untyped, as the specification asks. A tree the caller built and hands to
         /// <see cref="Xslt.Transform(Model.XdmTree)"/> is not validated here.
         /// </para>
         /// </remarks>
         public XsltValidation InputValidation { get; init; }
+
+        /// <summary>
+        /// Gets whether a document being validated may name the schemas to validate it against, with
+        /// <c>xsi:schemaLocation</c> and <c>xsi:noNamespaceSchemaLocation</c>. Defaults to
+        /// <see langword="false"/>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Off, the schemas in scope are the whole of what a document is validated against. On, a hint is
+        /// fetched through <see cref="SchemaResolver"/> and added to what the document is validated
+        /// against, for that document alone: each validated read makes a copy of the compiled schemas and
+        /// compiles the copy again, so the schemas every transformation over the stylesheet shares are never
+        /// changed under them, and a document that names a schema costs that compilation each time it is
+        /// read. A hint for a namespace the schemas in scope already have is not fetched.
+        /// </para>
+        /// <para>
+        /// The types a hint supplies annotate the document's nodes and are matched by name, so
+        /// <c>element(*, my:type)</c> finds them where the stylesheet imported <c>my:type</c> too; a
+        /// stylesheet cannot name a type or declaration that only a hint supplies. Following a hint reaches
+        /// whatever the document names, which is why it is a setting and needs
+        /// <see cref="SchemaResolver"/>: with none the transformation is refused when it is constructed.
+        /// Needs <see cref="SchemaAware"/> and <see cref="InputValidation"/> or a resolver that asks for
+        /// validation (<see cref="ResolvedResource.Validation"/>).
+        /// </para>
+        /// </remarks>
+        public bool FollowSchemaLocation { get; init; }
 
         /// <summary>
         /// Gets the resolver that finds the library packages named by <c>xsl:use-package</c>.
@@ -614,6 +644,11 @@ namespace CodeDeeds.Xslt
                 InitialMode = InitialMode,
                 InitialMatchSelection = InitialMatchSelection,
                 GlobalContextItem = GlobalContextItem,
+                InitialFunction = InitialFunction,
+                FunctionArguments = FunctionArguments,
+                InputUri = InputUri,
+                DynamicEvaluation = DynamicEvaluation,
+                FollowSchemaLocation = FollowSchemaLocation,
             };
         }
     }

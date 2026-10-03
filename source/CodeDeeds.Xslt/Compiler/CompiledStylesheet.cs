@@ -231,7 +231,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="options">The transformation's options.</param>
         internal Model.TreeValidation? InputValidationFor(XsltOptions options)
         {
-            return ValidationFor(options.InputValidation);
+            return ValidationFor(options.InputValidation, options);
         }
 
         /// <summary>
@@ -239,7 +239,8 @@ namespace CodeDeeds.Xslt.Compiler
         /// as it stands: the mode asks for no validation, or the stylesheet has no schemas to apply.
         /// </summary>
         /// <param name="mode">The mode, as the caller's options or a resolver asked for it.</param>
-        internal Model.TreeValidation? ValidationFor(XsltValidation? mode)
+        /// <param name="options">The options, which say whether a document's own schema hints are followed.</param>
+        internal Model.TreeValidation? ValidationFor(XsltValidation? mode, XsltOptions? options = null)
         {
             if (mode is not (XsltValidation.Strict or XsltValidation.Lax) || Schemas is null)
             {
@@ -250,7 +251,8 @@ namespace CodeDeeds.Xslt.Compiler
                 Schemas.ValidatingSet,
                 strict: mode == XsltValidation.Strict,
                 Schemas.TypeIdOf,
-                annotate: !StripInputTypeAnnotations);
+                annotate: !StripInputTypeAnnotations,
+                followHints: options?.FollowSchemaLocation == true ? Schemas.LocationResolver : null);
         }
 
         /// <summary>The serialization options requested by <c>xsl:output</c>.</summary>

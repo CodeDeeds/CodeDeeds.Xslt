@@ -95,6 +95,15 @@ namespace CodeDeeds.Xslt.Conformance
         /// </remarks>
         public List<(string Name, string File)> Variables { get; } = new();
 
+        /// <summary>The schemas the environment declares, as (target namespace URI if stated, file).</summary>
+        public List<(string? Uri, string? File)> Schemas { get; } = new();
+
+        /// <summary>
+        /// The source files the environment asks to be validated, <c>strict</c> or <c>lax</c>: what a
+        /// schema-aware run validates as it reads them, and a plain one reads as they stand.
+        /// </summary>
+        public HashSet<string> ValidatedFiles { get; } = new(StringComparer.Ordinal);
+
         /// <summary>
         /// The decimal formats the environment declares, as the <c>name</c> attribute wrote it against the
         /// element that carries it.
@@ -121,11 +130,8 @@ namespace CodeDeeds.Xslt.Conformance
         {
             string? unsupported = null;
 
-            if (element.Element(Ns_(element, "schema")) is not null)
-            {
-                unsupported = "environment declares a schema";
-            }
-            else if (element.Element(Ns_(element, "param")) is not null)
+            // A schema is the Runner's to judge: a schema-aware run loads it, and the other is told why not.
+            if (element.Element(Ns_(element, "param")) is not null)
             {
                 unsupported = "environment declares external variables";
             }
@@ -136,11 +142,17 @@ namespace CodeDeeds.Xslt.Conformance
 
             string? contextFile = null;
             List<(string, string)> variables = new();
+            HashSet<string> validated = new(StringComparer.Ordinal);
 
             foreach (XElement source in element.Elements(Ns_(element, "source")))
             {
                 string role = (string?)source.Attribute("role") ?? string.Empty;
                 string? file = (string?)source.Attribute("file");
+
+                if (file is not null && (string?)source.Attribute("validation") is "strict" or "lax")
+                {
+                    validated.Add(file);
+                }
 
                 if (role == ".")
                 {
@@ -170,6 +182,14 @@ namespace CodeDeeds.Xslt.Conformance
             };
 
             environment.Variables.AddRange(variables);
+            environment.ValidatedFiles.UnionWith(validated);
+
+            foreach (XElement schema in element.Elements(Ns_(element, "schema")))
+            {
+                // One with no file is an import of a namespace by name, which `role="import"` marks: the
+                // schema for the XPath functions namespace, say, that a processor is expected to recognize.
+                environment.Schemas.Add(((string?)schema.Attribute("uri"), (string?)schema.Attribute("file")));
+            }
 
             foreach (XElement ns in element.Elements(Ns_(element, "namespace")))
             {
