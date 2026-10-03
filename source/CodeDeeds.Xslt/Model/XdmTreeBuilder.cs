@@ -31,6 +31,12 @@ namespace CodeDeeds.Xslt.Model
         private const int InitialNodeCapacity = 64;
         private const int InitialAttributeCapacity = 32;
 
+        // What a builder given no estimate starts with. Most trees built without one are small: the value
+        // of a variable, a node that is an item of a sequence. Sixty-four entries in each of a dozen arrays
+        // was ten kilobytes for a tree of two nodes, and nothing else such a tree cost came near it.
+        private const int SmallNodeCapacity = 8;
+        private const int SmallOpenDepth = 4;
+
         // Sized by the constructor, from an estimate where the caller has one: the arrays double as the
         // document grows, and every doubling copies all of them, so a document that fits its estimate is
         // built without a single copy and finished without a trim.
@@ -61,13 +67,13 @@ namespace CodeDeeds.Xslt.Model
         // How many of the attribute entries are parentless namespace nodes, which come last.
         private int m_parentlessNamespaceNodes;
 
-        private string[] m_namespacePrefix = new string[InitialAttributeCapacity];
-        private string[] m_namespaceUri = new string[InitialAttributeCapacity];
+        private string[] m_namespacePrefix = Array.Empty<string>();
+        private string[] m_namespaceUri = Array.Empty<string>();
         private int m_namespaceDeclarationCount;
 
-        private int[] m_openNodes = new int[16];
-        private int[] m_openLastChild = new int[16];
-        private bool[] m_preserveSpace = new bool[16];
+        private int[] m_openNodes = new int[SmallOpenDepth];
+        private int[] m_openLastChild = new int[SmallOpenDepth];
+        private bool[] m_preserveSpace = new bool[SmallOpenDepth];
         private int m_openDepth;
 
         private bool m_finished;
@@ -114,19 +120,28 @@ namespace CodeDeeds.Xslt.Model
         private const int NameCacheSets = 32;
         private const int NameCacheSize = NameCacheSets * 2;
 
-        private readonly string?[] m_cachePrefix = new string?[NameCacheSize];
-        private readonly string?[] m_cacheUri = new string?[NameCacheSize];
-        private readonly string?[] m_cacheLocal = new string?[NameCacheSize];
-        private readonly int[] m_cacheNameCode = new int[NameCacheSize];
+        // How many nodes a tree has before the cache is worth its four arrays. A cache earns its keep on
+        // the names a document repeats; a tree this small repeats few, and the table answers for them.
+        private const int NameCacheThreshold = 32;
+
+        // Allocated together by the first name interned past the threshold.
+        private string?[]? m_cachePrefix;
+        private string?[]? m_cacheUri;
+        private string?[]? m_cacheLocal;
+        private int[]? m_cacheNameCode;
 
         /// <summary>
         /// Initializes a new builder.
         /// </summary>
+        /// <remarks>
+        /// A builder given no estimate starts small, which suits what is usually built without one: a
+        /// temporary tree of a few nodes. A larger tree grows by doubling, as it would past any estimate.
+        /// </remarks>
         /// <param name="nameTable">
         /// The table used to intern names, or <see langword="null"/> to create one for this tree alone.
         /// </param>
         public XdmTreeBuilder(NameTable? nameTable = null)
-            : this(nameTable, InitialNodeCapacity)
+            : this(nameTable, SmallNodeCapacity, 0, pooledStorage: false)
         {
         }
 
@@ -170,12 +185,22 @@ namespace CodeDeeds.Xslt.Model
             NameTable = nameTable ?? new NameTable();
             m_pooled = pooledStorage;
 
-            int attributes = Math.Max(attributeCapacity, InitialAttributeCapacity);
-            m_attributeNameCode = new int[attributes];
-            m_attributeValue = new string[attributes];
-            m_attributeOwner = new int[attributes];
+            // An estimate is taken at its word, down to nothing for the attributes: a tree with none
+            // then allocates none, and the first one added makes room for itself.
+            if (attributeCapacity > 0)
+            {
+                m_attributeNameCode = new int[attributeCapacity];
+                m_attributeValue = new string[attributeCapacity];
+                m_attributeOwner = new int[attributeCapacity];
+            }
+            else
+            {
+                m_attributeNameCode = Array.Empty<int>();
+                m_attributeValue = Array.Empty<string>();
+                m_attributeOwner = Array.Empty<int>();
+            }
 
-            int capacity = Math.Max(nodeCapacity, InitialNodeCapacity);
+            int capacity = Math.Max(nodeCapacity, SmallNodeCapacity);
 
             if (m_pooled)
             {
@@ -1350,7 +1375,7 @@ namespace CodeDeeds.Xslt.Model
         {
             if (m_namespaceDeclarationCount == m_namespacePrefix.Length)
             {
-                int capacity = m_namespaceDeclarationCount * 2;
+                int capacity = Math.Max(m_namespaceDeclarationCount * 2, 4);
                 Array.Resize(ref m_namespacePrefix, capacity);
                 Array.Resize(ref m_namespaceUri, capacity);
             }
@@ -1438,7 +1463,7 @@ namespace CodeDeeds.Xslt.Model
         {
             if (m_attributeCount == m_attributeNameCode.Length)
             {
-                int capacity = m_attributeCount * 2;
+                int capacity = Math.Max(m_attributeCount * 2, 4);
                 Array.Resize(ref m_attributeNameCode, capacity);
                 Array.Resize(ref m_attributeValue, capacity);
                 Array.Resize(ref m_attributeOwner, capacity);
@@ -1491,7 +1516,7 @@ namespace CodeDeeds.Xslt.Model
 
             if (m_attributeCount == m_attributeNameCode.Length)
             {
-                int capacity = m_attributeCount * 2;
+                int capacity = Math.Max(m_attributeCount * 2, 4);
                 Array.Resize(ref m_attributeNameCode, capacity);
                 Array.Resize(ref m_attributeValue, capacity);
                 Array.Resize(ref m_attributeOwner, capacity);
@@ -1572,7 +1597,7 @@ namespace CodeDeeds.Xslt.Model
 
             if (m_namespaceDeclarationCount == m_namespacePrefix.Length)
             {
-                int capacity = m_namespaceDeclarationCount * 2;
+                int capacity = Math.Max(m_namespaceDeclarationCount * 2, 4);
                 Array.Resize(ref m_namespacePrefix, capacity);
                 Array.Resize(ref m_namespaceUri, capacity);
             }
@@ -2227,37 +2252,50 @@ namespace CodeDeeds.Xslt.Model
         /// </remarks>
         private int InternName(string prefix, string namespaceUri, string localName)
         {
+            if (m_cacheLocal is null)
+            {
+                if (m_nodeCount < NameCacheThreshold)
+                {
+                    return NameTable.GetNameCode(prefix, namespaceUri, localName);
+                }
+
+                m_cachePrefix = new string?[NameCacheSize];
+                m_cacheUri = new string?[NameCacheSize];
+                m_cacheLocal = new string?[NameCacheSize];
+                m_cacheNameCode = new int[NameCacheSize];
+            }
+
             int first = SetOf(localName) << 1;
 
             if (ReferenceEquals(m_cacheLocal[first], localName)
-                && ReferenceEquals(m_cacheUri[first], namespaceUri)
-                && ReferenceEquals(m_cachePrefix[first], prefix))
+                && ReferenceEquals(m_cacheUri![first], namespaceUri)
+                && ReferenceEquals(m_cachePrefix![first], prefix))
             {
-                return m_cacheNameCode[first];
+                return m_cacheNameCode![first];
             }
 
             int second = first + 1;
 
             if (ReferenceEquals(m_cacheLocal[second], localName)
-                && ReferenceEquals(m_cacheUri[second], namespaceUri)
-                && ReferenceEquals(m_cachePrefix[second], prefix))
+                && ReferenceEquals(m_cacheUri![second], namespaceUri)
+                && ReferenceEquals(m_cachePrefix![second], prefix))
             {
                 // Deliberately not promoted to the first way. Two names alternating in one set then settle,
                 // one in each way, and both keep hitting; swapping them on every access would not.
-                return m_cacheNameCode[second];
+                return m_cacheNameCode![second];
             }
 
             int nameCode = NameTable.GetNameCode(prefix, namespaceUri, localName);
 
             m_cacheLocal[second] = m_cacheLocal[first];
-            m_cacheUri[second] = m_cacheUri[first];
-            m_cachePrefix[second] = m_cachePrefix[first];
-            m_cacheNameCode[second] = m_cacheNameCode[first];
+            m_cacheUri![second] = m_cacheUri![first];
+            m_cachePrefix![second] = m_cachePrefix![first];
+            m_cacheNameCode![second] = m_cacheNameCode![first];
 
             m_cacheLocal[first] = localName;
-            m_cacheUri[first] = namespaceUri;
-            m_cachePrefix[first] = prefix;
-            m_cacheNameCode[first] = nameCode;
+            m_cacheUri![first] = namespaceUri;
+            m_cachePrefix![first] = prefix;
+            m_cacheNameCode![first] = nameCode;
             return nameCode;
         }
 

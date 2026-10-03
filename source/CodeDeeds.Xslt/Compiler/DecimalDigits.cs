@@ -7,23 +7,39 @@ namespace CodeDeeds.Xslt.Compiler
     /// A number written as its decimal digits, with the place of the point recorded separately.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>format-number</c> shifts a number's point, rounds it at a place the picture chooses and pads it out,
     /// and is asked to do so to values reaching 10^308 and to integers of eighteen digits. In
     /// <see cref="double"/> that loses the digits it was told to print; in <see cref="decimal"/> it runs out of
     /// range at 7.9×10^28. Done on the digits themselves it is exact wherever the value came from, and the only
     /// question left is which digits those are — which is a question about the value's type, answered by the
     /// <c>Of</c> overloads below and nowhere else.
+    /// </para>
+    /// <para>
+    /// The digits stand in space the caller lends, which for every value but a very wide integer is space
+    /// on the caller's stack. A number is formatted once per element written, and held as strings it was
+    /// four of them for each: the digits kept, the two halves either side of the point, and a half padded
+    /// out. Read where they stand, none of those is made, and rounding changes the digits in place.
+    /// </para>
     /// </remarks>
-    internal readonly struct DecimalDigits
+    internal readonly ref struct DecimalDigits
     {
-        private DecimalDigits(string digits, int point)
+        /// <summary>
+        /// How much space holds the digits of any value but an integer too wide for 64 bits: a decimal's
+        /// twenty-nine, a double's seventeen, with room to spare.
+        /// </summary>
+        public const int Room = 48;
+
+        private readonly Span<char> m_digits;
+
+        private DecimalDigits(Span<char> digits, int point)
         {
-            Digits = digits;
+            m_digits = digits;
             Point = point;
         }
 
         /// <summary>The significant digits, carrying no leading or trailing zero. Empty when the value is zero.</summary>
-        public string Digits { get; }
+        public ReadOnlySpan<char> Digits => m_digits;
 
         /// <summary>
         /// How many digits stand to the left of the point, so that the value is <c>0.Digits × 10^Point</c>.
@@ -33,35 +49,41 @@ namespace CodeDeeds.Xslt.Compiler
         public int Point { get; }
 
         /// <summary>Gets whether the value is zero, which is the one value with no significant digits.</summary>
-        public bool IsZero => Digits.Length == 0;
-
-        // Formatted into stack space and read from there: a number is formatted once per element written,
-        // and the text, its halves either side of the point and its trimmed digits were four strings per
-        // number where one — the digits kept — is all that is needed.
+        public bool IsZero => m_digits.IsEmpty;
 
         /// <summary>The digits of an integer, which are exact however many there are.</summary>
-        public static DecimalDigits Of(long value)
+        /// <param name="value">The integer.</param>
+        /// <param name="space">Where the digits are to stand, at least <see cref="Room"/> long.</param>
+        public static DecimalDigits Of(long value, Span<char> space)
         {
             Span<char> buffer = stackalloc char[24];
 
             // long.MinValue has no positive counterpart, so the text is negated rather than the number.
             value.TryFormat(buffer, out int written, default, CultureInfo.InvariantCulture);
             ReadOnlySpan<char> text = buffer[..written];
-            return Parse(text[0] == '-' ? text[1..] : text);
+            return Parse(text[0] == '-' ? text[1..] : text, space);
         }
 
         /// <summary>The digits of an integer too wide to hold in 64 bits, which are exact as well.</summary>
-        public static DecimalDigits Of(BigInteger value)
+        /// <param name="value">The integer.</param>
+        /// <param name="space">
+        /// Where the digits are to stand if they fit. An integer of more digits than that is given an array
+        /// of its own, being rare enough to be worth one.
+        /// </param>
+        public static DecimalDigits Of(BigInteger value, Span<char> space)
         {
-            return Parse(BigInteger.Abs(value).ToString(CultureInfo.InvariantCulture));
+            string text = BigInteger.Abs(value).ToString(CultureInfo.InvariantCulture);
+            return Parse(text, text.Length <= space.Length ? space : new char[text.Length]);
         }
 
         /// <summary>The digits of a decimal, whose own text is already exact.</summary>
-        public static DecimalDigits Of(decimal value)
+        /// <param name="value">The decimal.</param>
+        /// <param name="space">Where the digits are to stand, at least <see cref="Room"/> long.</param>
+        public static DecimalDigits Of(decimal value, Span<char> space)
         {
             Span<char> buffer = stackalloc char[40];
             Math.Abs(value).TryFormat(buffer, out int written, default, CultureInfo.InvariantCulture);
-            return Parse(buffer[..written]);
+            return Parse(buffer[..written], space);
         }
 
         /// <summary>
@@ -72,20 +94,21 @@ namespace CodeDeeds.Xslt.Compiler
         /// specification asks to be printed. .NET writes the shortest round-tripping form by default, which is
         /// the same set of digits XPath's own double-to-string conversion uses.
         /// </remarks>
-        public static DecimalDigits Of(double value)
+        /// <param name="value">The double.</param>
+        /// <param name="space">Where the digits are to stand, at least <see cref="Room"/> long.</param>
+        public static DecimalDigits Of(double value, Span<char> space)
         {
             Span<char> buffer = stackalloc char[40];
             Math.Abs(value).TryFormat(buffer, out int written, "R", CultureInfo.InvariantCulture);
-            return Parse(buffer[..written]);
+            return Parse(buffer[..written], space);
         }
 
         /// <summary>
         /// Reads digits from a plain or exponential decimal numeral, which must not carry a sign.
         /// </summary>
-        public static DecimalDigits Parse(string text) => Parse(text.AsSpan());
-
-        /// <inheritdoc cref="Parse(string)"/>
-        public static DecimalDigits Parse(ReadOnlySpan<char> text)
+        /// <param name="text">The numeral.</param>
+        /// <param name="space">Where the digits are to stand, at least as long as the numeral.</param>
+        public static DecimalDigits Parse(scoped ReadOnlySpan<char> text, Span<char> space)
         {
             int exponent = 0;
             int e = text.IndexOfAny('e', 'E');
@@ -99,49 +122,52 @@ namespace CodeDeeds.Xslt.Compiler
             int point = text.IndexOf('.');
             int place = (point < 0 ? text.Length : point) + exponent;
 
-            Span<char> digits = text.Length <= 64 ? stackalloc char[64] : new char[text.Length];
+            // Leading zeros are not significant but do move the point; trailing ones are neither. The
+            // leading ones are dropped as they are met, and the trailing ones once all are in.
             int count = 0;
+
             for (int i = 0; i < text.Length; i++)
             {
-                if (i != point)
+                if (i == point)
                 {
-                    digits[count++] = text[i];
+                    continue;
                 }
+
+                if (count == 0 && text[i] == '0')
+                {
+                    place--;
+                    continue;
+                }
+
+                space[count++] = text[i];
             }
 
-            // Leading zeros are not significant but do move the point; trailing ones are neither.
-            int first = 0;
-            while (first < count && digits[first] == '0')
+            while (count > 0 && space[count - 1] == '0')
             {
-                first++;
-                place--;
+                count--;
             }
 
-            int last = count;
-            while (last > first && digits[last - 1] == '0')
-            {
-                last--;
-            }
-
-            string kept = last == first ? string.Empty : new string(digits[first..last]);
-            return new DecimalDigits(kept, kept.Length == 0 ? 0 : place);
+            return new DecimalDigits(space[..count], count == 0 ? 0 : place);
         }
 
         /// <summary>Multiplies by a power of ten, which only moves the point.</summary>
         public DecimalDigits Shift(int places)
         {
-            return IsZero ? this : new DecimalDigits(Digits, Point + places);
+            return IsZero ? this : new DecimalDigits(m_digits, Point + places);
         }
 
         /// <summary>
         /// Rounds to a given number of digits after the point, carrying where the rounding overflows.
         /// </summary>
+        /// <remarks>
+        /// The digits are changed where they stand, so the value this was is not to be read afterwards.
+        /// </remarks>
         /// <param name="fractionDigits">How many digits may stand after the point.</param>
         public DecimalDigits Round(int fractionDigits)
         {
             int keep = Point + fractionDigits;
 
-            if (IsZero || keep >= Digits.Length)
+            if (IsZero || keep >= m_digits.Length)
             {
                 return this;
             }
@@ -153,8 +179,8 @@ namespace CodeDeeds.Xslt.Compiler
                 return default;
             }
 
-            bool up = Digits[keep] >= '5';
-            char[] kept = Digits[..keep].ToCharArray();
+            bool up = m_digits[keep] >= '5';
+            Span<char> kept = m_digits[..keep];
             int at = kept.Length - 1;
 
             while (up && at >= 0)
@@ -171,37 +197,101 @@ namespace CodeDeeds.Xslt.Compiler
                 }
             }
 
-            // Carrying off the left end lengthens the number: 99 rounded to one digit is 100, not 10.
-            string digits = up ? "1" + new string(kept) : new string(kept);
-            int point = up ? Point + 1 : Point;
+            if (up)
+            {
+                // Carrying off the left end lengthens the number: 99 rounded to one digit is 100, not 10.
+                // Every digit kept was a nine and is now a zero, so the one carried is the only digit
+                // left that signifies, and it stands where the digit rounded on stood, which is there to
+                // be written over whether or not any digit was kept.
+                m_digits[0] = '1';
+                return new DecimalDigits(m_digits[..1], Point + 1);
+            }
 
-            digits = digits.TrimEnd('0');
-            return new DecimalDigits(digits, digits.Length == 0 ? 0 : point);
+            int count = kept.Length;
+
+            while (count > 0 && kept[count - 1] == '0')
+            {
+                count--;
+            }
+
+            return new DecimalDigits(kept[..count], count == 0 ? 0 : Point);
         }
 
         /// <summary>The digits standing before the point, with no padding and no leading zero.</summary>
-        public string IntegerPart()
+        public DigitRun IntegerPart()
         {
             if (Point <= 0)
             {
-                return string.Empty;
+                return default;
             }
 
-            return Point >= Digits.Length ? Digits.PadRight(Point, '0') : Digits[..Point];
+            return Point >= m_digits.Length
+                ? new DigitRun(0, m_digits, Point - m_digits.Length)
+                : new DigitRun(0, m_digits[..Point], 0);
         }
 
         /// <summary>
         /// The digits standing after the point, carrying whatever leading zeros the point's place calls for
         /// and no trailing ones.
         /// </summary>
-        public string FractionPart()
+        public DigitRun FractionPart()
         {
-            if (Point >= Digits.Length)
+            if (Point >= m_digits.Length)
             {
-                return string.Empty;
+                return default;
             }
 
-            return Point <= 0 ? new string('0', -Point) + Digits : Digits[Point..];
+            return Point <= 0 ? new DigitRun(-Point, m_digits, 0) : new DigitRun(0, m_digits[Point..], 0);
+        }
+    }
+
+    /// <summary>
+    /// A run of digits read where they stand, with zeros understood before and after them.
+    /// </summary>
+    /// <remarks>
+    /// What a number is padded out with is zeros and nothing else, so a padded run is its digits and two
+    /// counts, and no string has to be made to hold the zeros.
+    /// </remarks>
+    internal readonly ref struct DigitRun
+    {
+        private readonly ReadOnlySpan<char> m_digits;
+        private readonly int m_before;
+        private readonly int m_after;
+
+        /// <summary>Initializes a run.</summary>
+        /// <param name="before">How many zeros stand before the digits.</param>
+        /// <param name="digits">The digits.</param>
+        /// <param name="after">How many zeros stand after them.</param>
+        public DigitRun(int before, ReadOnlySpan<char> digits, int after)
+        {
+            m_before = before;
+            m_digits = digits;
+            m_after = after;
+        }
+
+        /// <summary>How many digits the run has, the zeros either side counted.</summary>
+        public int Length => m_before + m_digits.Length + m_after;
+
+        /// <summary>The digit at a place in the run, counted from its left.</summary>
+        public char this[int index]
+        {
+            get
+            {
+                int within = index - m_before;
+                return (uint)within < (uint)m_digits.Length ? m_digits[within] : '0';
+            }
+        }
+
+        /// <summary>The run with zeros put before it until it is a given length.</summary>
+        public DigitRun PadLeft(int length)
+        {
+            return Length >= length ? this : new DigitRun(m_before + length - Length, m_digits, m_after);
+        }
+
+        /// <summary>The run with zeros put after it until it is a given length.</summary>
+        public DigitRun PadRight(int length)
+        {
+            return Length >= length ? this : new DigitRun(m_before, m_digits, m_after + length - Length);
         }
     }
 }

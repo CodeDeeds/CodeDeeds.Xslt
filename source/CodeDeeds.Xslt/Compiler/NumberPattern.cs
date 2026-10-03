@@ -106,7 +106,9 @@ namespace CodeDeeds.Xslt.Compiler
                 return picture.Prefix + format.Infinity + picture.Suffix;
             }
 
-            return picture.Render(Digitize(value, scaled, picture.Multiplier, m_legacy), format);
+            // The digits stand here, on the stack, for as long as it takes to write them out.
+            Span<char> space = stackalloc char[DecimalDigits.Room];
+            return picture.Render(Digitize(value, scaled, picture.Multiplier, m_legacy, space), format);
         }
 
         private static double Power(int tens)
@@ -124,21 +126,27 @@ namespace CodeDeeds.Xslt.Compiler
         /// printed as written rather than as the nearest double — including when a percent sign has scaled it,
         /// which for those two is moving the point rather than arithmetic.
         /// </remarks>
-        private static DecimalDigits Digitize(XPathValue value, double scaled, int multiplier, bool legacy)
+        private static DecimalDigits Digitize(
+            XPathValue value, double scaled, int multiplier, bool legacy, Span<char> space)
         {
             if (legacy)
             {
-                return scaled < 7.9e28 ? DecimalDigits.Of((decimal)scaled) : DecimalDigits.Of(scaled);
+                return scaled < 7.9e28 ? DecimalDigits.Of((decimal)scaled, space) : DecimalDigits.Of(scaled, space);
             }
 
-            return value.TypeCode switch
+            switch (value.TypeCode)
             {
-                XdmTypeCode.Integer => (value.IsWideInteger
-                    ? DecimalDigits.Of(value.ToBigInteger())
-                    : DecimalDigits.Of(value.ToInteger())).Shift(multiplier),
-                XdmTypeCode.Decimal => DecimalDigits.Of(value.ToDecimal()).Shift(multiplier),
-                _ => DecimalDigits.Of(scaled),
-            };
+                case XdmTypeCode.Integer:
+                    return (value.IsWideInteger
+                        ? DecimalDigits.Of(value.ToBigInteger(), space)
+                        : DecimalDigits.Of(value.ToInteger(), space)).Shift(multiplier);
+
+                case XdmTypeCode.Decimal:
+                    return DecimalDigits.Of(value.ToDecimal(), space).Shift(multiplier);
+
+                default:
+                    return DecimalDigits.Of(scaled, space);
+            }
         }
 
         private static int[] ToCodePoints(string text)
@@ -374,13 +382,10 @@ namespace CodeDeeds.Xslt.Compiler
 
                 digits = digits.Round(m_maximumFractionDigits);
 
-                string integer = digits.IntegerPart();
-                string fraction = digits.FractionPart();
-
-                if (fraction.Length < m_minimumFractionDigits)
-                {
-                    fraction = fraction.PadRight(m_minimumFractionDigits, '0');
-                }
+                // Read where the digits stand, with the zeros that pad them out counted rather than
+                // written: the two halves and their padding were three strings for every number.
+                DigitRun integer = digits.IntegerPart();
+                DigitRun fraction = digits.FractionPart().PadRight(m_minimumFractionDigits);
 
                 // An exponential form always shows an integer digit where the picture has an integer part to
                 // show it in, so '#.#e0' writes 0.2e0 where '.#e0' writes .2e0.
@@ -388,10 +393,7 @@ namespace CodeDeeds.Xslt.Compiler
                     ? Math.Max(m_minimumIntegerDigits, 1)
                     : m_minimumIntegerDigits;
 
-                if (integer.Length < leastInteger)
-                {
-                    integer = integer.PadLeft(leastInteger, '0');
-                }
+                integer = integer.PadLeft(leastInteger);
 
                 // One builder per thread, reused: a number is formatted once per element written, and the
                 // builder and its first chunk were two allocations per call for a string a few characters long.
@@ -415,8 +417,10 @@ namespace CodeDeeds.Xslt.Compiler
                         AppendCodePoint(builder, format.MinusSign);
                     }
 
-                    string magnitude = Math.Abs(exponent).ToString(System.Globalization.CultureInfo.InvariantCulture);
-                    AppendDigits(builder, magnitude.PadLeft(m_exponentDigits, '0'));
+                    Span<char> magnitude = stackalloc char[12];
+                    Math.Abs((long)exponent).TryFormat(
+                        magnitude, out int written, default, System.Globalization.CultureInfo.InvariantCulture);
+                    AppendDigits(builder, new DigitRun(0, magnitude[..written], 0).PadLeft(m_exponentDigits));
                 }
 
                 builder.Append(m_suffix);
@@ -615,7 +619,7 @@ namespace CodeDeeds.Xslt.Compiler
                 }
             }
 
-            private void AppendInteger(StringBuilder builder, string integer, DecimalFormat format)
+            private void AppendInteger(StringBuilder builder, DigitRun integer, DecimalFormat format)
             {
                 if (m_groupingInterval <= 0 && m_integerGrouping.Length == 0)
                 {
@@ -642,7 +646,7 @@ namespace CodeDeeds.Xslt.Compiler
                 }
             }
 
-            private void AppendFraction(StringBuilder builder, string fraction, DecimalFormat format)
+            private void AppendFraction(StringBuilder builder, DigitRun fraction, DecimalFormat format)
             {
                 for (int i = 0; i < fraction.Length; i++)
                 {
@@ -655,11 +659,11 @@ namespace CodeDeeds.Xslt.Compiler
                 }
             }
 
-            private void AppendDigits(StringBuilder builder, string digits)
+            private void AppendDigits(StringBuilder builder, DigitRun digits)
             {
-                foreach (char c in digits)
+                for (int i = 0; i < digits.Length; i++)
                 {
-                    AppendCodePoint(builder, Translate(c));
+                    AppendCodePoint(builder, Translate(digits[i]));
                 }
             }
 

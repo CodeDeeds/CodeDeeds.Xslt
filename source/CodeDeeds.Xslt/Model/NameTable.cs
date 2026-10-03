@@ -27,14 +27,21 @@ namespace CodeDeeds.Xslt.Model
         /// <summary>The name code of the empty name, used by nodes that have no name.</summary>
         public const int NoNameCode = -1;
 
+        // What the arrays grow to at the first name, and at the first name past that. They start empty:
+        // a table is made for every tree built without one, and the tree of a text node has no names
+        // at all. A tree of a few nodes has a few names, and one with more than a few is a document,
+        // which is given the room it always had rather than doubled up to it.
+        private const int InitialCapacity = 8;
+        private const int DocumentCapacity = 64;
+
         private readonly Dictionary<FingerprintKey, int> m_fingerprintLookup = new();
-        private string[] m_fingerprintUri = new string[64];
-        private string[] m_fingerprintLocal = new string[64];
+        private string[] m_fingerprintUri = Array.Empty<string>();
+        private string[] m_fingerprintLocal = Array.Empty<string>();
         private int m_fingerprintCount;
 
         private readonly Dictionary<NameKey, int> m_nameLookup = new();
-        private int[] m_nameFingerprint = new int[64];
-        private string[] m_namePrefix = new string[64];
+        private int[] m_nameFingerprint = Array.Empty<int>();
+        private string[] m_namePrefix = Array.Empty<string>();
         private int m_nameCount;
 
         /// <summary>
@@ -63,8 +70,8 @@ namespace CodeDeeds.Xslt.Model
 
             if (m_fingerprintCount == m_fingerprintUri.Length)
             {
-                Array.Resize(ref m_fingerprintUri, m_fingerprintCount * 2);
-                Array.Resize(ref m_fingerprintLocal, m_fingerprintCount * 2);
+                Array.Resize(ref m_fingerprintUri, NextCapacity(m_fingerprintCount));
+                Array.Resize(ref m_fingerprintLocal, NextCapacity(m_fingerprintCount));
             }
 
             int fingerprint = m_fingerprintCount++;
@@ -110,8 +117,8 @@ namespace CodeDeeds.Xslt.Model
 
             if (m_nameCount == m_nameFingerprint.Length)
             {
-                Array.Resize(ref m_nameFingerprint, m_nameCount * 2);
-                Array.Resize(ref m_namePrefix, m_nameCount * 2);
+                Array.Resize(ref m_nameFingerprint, NextCapacity(m_nameCount));
+                Array.Resize(ref m_namePrefix, NextCapacity(m_nameCount));
             }
 
             int nameCode = m_nameCount++;
@@ -169,6 +176,12 @@ namespace CodeDeeds.Xslt.Model
             string prefix = m_namePrefix[nameCode];
             string localName = m_fingerprintLocal[m_nameFingerprint[nameCode]];
             return prefix.Length == 0 ? localName : string.Concat(prefix, ":", localName);
+        }
+
+        /// <summary>How large an array that is full becomes.</summary>
+        private static int NextCapacity(int count)
+        {
+            return count == 0 ? InitialCapacity : Math.Max(count * 2, DocumentCapacity);
         }
 
         private readonly record struct FingerprintKey(string Uri, string Local);

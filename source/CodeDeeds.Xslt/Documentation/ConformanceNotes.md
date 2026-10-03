@@ -9799,6 +9799,150 @@ to allocate under eight kilobytes, where it was 315 on the engine as it was. An 
 a thread the test started is a crash of the test host and not a failure of the test, and the first
 of the two carries what fails there back to the thread that asked.
 
+### Four things that cost more than they made
+
+A survey of what a transformation allocates, taken at `bc4a80f`: about a hundred and sixty operations,
+each run until the bytes a call had stopped moving, the bytes then counted exactly and attributed to
+types from the runtime's allocation ticks, and for a body run once for each of a thousand products the
+same loop with nothing in it taken off. Most of what a stylesheet does every day allocates nothing —
+`xsl:value-of` of a child, a comparison in an `xsl:if` or an `xsl:choose`, `count()`, a predicate, a
+literal element, `xsl:call-template` without parameters, `xsl:copy-of`, all three serializers. Four
+things stood out for costing far more than what they produced, and for being cheap to put right.
+
+**A temporary tree began at the size of a small document.** `new XdmTreeBuilder()` made twelve node
+arrays of sixty-four entries, three attribute arrays and two namespace arrays of thirty-two, a name
+cache of four arrays of sixty-four, and — given no name table — a name table whose four arrays were
+sixty-four entries as well: 10,262 bytes for a variable holding one element with a text node in it,
+before the first node was added. Every temporary tree is built that way: the value of an
+`xsl:variable` with content, what `xsl:try` and `xsl:where-populated` hold back, and each node that
+is an item of a sequence, which is a tree of its own, so that a variable declared `as="xs:string"`
+with an `xsl:value-of` inside it paid the ten kilobytes for a text node it then atomized. A builder
+given no estimate starts at eight nodes now, with no attribute or namespace arrays until there is an
+attribute or a namespace, a stack of four open elements, and no name cache until the tree has
+thirty-two nodes; a name table's arrays start empty, go to eight at the first name and to sixty-four,
+where they began before, at the ninth. A builder given an estimate takes it at its word, down to those
+eight nodes, where it was raised to sixty-four; what the parser estimates for a document is what it
+was. The variable is 2,926 bytes, of which the arrays are little over a thousand and the rest is the
+builder, the tree, the table and its two dictionaries, which are objects and not sizes.
+
+**An element's string value was gathered in a builder.** `XdmTree.StringValueOf` returns the text
+node's own string for an element wrapping one, and for anything else appended every text node beneath
+to a new `StringBuilder`: the builder, its chunks as it grew, and then the string. It measures first
+now and writes once, into a string of the length it comes to, and where only one text node beneath
+has anything in it — an element wrapping an element wrapping text — it returns that node's string and
+allocates nothing. `xsl:value-of select="."` on a product, seven fields, was 1,050 bytes and is 290,
+the string. The gathering is a method of its own, and the timing is why: inside `StringValueOf` it
+made the method too large to inline where a copy writes a text node, and `xsl:copy-of` of the
+document, which asks for a string value at every text node and never reaches the loop, read some six
+percent slower in six rounds of six — 946 microseconds to 1,016 and then 949 to 1,002. The runtime's
+own listing of `CopyShallow` says the same: five calls to `StringValueOf` left standing of its six
+before, six with the loop inside, and five again with it moved out, the sixth being the one inlined.
+
+**A union made three sets, and `xsl:apply-templates` a fourth.** `UnionExpr` evaluated either operand
+to a `NodeSet`, made a third for the result and sorted it; `xsl:apply-templates` evaluated its select
+to a value and walked the set that was. The identity template does both once for every element it
+copies, `select="@*|node()"`: 233 bytes an element, 1,868,224 a transformation over the thousand
+products, where `xsl:copy-of` and `on-no-match="shallow-copy"` allocate four thousand for the same
+result. A union whose operands both promise nodes of one tree now gathers them into the caller's
+list and puts them in order where they stand — `PathExpr.OrderFrom`, one pass to find them already
+in order, which attributes followed by children are, the ordering key asked only where there is an
+attribute among them and held in a rented array only where they are out of order. An operand that may
+span documents, a variable or `document()`, goes the way it went. `xsl:apply-templates` with a select
+that promises nodes of one tree and no `xsl:sort` asks for the nodes in a rented list, as the sorted
+form already did, and gives the list back when the templates have run. The identity template is 4,016
+bytes a transformation, `(name | category)[1]` nothing where it was 240, and
+`xsl:apply-templates select="name"` nothing where it was 80.
+
+**`format-number()` made four strings of every number.** The digits kept, the half before the point,
+the half after it and the result, and a fifth where the half after it was padded out; a number that
+needed rounding had an array and two more strings. `DecimalDigits` is a `ref struct` over space the
+caller lends, forty-eight characters of stack in `NumberPattern.Format` and an array only for an
+integer wider than that, and rounding changes the digits where they stand. The two halves are a
+`DigitRun`: the digits read in place with a count of zeros either side, so that padding is
+arithmetic. 131 bytes a call and now 35, the result. Two thousand calls of it were nearly three
+quarters of what the products stylesheet allocated writing to a writer, 356,368 bytes and now 178,008;
+what is left is the results and the two `avg()` calls atomizing their nodes.
+
+**And a number below every place the picture keeps did not format at all.** Rounding a value that
+stands two places or more under the last one kept returned `default`, a struct whose string was null,
+and reading its fraction threw: `format-number(0.004, '0')` was a `NullReferenceException` on both
+backends at every version, as was `format-number(0.0000125, '0.00')`. No test the runs take formats
+such a number: no failure on any of them was this one. The default of a `ref struct` over a span is an
+empty span, which is zero, and the answers are `0` and `0.00`, as `XslCompiledTransform` writes them.
+Found by the answers the new tests ask for, the engine as it was failing three of them on this alone.
+
+Bytes a transformation, before and after, the thousand products parsed once unless the row parses:
+
+| | was | is |
+|---|---:|---:|
+| The products stylesheet, tree to a writer, either backend | 356,368 | 178,008 |
+| The products stylesheet, text to a string | 1,506,459 | 1,327,733 |
+| The identity template, `@*\|node()` | 1,868,224 | 4,016 |
+| A variable holding an element, made for each product | 10,270,412 | 2,934,376 |
+| `xsl:value-of select="."` for each product | 1,058,272 | 298,648 |
+| `format-number(price, '0.00')` for each product | 139,808 | 43,088 |
+| `xsl:apply-templates select="name"` for each product | 88,528 | 8,528 |
+| Compiling the products stylesheet | 124,464 | 124,592 |
+| A variable holding a tree of a thousand elements | 287,152 | 289,096 |
+
+Of the hundred and fifty-nine operations surveyed, twenty-seven allocate less and three more: the
+last two rows, and the products stylesheet compiled for the compiled backend, by 128 bytes. A name
+table that reaches nine names is resized once more than it was, and a tree that outgrows eight nodes
+doubles from there.
+
+In microseconds a transformation, each figure the mean of three runs in fresh processes taken turn
+about with the engine as it was, warmed until time and bytes a call had stopped moving, the machine
+quiet:
+
+| | was | is |
+|---|---:|---:|
+| The products stylesheet, tree to a writer | 3,428 | 3,353 |
+| The same on the compiled backend | 3,374 | 3,356 |
+| The products stylesheet, text to a string | 5,906 | 5,843 |
+| Parsing the thousand products | 2,206, one run of three at 2,547 | 2,015 |
+| The JSON stylesheet, a hundred products | 165 | 165 |
+| Compiling the products stylesheet | 230 | 232 |
+| The identity template, `@*\|node()` | 5,504 | 5,141 |
+| `xsl:copy-of select="."` | 932 | 921 |
+| `on-no-match="shallow-copy"` | 1,688 | 1,677 |
+| `xsl:apply-templates` to the products, an empty template | 97 | 94 |
+| A variable holding an element, made for each product | 9,392 | 1,502 |
+| `xsl:value-of select="."` for each product | 281 | 157 |
+| `format-number(price, '0.00')` for each product | 361 | 382, one run of three at 449 and the others at 346 and 350 |
+| `xsl:apply-templates select="name"` for each product | 235 | 235 |
+| A variable holding a tree of a thousand elements | 232 | 238 |
+| `xsl:value-of select="name"`, which nothing here touches | 131 | 131 |
+| `xsl:for-each select="*"`, likewise | 304 | 309 |
+| `count(//product[inStock='true'])`, likewise | 127 | 128 |
+
+A temporary tree is a sixth of the time it was and the string value of an element a little over half.
+The identity template is seven percent faster for not making two megabytes of sets, which says that
+allocation was not what makes it five times `xsl:copy-of`. Everything else is level: the rows that
+changed move by no more than the three that nothing touches, and `format-number()`, which allocates a
+quarter of what it did, takes the time it took.
+
+Nothing moves on any conformance run, every failure set identical test for test, the suites untouched
+throughout: the 3.0 run stands at 8,061 of 8,071, the 2.0 run at 5,678 of 5,701 and the schema-aware
+run at 8,668 of 8,727, each on both backends, and the XPath runs at 18,268 of 18,285 and 14,553 of
+14,577.
+
+Twenty-seven new unit tests, `EverydayAllocationTests`. Eighteen ask for answers and pass against the
+engine as it was: unions written in and out of order, with duplicates, of attributes, namespace nodes
+and children interleaved, of reverse axes, with an empty operand, with a variable and with another
+tree; templates applied to a selection, for the position and size each sees, sorted, with parameters,
+in another tree, down a run of five thousand siblings with the call last and not last, and the
+identity template against `xsl:copy-of`; string values; trees past every first size, by stylesheet and
+by hand; and forty-odd numbers and pictures, the 1.0 ones asked of `XslCompiledTransform` first. Nine
+do not pass against it: the three that format a number below the picture's last place, the one that
+holds an element with one text node deep beneath it to returning that node's own string, and five
+that measure — a temporary tree under 3,500 bytes, a string value and a formatted number under the
+size of their results rounded up, a selection applied to for nothing, and the identity template
+within sixteen kilobytes of `xsl:copy-of`. That last pair is measured turn about and the least of
+forty taken: writing a copied element allocates a few hundred bytes in code the runtime has not yet
+optimised and nothing once it has, so the two measured one after the other can be read either side of
+that. Copying the test's document read 188 kilobytes in one run of the tests and 388 in another, and
+settles at four. 3,064 unit tests in all.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error

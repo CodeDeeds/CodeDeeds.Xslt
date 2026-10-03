@@ -1058,16 +1058,64 @@ namespace CodeDeeds.Xslt.Model
                 return m_value[first] ?? string.Empty;
             }
 
-            StringBuilder builder = new StringBuilder();
+            return GatheredText(nodeId, end);
+        }
+
+        /// <summary>The text nodes beneath an element, in order, as one string.</summary>
+        /// <remarks>
+        /// <para>
+        /// Measured first and then written once, into a string of the length it comes to. A builder
+        /// grown as the text arrived cost two and a half times the string it produced, on every reading
+        /// of an element with more than one text node beneath it.
+        /// </para>
+        /// <para>
+        /// Apart from <see cref="StringValueOf"/>, which is asked for every text node and attribute a
+        /// transformation reads and answers most of them in a few instructions: with this inside it the
+        /// method was too large to be inlined where a copy writes a text node, and copying a document,
+        /// which asks for nothing an element holds, was some six percent slower for a loop it never
+        /// reached.
+        /// </para>
+        /// </remarks>
+        /// <param name="nodeId">The element, or the document node.</param>
+        /// <param name="end">The last node of its subtree.</param>
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private string GatheredText(int nodeId, int end)
+        {
+            int length = 0;
+            string? only = null;
+            int pieces = 0;
+
             for (int i = nodeId + 1; i <= end; i++)
             {
-                if (m_kind[i] == NodeKind.Text)
+                if (m_kind[i] == NodeKind.Text && m_value[i] is { Length: > 0 } text)
                 {
-                    builder.Append(m_value[i]);
+                    length += text.Length;
+                    only = text;
+                    pieces++;
                 }
             }
 
-            return builder.ToString();
+            // One text node somewhere beneath, however deep, is its own string.
+            if (pieces <= 1)
+            {
+                return only ?? string.Empty;
+            }
+
+            return string.Create(length, (Tree: this, First: nodeId + 1, Last: end), static (span, state) =>
+            {
+                NodeKind[] kinds = state.Tree.m_kind;
+                string?[] values = state.Tree.m_value;
+                int at = 0;
+
+                for (int i = state.First; i <= state.Last; i++)
+                {
+                    if (kinds[i] == NodeKind.Text && values[i] is { Length: > 0 } text)
+                    {
+                        text.CopyTo(span.Slice(at));
+                        at += text.Length;
+                    }
+                }
+            });
         }
 
         /// <summary>

@@ -884,5 +884,95 @@ namespace CodeDeeds.Xslt.XPath
 
             nodes.RemoveRange(write, nodes.Count - write);
         }
+
+        /// <summary>
+        /// Places the nodes from a position in a list onwards in document order and removes duplicates
+        /// among them, leaving what comes before the position alone.
+        /// </summary>
+        /// <remarks>
+        /// For nodes gathered from more than one expression into a list the caller owns part of. Nodes
+        /// already in order, which two runs appended one after the other usually are, cost one pass to
+        /// find so and nothing more; only attributes out of order need their ordering keys held, and
+        /// those are held in a rented array.
+        /// </remarks>
+        /// <param name="nodes">The list, of which the tail is ordered.</param>
+        /// <param name="start">Where the tail starts.</param>
+        /// <param name="tree">The tree every node of the tail belongs to.</param>
+        internal static void OrderFrom(List<int> nodes, int start, XdmTree tree)
+        {
+            Span<int> tail = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(nodes).Slice(start);
+
+            if (tail.Length < 2)
+            {
+                return;
+            }
+
+            bool containsAttributes = false;
+            bool ordered = true;
+
+            for (int i = 0; i < tail.Length; i++)
+            {
+                containsAttributes |= XdmTree.IsAttribute(tail[i]);
+                if (i > 0 && tail[i] <= tail[i - 1])
+                {
+                    ordered = false;
+                }
+            }
+
+            if (containsAttributes)
+            {
+                // Attribute ids sit outside the preorder sequence, so whether these are in order is a
+                // question for the ordering key, and the ids' own order says nothing either way.
+                ordered = true;
+                long previous = long.MinValue;
+
+                for (int i = 0; i < tail.Length; i++)
+                {
+                    long key = tree.DocumentOrderKeyOf(tail[i]);
+                    if (key <= previous)
+                    {
+                        ordered = false;
+                        break;
+                    }
+
+                    previous = key;
+                }
+
+                if (ordered)
+                {
+                    return;
+                }
+
+                long[] keys = System.Buffers.ArrayPool<long>.Shared.Rent(tail.Length);
+
+                for (int i = 0; i < tail.Length; i++)
+                {
+                    keys[i] = tree.DocumentOrderKeyOf(tail[i]);
+                }
+
+                keys.AsSpan(0, tail.Length).Sort(tail);
+                System.Buffers.ArrayPool<long>.Shared.Return(keys);
+            }
+            else if (ordered)
+            {
+                // Strictly ascending, so there is no duplicate among them either.
+                return;
+            }
+            else
+            {
+                tail.Sort();
+            }
+
+            int write = 1;
+            for (int read = 1; read < tail.Length; read++)
+            {
+                if (tail[read] != tail[write - 1])
+                {
+                    tail[write++] = tail[read];
+                }
+            }
+
+            nodes.RemoveRange(start + write, tail.Length - write);
+        }
     }
 }

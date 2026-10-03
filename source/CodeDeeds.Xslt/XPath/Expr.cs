@@ -1666,8 +1666,97 @@ namespace CodeDeeds.Xslt.XPath
         /// <inheritdoc/>
         internal override IEnumerable<Expr> Children => new[] { m_left, m_right };
 
+        /// <summary>
+        /// Whether both operands are node-sets of the one tree, so that they can be gathered into a list
+        /// and put in order there.
+        /// </summary>
+        /// <remarks>
+        /// Asked at each evaluation rather than once, as <see cref="FilterExpr"/> asks it: what an operand
+        /// promises is its own to say, and a reference resolved after this was built says it late.
+        /// </remarks>
+        private bool GathersInPlace =>
+            m_left.ReturnsNodeSet && m_right.ReturnsNodeSet && !m_left.MaySpanDocuments && !m_right.MaySpanDocuments;
+
         /// <inheritdoc/>
         public override XPathValue Evaluate(ref DynamicContext context)
+        {
+            if (!GathersInPlace)
+            {
+                return XPathValue.FromNodeSet(EvaluateAsSets(ref context));
+            }
+
+            List<int> nodes = NodeListPool.Rent();
+
+            try
+            {
+                XdmTree tree = EvaluateNodes(ref context, nodes);
+                return XPathValue.FromNodeSet(NodeSet.FromOrderedNodes(tree, nodes));
+            }
+            finally
+            {
+                NodeListPool.Return(nodes);
+            }
+        }
+
+        /// <inheritdoc/>
+        /// <remarks>
+        /// The identity template selects <c>@*|node()</c> once for every element it copies, and going
+        /// through sets cost three of them and their arrays each time: a set for either operand and one
+        /// for the result, two megabytes to copy a document of twenty-four thousand nodes. Here both
+        /// operands are appended to the caller's list and put in order where they stand, which for that
+        /// selection is the order they arrive in, the attributes of an element coming before its children.
+        /// </remarks>
+        public override XdmTree EvaluateNodes(ref DynamicContext context, List<int> output)
+        {
+            if (!GathersInPlace)
+            {
+                return AppendSets(ref context, output);
+            }
+
+            int start = output.Count;
+            XdmTree leftTree = m_left.EvaluateNodes(ref context, output);
+            int middle = output.Count;
+            XdmTree rightTree = m_right.EvaluateNodes(ref context, output);
+
+            // The tree is the left operand's unless that selected nothing, as it is the other way.
+            if (middle == output.Count)
+            {
+                return middle == start ? context.Tree : leftTree;
+            }
+
+            if (middle == start)
+            {
+                PathExpr.OrderFrom(output, start, rightTree);
+                return rightTree;
+            }
+
+            // Neither operand may span documents, so they have the one tree between them. Where they
+            // have not, a promise was wrong, and the sets know how to hold nodes of two trees.
+            if (!ReferenceEquals(leftTree, rightTree))
+            {
+                output.RemoveRange(start, output.Count - start);
+                return AppendSets(ref context, output);
+            }
+
+            PathExpr.OrderFrom(output, start, leftTree);
+            return leftTree;
+        }
+
+        /// <summary>Appends the union made the general way, as sets, to a caller's list.</summary>
+        private XdmTree AppendSets(ref DynamicContext context, List<int> output)
+        {
+            NodeSet nodes = EvaluateAsSets(ref context);
+
+            for (int i = 0; i < nodes.Count; i++)
+            {
+                output.Add(nodes[i]);
+            }
+
+            return nodes.Tree;
+        }
+
+        /// <summary>The union of whatever the operands are, each read as a set of nodes.</summary>
+        private NodeSet EvaluateAsSets(ref DynamicContext context)
         {
             // Read through NodeSet.Of rather than AsNodeSet, because from XPath 2.0 a sequence of nodes is
             // as good an operand as a node-set: a variable holding elements is a sequence, and refusing
@@ -1688,7 +1777,7 @@ namespace CodeDeeds.Xslt.XPath
             result.AddRange(left);
             result.AddRange(right);
             result.SortAndDeduplicate();
-            return XPathValue.FromNodeSet(result);
+            return result;
         }
     }
 

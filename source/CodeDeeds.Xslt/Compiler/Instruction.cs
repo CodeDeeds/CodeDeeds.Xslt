@@ -1845,7 +1845,75 @@ namespace CodeDeeds.Xslt.Compiler
                 return;
             }
 
+            // A select that promises nodes of one tree, with nothing to sort them by, is walked from a
+            // list rather than from a set made to hold them.
+            if (m_select is not null && m_sortKeys.Length == 0 && m_select.ReturnsNodeSet && !m_select.MaySpanDocuments)
+            {
+                ApplyToNodes(parameters, mode, ref context, runtime);
+                return;
+            }
+
             ApplyToSelection(parameters, mode, ref context, runtime);
+        }
+
+        /// <summary>
+        /// Applies templates to the nodes a select promises, gathered into a rented list.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The commonest select there is, a path, and going through a value made a set and its array of
+        /// it at every instruction run: a hundred bytes each time a template applied templates to
+        /// something it named, and more than twice that for the identity template's <c>@*|node()</c>.
+        /// The list is rented for as long as the templates applied are running, as the list of a sorted
+        /// selection is, and given back whatever they do.
+        /// </para>
+        /// <para>
+        /// Apart from <see cref="Execute"/> for the reason <see cref="ApplyToSelection"/> is, and with
+        /// one context of its own rather than that method's two.
+        /// </para>
+        /// </remarks>
+        /// <param name="parameters">The parameters, already evaluated.</param>
+        /// <param name="mode">The mode to apply templates in.</param>
+        /// <param name="context">The instruction's context.</param>
+        /// <param name="runtime">The transformation in progress.</param>
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private void ApplyToNodes(
+            ParameterValue[] parameters, int mode, ref DynamicContext context, XsltRuntime runtime)
+        {
+            List<int> nodes = NodeListPool.Rent();
+
+            try
+            {
+                XdmTree tree = m_select!.EvaluateNodes(ref context, nodes);
+                bool elsewhere = !ReferenceEquals(tree, context.Tree);
+                int size = nodes.Count;
+
+                for (int i = 0; i < size; i++)
+                {
+                    int node = nodes[i];
+                    DynamicContext inner = elsewhere ? context.SwitchTree(tree, context.Node) : context;
+                    inner.Node = node;
+                    inner.CurrentNode = node;
+                    inner.CurrentTree = inner.Tree;
+                    inner.Position = i + 1;
+                    inner.Size = size;
+
+                    // The last node in tail position is handed back, as it is in ApplyToSelection.
+                    if (m_last && i == size - 1)
+                    {
+                        runtime.ApplyTemplatesInTailPosition(node, mode, parameters, ref inner);
+                    }
+                    else
+                    {
+                        runtime.ApplyTemplates(node, mode, parameters, ref inner);
+                    }
+                }
+            }
+            finally
+            {
+                NodeListPool.Return(nodes);
+            }
         }
 
         /// <summary>
