@@ -319,24 +319,6 @@ namespace CodeDeeds.Xslt.Compiler
         }
 
         /// <summary>
-        /// Finds the template that applies to a node, or <see langword="null"/> if none does and the built-in
-        /// rule should be used instead.
-        /// </summary>
-        /// <param name="node">The node being matched.</param>
-        /// <param name="mode">The mode in force.</param>
-        /// <param name="context">The context used to evaluate pattern predicates.</param>
-        /// <summary>
-        /// Finds the template that applies to a node, considering only modules below a given precedence.
-        /// </summary>
-        /// <remarks>
-        /// The ceiling is what implements <c>xsl:apply-imports</c>: it asks for the template that would have
-        /// matched had the current template's module — and everything importing it — not existed.
-        /// </remarks>
-        /// <param name="node">The node being matched.</param>
-        /// <param name="mode">The mode in force.</param>
-        /// <param name="context">The context used to evaluate pattern predicates.</param>
-        /// <param name="maximumPrecedence">Only templates strictly below this precedence are considered.</param>
-        /// <summary>
         /// Finds the template that would match were everything up to and including one already-tried template
         /// not there, which is what <c>xsl:next-match</c> asks for.
         /// </summary>
@@ -365,9 +347,6 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="item">The item being matched.</param>
         /// <param name="mode">The mode in force.</param>
         /// <param name="context">The context used to evaluate the predicates.</param>
-        /// <param name="item">The item being matched.</param>
-        /// <param name="mode">The mode in force.</param>
-        /// <param name="context">The context used to evaluate the predicates.</param>
         /// <param name="after">
         /// The rule already running, which and whose betters are passed over — what <c>xsl:next-match</c>
         /// asks for. Null to search from the top.
@@ -375,6 +354,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="maximumPrecedence">
         /// Only rules strictly below this precedence are considered — what <c>xsl:apply-imports</c> asks for.
         /// </param>
+        /// <param name="minimumPrecedence">Only rules at or above this precedence are considered.</param>
         /// <remarks>
         /// The two extra arguments are here for the same reason they are on <see cref="Find"/>: an atomic
         /// value can be the context item of a rule, so that rule can contain an <c>xsl:next-match</c> or an
@@ -452,6 +432,19 @@ namespace CodeDeeds.Xslt.Compiler
             return after.Template.ExplicitPriority is null || !ofTheSameTemplate;
         }
 
+        /// <summary>
+        /// Finds the template that applies to a node, considering only modules below a given precedence, or
+        /// <see langword="null"/> if none does and the built-in rule should be used instead.
+        /// </summary>
+        /// <remarks>
+        /// The ceiling is what implements <c>xsl:apply-imports</c>: it asks for the template that would have
+        /// matched had the current template's module — and everything importing it — not existed.
+        /// </remarks>
+        /// <param name="node">The node being matched.</param>
+        /// <param name="mode">The mode in force.</param>
+        /// <param name="context">The context used to evaluate pattern predicates.</param>
+        /// <param name="maximumPrecedence">Only templates strictly below this precedence are considered.</param>
+        /// <param name="minimumPrecedence">Only templates at or above this precedence are considered.</param>
         public TemplateRule? Find(
             int node,
             int mode,

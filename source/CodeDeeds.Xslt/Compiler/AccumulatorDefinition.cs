@@ -199,6 +199,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="after">Whether the call asks for the value after the node rather than before it.</param>
         /// <param name="namespaces">The prefixes in scope where the call was written.</param>
         /// <param name="accumulators">The accumulators the stylesheet declares.</param>
+        /// <param name="package">The package the call was written in; only that package's accumulators are matched by name.</param>
         public AccumulatorExpr(
             Expr computed,
             bool after,

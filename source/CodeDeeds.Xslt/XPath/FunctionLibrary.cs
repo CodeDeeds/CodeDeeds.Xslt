@@ -47,6 +47,8 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="version">The version in force where the call was written, which decides behaviour.</param>
         /// <param name="syntaxVersion">The version whose grammar and library are being read.</param>
         /// <param name="legacySyntax">Whether the 1.0 library alone is in force.</param>
+        /// <param name="namespaces">The namespace bindings where the call was written, or <see langword="null"/> where there are none to give.</param>
+        /// <param name="defaultElementNamespace">The default namespace for unprefixed element names where the call was written.</param>
         public static Expr? TryCreate(
             string namespaceUri,
             string localName,
@@ -169,6 +171,10 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         /// <param name="localName">The type's local name.</param>
         /// <param name="arguments">The argument expressions.</param>
+        /// <param name="namespaces">The namespace bindings where the call was written, kept for <c>xs:QName()</c> to resolve a prefix against.</param>
+        /// <param name="syntaxVersion">The version whose grammar is being read.</param>
+        /// <param name="defaultElementNamespace">The default namespace for unprefixed element names where the call was written.</param>
+        /// <param name="thirty">Whether the 3.0 library is reachable, which decides whether 3.0-only constructors exist.</param>
         private static Expr TypeConstructor(
             string localName,
             Expr[] arguments,

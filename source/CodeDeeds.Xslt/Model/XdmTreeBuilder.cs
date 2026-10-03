@@ -9,7 +9,7 @@ namespace CodeDeeds.Xslt.Model
     /// <para>
     /// The builder exposes a writer-style surface — start an element, add its attributes and namespace
     /// declarations, add children, end the element — so that trees can be produced from any source. XML input
-    /// goes through <see cref="FromXml(System.IO.TextReader, NameTable?)"/>; JSON input uses the same surface
+    /// goes through <see cref="FromXml(TextReader, NameTable?, WhitespaceControl?, bool, IXsltResolver?, string?)"/>; JSON input uses the same surface
     /// from a separate builder, which is why the API is not specific to <see cref="XmlReader"/>.
     /// </para>
     /// <para>
@@ -387,6 +387,12 @@ namespace CodeDeeds.Xslt.Model
         /// <param name="stream">The XML to parse. The caller retains ownership and must dispose it.</param>
         /// <param name="nameTable">The table used to intern names, or <see langword="null"/> to create one.</param>
         /// <param name="whitespace">Which whitespace-only text nodes to strip, or <see langword="null"/> to keep all.</param>
+        /// <param name="locations">Whether to record where each node starts, as a stylesheet asks.</param>
+        /// <param name="entityResolver">
+        /// What fetches the external subset of a document type declaration and the external entities it
+        /// declares, or <see langword="null"/>, the default, to fetch nothing.
+        /// </param>
+        /// <param name="baseUri">The document's base URI, which a declaration's relative references resolve against.</param>
         /// <returns>The parsed tree.</returns>
         /// <remarks>
         /// <para>
@@ -1386,30 +1392,6 @@ namespace CodeDeeds.Xslt.Model
             m_namespaceCount[element]++;
         }
 
-        /// <summary>
-        /// Adds an attribute to the element being built.
-        /// </summary>
-        /// <param name="prefix">The prefix, or an empty string if unprefixed.</param>
-        /// <param name="namespaceUri">The namespace URI, or an empty string for no namespace.</param>
-        /// <param name="localName">The local part of the name.</param>
-        /// <param name="value">The attribute value.</param>
-        /// <exception cref="InvalidOperationException">
-        /// No element is open, or a child has already been added to it.
-        /// </exception>
-        /// <summary>
-        /// Adds an attribute that belongs to no element, and returns the id it will have.
-        /// </summary>
-        /// <remarks>
-        /// XSLT 2.0 lets a sequence hold a parentless attribute: <c>&lt;xsl:variable as="attribute()"&gt;</c>
-        /// with an <c>xsl:attribute</c> inside it produces exactly one, and the whole point of declaring the
-        /// type is to say that the attribute is the value rather than something to attach. Its owner is
-        /// recorded as -1, which is what <see cref="XdmTree.ParentOf"/> then answers: no parent, as the data
-        /// model says.
-        /// </remarks>
-        /// <param name="prefix">The preferred prefix, or an empty string.</param>
-        /// <param name="namespaceUri">The namespace URI, or an empty string for no namespace.</param>
-        /// <param name="localName">The local part of the name.</param>
-        /// <param name="value">The attribute's value.</param>
         /// <summary>The first node built directly under the document node, or -1 where none has been.</summary>
         public int FirstTopLevelNode => m_firstChild[XdmTree.RootNode];
 
@@ -1459,6 +1441,20 @@ namespace CodeDeeds.Xslt.Model
             m_openLastChild[0] = -1;
         }
 
+        /// <summary>
+        /// Adds an attribute that belongs to no element, and returns the id it will have.
+        /// </summary>
+        /// <remarks>
+        /// XSLT 2.0 lets a sequence hold a parentless attribute: <c>&lt;xsl:variable as="attribute()"&gt;</c>
+        /// with an <c>xsl:attribute</c> inside it produces exactly one, and the whole point of declaring the
+        /// type is to say that the attribute is the value rather than something to attach. Its owner is
+        /// recorded as -1, which is what <see cref="XdmTree.ParentOf"/> then answers: no parent, as the data
+        /// model says.
+        /// </remarks>
+        /// <param name="prefix">The preferred prefix, or an empty string.</param>
+        /// <param name="namespaceUri">The namespace URI, or an empty string for no namespace.</param>
+        /// <param name="localName">The local part of the name.</param>
+        /// <param name="value">The attribute's value.</param>
         public int AddParentlessAttribute(string prefix, string namespaceUri, string localName, string value)
         {
             if (m_attributeCount == m_attributeNameCode.Length)
@@ -1504,6 +1500,16 @@ namespace CodeDeeds.Xslt.Model
             return id;
         }
 
+        /// <summary>
+        /// Adds an attribute to the element being built.
+        /// </summary>
+        /// <param name="prefix">The prefix, or an empty string if unprefixed.</param>
+        /// <param name="namespaceUri">The namespace URI, or an empty string for no namespace.</param>
+        /// <param name="localName">The local part of the name.</param>
+        /// <param name="value">The attribute value.</param>
+        /// <exception cref="InvalidOperationException">
+        /// No element is open, or a child has already been added to it.
+        /// </exception>
         public void AddAttribute(string prefix, string namespaceUri, string localName, string value)
         {
             m_lastWasAtomic = false;
@@ -1621,15 +1627,6 @@ namespace CodeDeeds.Xslt.Model
             m_openDepth--;
         }
 
-        /// <summary>
-        /// Adds character data. Text added immediately after other text is merged into a single node, as the
-        /// XPath data model requires.
-        /// </summary>
-        /// <param name="text">The characters to add. An empty string is ignored.</param>
-        /// <param name="keepEmpty">
-        /// Whether a zero-length text node is added rather than dropped, which a sequence may hold where a
-        /// tree may not.
-        /// </param>
         /// <summary>The text nodes added with output escaping disabled.</summary>
         private HashSet<int>? m_rawText;
 
@@ -1646,6 +1643,15 @@ namespace CodeDeeds.Xslt.Model
             }
         }
 
+        /// <summary>
+        /// Adds character data. Text added immediately after other text is merged into a single node, as the
+        /// XPath data model requires.
+        /// </summary>
+        /// <param name="text">The characters to add. An empty string is ignored.</param>
+        /// <param name="keepEmpty">
+        /// Whether a zero-length text node is added rather than dropped, which a sequence may hold where a
+        /// tree may not.
+        /// </param>
         public void AddText(string text, bool keepEmpty = false)
         {
             if (text.Length == 0 && !keepEmpty)

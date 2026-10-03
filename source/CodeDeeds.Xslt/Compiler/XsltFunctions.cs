@@ -659,6 +659,8 @@ namespace CodeDeeds.Xslt.Compiler
         /// </param>
         /// <param name="dynamicEvaluation">Whether <c>xsl:evaluate</c> is switched on, which is what
         /// <c>xsl:supports-dynamic-evaluation</c> answers.</param>
+        /// <param name="schemaAware">Whether a schema-aware processor was asked for, which is what
+        /// <c>xsl:is-schema-aware</c> answers.</param>
         public static XPathValue Lookup(
             string namespaceUri,
             string localName,
@@ -986,6 +988,8 @@ namespace CodeDeeds.Xslt.Compiler
         /// must be told so.
         /// </param>
         /// <param name="arity">The second argument, or null where the call gave one argument.</param>
+        /// <param name="staticContext">Whether the call stands in a static expression, whose library is the
+        /// narrower one.</param>
         public FunctionAvailableExpr(
             Expr name,
             Dictionary<string, string> prefixes,
@@ -1330,7 +1334,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// </summary>
         /// <remarks>
         /// A different question from whether a value of it can be built, which is what the table of types
-        /// holds and what <see cref="IsFunctionAvailable(string, string)"/> asks: <c>xs:anyType</c> is in
+        /// holds and what <see cref="IsFunctionAvailable(string, string, XsltVersion, XsltVersion)"/> asks: <c>xs:anyType</c> is in
         /// scope and constructs nothing, and at 2.0 <c>xs:int</c> constructs something and is not in scope.
         /// Which types are in scope is the processor's version to say — 2.0 gives a basic processor a short
         /// list and the rest to a schema-aware one, where 3.0 gives every processor all of XML Schema Part
@@ -1374,6 +1378,9 @@ namespace CodeDeeds.Xslt.Compiler
         /// </summary>
         /// <param name="namespaceUri">The function name's namespace URI.</param>
         /// <param name="localName">The function name's local part.</param>
+        /// <param name="version">The version the question is asked under.</param>
+        /// <param name="syntaxVersion">The version this processor implements; a later language's functions are
+        /// available when either version is 3.0.</param>
         public static bool IsFunctionAvailable(
             string namespaceUri, string localName, XsltVersion version, XsltVersion syntaxVersion)
         {
@@ -1441,6 +1448,8 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="localName">The name's local part.</param>
         /// <param name="arity">How many arguments the caller is asking about.</param>
         /// <param name="version">The version the question is asked under.</param>
+        /// <param name="syntaxVersion">The version this processor implements; a later language's functions are
+        /// available when either version is 3.0.</param>
         public static bool IsFunctionAvailable(
             string namespaceUri,
             string localName,

@@ -491,7 +491,8 @@ namespace CodeDeeds.Xslt.Model
         /// character (F&amp;O 3.1 §17.5).
         /// </remarks>
         /// <param name="value">The string as JSON meant it, with the escapes already read.</param>
-        /// <param name="settings">What the call said.</param>
+        /// <param name="escape">Whether to leave such a character escaped rather than hand it to <paramref name="fallback"/>.</param>
+        /// <param name="fallback">What turns the escape sequence of such a character into its replacement, where <paramref name="escape"/> is false.</param>
         /// <param name="escaped">Set where something was left escaped.</param>
         internal static string Represent(
             string value, bool escape, Func<string, string>? fallback, out bool escaped)

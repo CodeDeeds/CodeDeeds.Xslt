@@ -2955,7 +2955,7 @@ namespace CodeDeeds.Xslt.XPath
         /// Splits a string on a pattern, giving what lies between the matches.
         /// </summary>
         /// <remarks>
-        /// Written out rather than handed to <see cref="Regex.Split"/>, which also returns whatever the
+        /// Written out rather than handed to <see cref="Regex.Split(string)"/>, which also returns whatever the
         /// pattern's groups captured: <c>tokenize('abracadabra', '(ab)|(a)')</c> would come back with the
         /// <c>ab</c> and <c>a</c> it split on among the pieces it split into.
         /// </remarks>

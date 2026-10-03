@@ -1847,7 +1847,7 @@ namespace CodeDeeds.Xslt.XPath
         /// <para>
         /// A filter over what is <em>usually</em> one node, <c>.[…]</c> or <c>current()[…]</c>, makes no
         /// such claim for itself and is evaluated as a value: the one-node question a reader asks of
-        /// <see cref="UsuallyReturnsNodeSet"/> has no way to answer "a node, and the predicate kept it
+        /// <see cref="Expr.UsuallyReturnsNodeSet"/> has no way to answer "a node, and the predicate kept it
         /// out", which is the answer a filter can give.
         /// </para>
         /// </remarks>

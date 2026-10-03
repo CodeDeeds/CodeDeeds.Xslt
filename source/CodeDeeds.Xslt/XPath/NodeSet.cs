@@ -237,7 +237,7 @@ namespace CodeDeeds.Xslt.XPath
             m_nodes[m_count++] = node;
         }
 
-        /// <summary>Appends every node of another set. Ordering is not preserved; see <see cref="Add"/>.</summary>
+        /// <summary>Appends every node of another set. Ordering is not preserved; see <see cref="Add(XdmTree, int)"/>.</summary>
         /// <param name="other">The set whose nodes are appended.</param>
         public void AddRange(NodeSet other)
         {

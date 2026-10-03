@@ -1099,6 +1099,7 @@ namespace CodeDeeds.Xslt.Runtime
         /// protected the ordinary way.
         /// </remarks>
         /// <param name="attribute">The attribute about to be written.</param>
+        /// <param name="escaped">Set where the escaping applied to this attribute, whether or not it changed the value.</param>
         /// <returns>The value to write.</returns>
         private string ForUri(PendingAttribute attribute, out bool escaped)
         {

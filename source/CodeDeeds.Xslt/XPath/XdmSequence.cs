@@ -251,18 +251,6 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
-        /// Reduces items to the atomic values they stand for, which is what <c>fn:data</c> does.
-        /// </summary>
-        /// <remarks>
-        /// A node contributes its typed value: its string-value as <c>xs:untypedAtomic</c> in a tree
-        /// nothing validated, and what its annotation says in a validated one, which may be several values
-        /// or none. An <b>array</b> contributes the atomization of its members, which is why the count
-        /// can change: XPath 3.1 made an array atomizable where 3.0 refused it, so <c>sum([1, 2, 3])</c> is
-        /// six and <c>sum([[1, 2], [3, 4]])</c> is ten. A map and a function have no typed value at all.
-        /// </remarks>
-        /// <param name="items">The items to atomize.</param>
-        /// <returns>The atomic values, which may be more or fewer than the items given.</returns>
-        /// <summary>
         /// The items a value contributes when it is written into a result tree, with arrays opened out.
         /// </summary>
         /// <remarks>
@@ -320,6 +308,18 @@ namespace CodeDeeds.Xslt.XPath
             }
         }
 
+        /// <summary>
+        /// Reduces items to the atomic values they stand for, which is what <c>fn:data</c> does.
+        /// </summary>
+        /// <remarks>
+        /// A node contributes its typed value: its string-value as <c>xs:untypedAtomic</c> in a tree
+        /// nothing validated, and what its annotation says in a validated one, which may be several values
+        /// or none. An <b>array</b> contributes the atomization of its members, which is why the count
+        /// can change: XPath 3.1 made an array atomizable where 3.0 refused it, so <c>sum([1, 2, 3])</c> is
+        /// six and <c>sum([[1, 2], [3, 4]])</c> is ten. A map and a function have no typed value at all.
+        /// </remarks>
+        /// <param name="items">The items to atomize.</param>
+        /// <returns>The atomic values, which may be more or fewer than the items given.</returns>
         public static List<XPathValue> Atomize(List<XPathValue> items)
         {
             List<XPathValue> atomized = new List<XPathValue>(items.Count);

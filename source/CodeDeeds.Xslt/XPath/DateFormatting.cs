@@ -753,12 +753,6 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
-        /// Renders a component's number, into the caller's buffer where it fits.
-        /// </summary>
-        /// <param name="value">The number to render.</param>
-        /// <param name="presentation">The token saying how to render it.</param>
-        /// <param name="scratch">Room to write into, which the returned span points at.</param>
-        /// <summary>
         /// Writes a numeric component through its presentation modifier.
         /// </summary>
         /// <remarks>
@@ -767,6 +761,11 @@ namespace CodeDeeds.Xslt.XPath
         /// which the <c>xsl:number</c> formatter this used to go through has any idea about. That formatter
         /// still answers the common pictures, so it stays as the fast path and this is the fallback.
         /// </remarks>
+        /// <param name="value">The number to write.</param>
+        /// <param name="presentation">The presentation modifier, read as a <c>format-integer</c> picture.</param>
+        /// <param name="ordinal">Whether the component asked for an ordinal, which rules out the fast path.</param>
+        /// <param name="scratch">Room the fast path writes into, which the returned span may point at.</param>
+        /// <param name="language">The language the number is written in, or <see langword="null"/> for the default.</param>
         private static ReadOnlySpan<char> Number(
             int value,
             ReadOnlySpan<char> presentation,

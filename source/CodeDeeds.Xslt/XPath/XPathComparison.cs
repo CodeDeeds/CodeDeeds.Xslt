@@ -111,7 +111,7 @@ namespace CodeDeeds.Xslt.XPath
 
         /// <summary>
         /// Compares a list of nodes against an operand whose value proved to be something other than the
-        /// one boolean, number or string <see cref="NodesVersusValue"/> reads.
+        /// one boolean, number or string <see cref="NodesVersusValue(XdmTree, List{int}, XPathValue, bool, BinaryOperator)"/> reads.
         /// </summary>
         /// <remarks>
         /// <para>
@@ -120,7 +120,7 @@ namespace CodeDeeds.Xslt.XPath
         /// <para>
         /// Anything else is a sequence, which a 1.0 stylesheet on this processor may write, and each of
         /// its items is an operand in its turn: the general comparison knows how, so the nodes are given
-        /// to it as the node-set they would have been. <see cref="NodesVersusValue"/> was handed these
+        /// to it as the node-set they would have been. <see cref="NodesVersusValue(XdmTree, List{int}, XPathValue, bool, BinaryOperator)"/> was handed these
         /// once, and read a sequence as its items joined by spaces — <c>price = (1 to 10)</c> compared
         /// each price with the text <c>1 2 3 …</c> and found none, where <c>string(price) = (1 to 10)</c>
         /// beside it found four, and <c>category = (5 to 1)</c> found every empty category equal to an
@@ -204,7 +204,7 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
-        /// Whether a value is one boolean, number or string, which is what <see cref="NodesVersusValue"/>
+        /// Whether a value is one boolean, number or string, which is what <see cref="NodesVersusValue(XdmTree, List{int}, XPathValue, bool, BinaryOperator)"/>
         /// compares nodes against; anything else is <see cref="NodesVersusOther"/>'s.
         /// </summary>
         /// <param name="value">The operand beside the nodes.</param>
@@ -371,9 +371,6 @@ namespace CodeDeeds.Xslt.XPath
             return false;
         }
 
-        /// <summary>Evaluates the <c>=</c> operator.</summary>
-        /// <param name="left">The left operand.</param>
-        /// <param name="right">The right operand.</param>
         /// <summary>
         /// Applies a general comparison across sequences, which is existential: true when <em>some</em> item
         /// on the left stands in the given relation to <em>some</em> item on the right.
@@ -382,6 +379,10 @@ namespace CodeDeeds.Xslt.XPath
         /// The same rule XPath 1.0 already applies to node-sets, extended to the sequences XPath 2.0 adds. It
         /// is why <c>$a = 1</c> and <c>$a != 1</c> can both be true, and why <c>eq</c> exists.
         /// </remarks>
+        /// <param name="left">The left operand.</param>
+        /// <param name="right">The right operand.</param>
+        /// <param name="op">The operator, handed on to <paramref name="compare"/> for each pair.</param>
+        /// <param name="compare">The comparison of one pair of atomic values.</param>
         private static bool QuantifyOverSequences(
             XPathValue left,
             XPathValue right,
@@ -608,6 +609,7 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="right">The right operand.</param>
         /// <param name="op">The operator.</param>
         /// <param name="version">The XSLT version whose rules apply.</param>
+        /// <param name="where">The collation and namespaces in force where the comparison was written, or <see langword="null"/> for the defaults.</param>
         public static bool General(
             XPathValue left,
             XPathValue right,

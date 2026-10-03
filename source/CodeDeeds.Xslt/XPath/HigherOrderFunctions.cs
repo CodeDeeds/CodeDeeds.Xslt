@@ -284,6 +284,7 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         /// <param name="items">The items to sort.</param>
         /// <param name="key">The key function, or <see langword="null"/> to sort by the items themselves.</param>
+        /// <param name="collation">The collation string keys are compared under.</param>
         /// <param name="context">The context calls are made in.</param>
         internal static List<XPathValue> Sort(
             List<XPathValue> items,

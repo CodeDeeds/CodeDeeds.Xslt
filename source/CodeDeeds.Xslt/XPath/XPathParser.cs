@@ -2228,13 +2228,6 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
-        /// Parses a parenthesized argument list, optionally with an argument already supplied.
-        /// </summary>
-        /// <param name="first">
-        /// An argument to put in front of those written, which is how the arrow works: <c>$x =&gt; f(1)</c>
-        /// is <c>f($x, 1)</c>, so the left operand arrives here rather than in the text being parsed.
-        /// </param>
-        /// <summary>
         /// Parses the arguments of a call, with <see langword="null"/> where a <c>?</c> stands.
         /// </summary>
         /// <remarks>

@@ -175,6 +175,8 @@ namespace CodeDeeds.Xslt.XPath
             }
         }
 
+        /// <param name="builder">The word being built, which the number is appended to.</param>
+        /// <param name="value">The number to append, below one thousand.</param>
         /// <param name="apocope">Whether a final one loses its vowel, as it does before mila.</param>
         /// <param name="compound">Whether something already stands before this in the word.</param>
         private static void AppendBelowThousand(StringBuilder builder, ulong value, bool apocope, bool compound)

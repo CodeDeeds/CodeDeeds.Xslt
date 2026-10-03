@@ -339,6 +339,8 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="arity">The number of arguments required, or <see langword="null"/> for any.</param>
         /// <param name="occurrence">How many items the type admits.</param>
         /// <param name="written">The type as it was written, for diagnostics.</param>
+        /// <param name="parameterTypes">The declared parameter types, or <see langword="null"/> for <c>function(*)</c>.</param>
+        /// <param name="resultType">The declared result type, or <see langword="null"/> where none was written.</param>
         public static XdmSequenceType FunctionItem(
             int? arity,
             XdmOccurrence occurrence,
@@ -360,6 +362,7 @@ namespace CodeDeeds.Xslt.XPath
         /// Which derived type was named, where the name is narrower than the representation — so that
         /// <c>xs:int</c> asks about the name a value was made under rather than about the integer it holds.
         /// </param>
+        /// <param name="builtIn">The built-in type named, where there is one, so that its rules can be applied.</param>
         public static XdmSequenceType Atomic(
             XdmTypeCode code,
             XdmOccurrence occurrence,

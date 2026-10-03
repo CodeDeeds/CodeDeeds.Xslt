@@ -754,6 +754,9 @@ namespace CodeDeeds.Xslt.Runtime
         /// </remarks>
         /// <param name="href">The document reference as written.</param>
         /// <param name="baseUri">The stylesheet's base URI, which a relative reference resolves against.</param>
+        /// <param name="package">
+        /// The package the call was written in, which decides what whitespace the document is stripped of.
+        /// </param>
         /// <returns>The loaded document.</returns>
         /// <exception cref="XsltException">No document resolver is configured, or the document is unavailable.</exception>
         public XdmTree LoadDocument(string href, string? baseUri, int package = 0)
@@ -1882,6 +1885,8 @@ namespace CodeDeeds.Xslt.Runtime
         /// <param name="mode">The mode to run it in.</param>
         /// <param name="tree">The tree of the node it applies to.</param>
         /// <param name="node">The node it applies to.</param>
+        /// <param name="position">The context position it was called with.</param>
+        /// <param name="size">The context size it was called with.</param>
         private bool TakeDeferredApply(
             out TemplateRule rule,
             out ParameterValue[] parameters,
@@ -1981,21 +1986,6 @@ namespace CodeDeeds.Xslt.Runtime
             return moved;
         }
 
-        /// <summary>
-        /// Applies the template that would have matched the current node if the running template's module, and
-        /// everything importing it, did not exist — that is, <c>xsl:apply-imports</c>.
-        /// </summary>
-        /// <remarks>
-        /// This is how a stylesheet overrides an imported template and still calls through to it, so the
-        /// override can wrap rather than replace what it inherited.
-        /// </remarks>
-        /// <param name="context">The context, positioned on the node being processed.</param>
-        /// <summary>
-        /// Hands the node to the template that would have matched had the running one not existed, which is
-        /// <c>xsl:next-match</c>.
-        /// </summary>
-        /// <param name="parameters">Parameters for the template found.</param>
-        /// <param name="context">The context, positioned on the node.</param>
         private HashSet<string>? m_resultDocuments;
 
         /// <summary>Every document this transformation has read, by the URI it was read under.</summary>
@@ -2066,25 +2056,6 @@ namespace CodeDeeds.Xslt.Runtime
         }
 
         /// <summary>
-        /// Calls a function declared by <c>xsl:function</c> and returns its value.
-        /// </summary>
-        /// <remarks>
-        /// <para>
-        /// A function gets its own variable frame, as a template does, but the context node stays where the
-        /// caller was: a function is called from inside an expression and has no node of its own to move to.
-        /// </para>
-        /// <para>
-        /// Tunnel parameters do not cross into a function. A stylesheet function is meant to be a function of
-        /// its arguments — that is what allows a call to be lifted out of a loop, evaluated once, or skipped —
-        /// and letting a tunnelled value in through the side would make two calls with identical arguments
-        /// return different answers. Templates it invokes therefore start from an empty set. The
-        /// specification never settled this corner; see the note in ConformanceNotes.md.
-        /// </para>
-        /// </remarks>
-        /// <param name="function">The function to call.</param>
-        /// <param name="arguments">The argument values, already evaluated in the caller's context.</param>
-        /// <param name="context">The caller's context.</param>
-        /// <summary>
         /// What each deterministic function has already answered, by function and by argument values.
         /// </summary>
         /// <remarks>
@@ -2148,6 +2119,25 @@ namespace CodeDeeds.Xslt.Runtime
             return "q" + name.NamespaceUri.Length + ":" + name.NamespaceUri + name.LocalName;
         }
 
+        /// <summary>
+        /// Calls a function declared by <c>xsl:function</c> and returns its value.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A function gets its own variable frame, as a template does, but the context node stays where the
+        /// caller was: a function is called from inside an expression and has no node of its own to move to.
+        /// </para>
+        /// <para>
+        /// Tunnel parameters do not cross into a function. A stylesheet function is meant to be a function of
+        /// its arguments — that is what allows a call to be lifted out of a loop, evaluated once, or skipped —
+        /// and letting a tunnelled value in through the side would make two calls with identical arguments
+        /// return different answers. Templates it invokes therefore start from an empty set. The
+        /// specification never settled this corner; see the note in ConformanceNotes.md.
+        /// </para>
+        /// </remarks>
+        /// <param name="function">The function to call.</param>
+        /// <param name="arguments">The argument values, already evaluated in the caller's context.</param>
+        /// <param name="context">The caller's context.</param>
         internal XPathValue InvokeFunction(
             UserFunction function,
             XPathValue[] arguments,
@@ -2494,6 +2484,12 @@ namespace CodeDeeds.Xslt.Runtime
             InvokeRule(found.Value, parameters, m_currentMode, ref context);
         }
 
+        /// <summary>
+        /// Hands the node to the template that would have matched had the running one not existed, which is
+        /// <c>xsl:next-match</c>.
+        /// </summary>
+        /// <param name="parameters">Parameters for the template found.</param>
+        /// <param name="context">The context, positioned on the node.</param>
         internal void ApplyNextMatch(ParameterValue[] parameters, ref DynamicContext context)
         {
             RequireCurrentRule("xsl:next-match");
@@ -2529,16 +2525,6 @@ namespace CodeDeeds.Xslt.Runtime
         }
 
         /// <summary>
-        /// Refuses an instruction that continues the current template rule where there is none.
-        /// </summary>
-        /// <remarks>
-        /// Both instructions mean "carry on down the list of rules that matched this node", and outside a
-        /// rule there is no such list. A named template reached by <c>xsl:call-template</c> keeps the rule
-        /// that called it — that is not this case — but one that is the transformation's entry point, or a
-        /// body running inside <c>xsl:for-each</c>, <c>xsl:for-each-group</c> or a function, has none.
-        /// </remarks>
-        /// <param name="instruction">The instruction, named in the message.</param>
-        /// <summary>
         /// Refuses <c>xsl:next-match</c> or <c>xsl:apply-imports</c> where there is no context item.
         /// </summary>
         /// <remarks>
@@ -2548,6 +2534,7 @@ namespace CodeDeeds.Xslt.Runtime
         /// <c>xsl:context-item use="absent"</c> is how a stylesheet reaches it.
         /// </remarks>
         /// <param name="instruction">The instruction, named in the message.</param>
+        /// <param name="context">The context, which is checked for an item.</param>
         private void RequireContextItemForRule(string instruction, ref DynamicContext context)
         {
             if (!context.HasContextItem)
@@ -2559,6 +2546,16 @@ namespace CodeDeeds.Xslt.Runtime
             }
         }
 
+        /// <summary>
+        /// Refuses an instruction that continues the current template rule where there is none.
+        /// </summary>
+        /// <remarks>
+        /// Both instructions mean "carry on down the list of rules that matched this node", and outside a
+        /// rule there is no such list. A named template reached by <c>xsl:call-template</c> keeps the rule
+        /// that called it — that is not this case — but one that is the transformation's entry point, or a
+        /// body running inside <c>xsl:for-each</c>, <c>xsl:for-each-group</c> or a function, has none.
+        /// </remarks>
+        /// <param name="instruction">The instruction, named in the message.</param>
         private void RequireCurrentRule(string instruction)
         {
             if (m_currentRule is null)
@@ -2589,6 +2586,16 @@ namespace CodeDeeds.Xslt.Runtime
         /// <param name="rule">What it returned.</param>
         internal void ResumeCurrentRule(TemplateRule? rule) => m_currentRule = rule;
 
+        /// <summary>
+        /// Applies the template that would have matched the current node if the running template's module, and
+        /// everything importing it, did not exist — that is, <c>xsl:apply-imports</c>.
+        /// </summary>
+        /// <remarks>
+        /// This is how a stylesheet overrides an imported template and still calls through to it, so the
+        /// override can wrap rather than replace what it inherited.
+        /// </remarks>
+        /// <param name="parameters">Parameters for the template found.</param>
+        /// <param name="context">The context, positioned on the node being processed.</param>
         internal void ApplyImports(ParameterValue[] parameters, ref DynamicContext context)
         {
             RequireCurrentRule("xsl:apply-imports");
@@ -2659,29 +2666,6 @@ namespace CodeDeeds.Xslt.Runtime
         }
 
         /// <summary>
-        /// Runs a template, giving it a fresh variable frame and binding its parameters.
-        /// </summary>
-        /// <remarks>
-        /// Each invocation allocates its own frame rather than carving one out of a shared stack. A shared
-        /// stack would have to grow, and growing it would leave contexts already captured by outer frames
-        /// pointing at the old array. The IL backend removes the question entirely by turning variables into
-        /// real IL locals.
-        /// </remarks>
-        /// <param name="template">The template to run.</param>
-        /// <param name="parameters">Parameters supplied by the call site.</param>
-        /// <param name="context">The caller's context, which supplies the context node.</param>
-        /// <param name="mode">
-        /// The mode in force for the invocation, which is what <c>xsl:apply-imports</c>, <c>xsl:next-match</c>
-        /// and <c>mode="#current"</c> read. It belongs to the invocation and not to the template: one template
-        /// may serve several modes, and <c>xsl:call-template</c> changes the mode not at all.
-        /// </param>
-        /// <param name="asRule">
-        /// Whether this invocation makes the template the current template rule. True where a pattern chose
-        /// it and false where a name did: <c>xsl:call-template</c> leaves the current rule exactly as it
-        /// found it, so a named helper called from a matched template can still say
-        /// <c>xsl:apply-imports</c> and mean the rule that called it.
-        /// </param>
-        /// <summary>
         /// Runs a template rule the search chose, which becomes the current template rule for as long as it
         /// runs — and so what an <c>xsl:next-match</c> inside it carries on from.
         /// </summary>
@@ -2695,6 +2679,29 @@ namespace CodeDeeds.Xslt.Runtime
             InvokeTemplate(rule.Template, parameters, mode, ref context, rule);
         }
 
+        /// <summary>
+        /// Runs a template, giving it a fresh variable frame and binding its parameters.
+        /// </summary>
+        /// <remarks>
+        /// Each invocation allocates its own frame rather than carving one out of a shared stack. A shared
+        /// stack would have to grow, and growing it would leave contexts already captured by outer frames
+        /// pointing at the old array. The IL backend removes the question entirely by turning variables into
+        /// real IL locals.
+        /// </remarks>
+        /// <param name="template">The template to run.</param>
+        /// <param name="parameters">Parameters supplied by the call site.</param>
+        /// <param name="mode">
+        /// The mode in force for the invocation, which is what <c>xsl:apply-imports</c>, <c>xsl:next-match</c>
+        /// and <c>mode="#current"</c> read. It belongs to the invocation and not to the template: one template
+        /// may serve several modes, and <c>xsl:call-template</c> changes the mode not at all.
+        /// </param>
+        /// <param name="context">The caller's context, which supplies the context node.</param>
+        /// <param name="asRule">
+        /// Whether this invocation makes the template the current template rule. True where a pattern chose
+        /// it and false where a name did: <c>xsl:call-template</c> leaves the current rule exactly as it
+        /// found it, so a named helper called from a matched template can still say
+        /// <c>xsl:apply-imports</c> and mean the rule that called it.
+        /// </param>
         internal void InvokeTemplate(
             Template template,
             ParameterValue[] parameters,

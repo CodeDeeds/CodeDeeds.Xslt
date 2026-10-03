@@ -289,11 +289,6 @@ namespace CodeDeeds.Xslt.Compiler
         /// </summary>
         public NodeKind? RequiredKind { get; private init; }
 
-        /// <summary>
-        /// Returns whether a node matches this pattern.
-        /// </summary>
-        /// <param name="node">The candidate node.</param>
-        /// <param name="context">The context used to evaluate any predicates.</param>
         /// <summary>Returns whether any of a set of patterns matches a node.</summary>
         /// <param name="patterns">The patterns, as parsed from one attribute.</param>
         /// <param name="node">The node to test.</param>
@@ -311,6 +306,11 @@ namespace CodeDeeds.Xslt.Compiler
             return false;
         }
 
+        /// <summary>
+        /// Returns whether a node matches this pattern.
+        /// </summary>
+        /// <param name="node">The candidate node.</param>
+        /// <param name="context">The context used to evaluate any predicates.</param>
         public bool Matches(int node, ref DynamicContext context)
         {
             // Counted while the pattern is matched: a pattern is not output, temporary or otherwise, so

@@ -38,7 +38,7 @@ namespace CodeDeeds.Xslt.Runtime
         /// <c>omit-xml-declaration="no"</c>: a document produced with the XML method carries a declaration
         /// unless the stylesheet says otherwise. Whether a particular run wants one usually depends on what the
         /// caller is doing with the result rather than on the stylesheet, which is what
-        /// <see cref="Xslt.OmitXmlDeclaration"/> is for.
+        /// <see cref="XsltOptions.OmitXmlDeclaration"/> is for.
         /// </remarks>
         public bool OmitXmlDeclaration { get; set; }
 

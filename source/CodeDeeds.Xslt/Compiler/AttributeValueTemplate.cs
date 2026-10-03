@@ -43,6 +43,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// </summary>
         /// <param name="text">The attribute's literal text.</param>
         /// <param name="context">The static context used to compile embedded expressions.</param>
+        /// <param name="backend">Whether the embedded expressions are interpreted or compiled to IL.</param>
         /// <returns>The compiled template.</returns>
         /// <exception cref="XsltException">A brace is unbalanced, or an embedded expression is invalid.</exception>
         public static AttributeValueTemplate Parse(

@@ -228,8 +228,6 @@ namespace CodeDeeds.Xslt.XPath
         /// <c>$12</c> as the twelfth group rather than the first followed by a 2.
         /// </remarks>
         /// <param name="replacement">The replacement as the stylesheet wrote it.</param>
-        /// <exception cref="XsltException">The replacement is not one XPath allows.</exception>
-        /// <param name="replacement">The replacement as the stylesheet wrote it.</param>
         /// <param name="pattern">The compiled pattern, which says how many groups there are to name.</param>
         /// <exception cref="XsltException">The replacement is not one XPath allows.</exception>
         public static string TranslateReplacement(string replacement, Regex pattern)
@@ -345,6 +343,7 @@ namespace CodeDeeds.Xslt.XPath
         /// </para>
         /// </remarks>
         /// <param name="pattern">The pattern as written.</param>
+        /// <param name="three">Whether the 3.0 grammar is in force, which admits <c>(?:</c> and the 3.0 hyphen rule.</param>
         /// <exception cref="XsltException">The pattern is not one XPath's grammar admits.</exception>
         private static void Validate(string pattern, bool three)
         {
@@ -831,6 +830,7 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         /// <param name="pattern">The pattern, already stripped of ignorable whitespace.</param>
         /// <param name="options">The options the flags selected, which several rewrites turn on.</param>
+        /// <param name="three">Whether the 3.0 grammar is in force, which decides the name-character sets behind <c>\i</c> and <c>\c</c>.</param>
         private static string ToDotNet(string pattern, RegexOptions options, bool three)
         {
             bool multiline = (options & RegexOptions.Multiline) != 0;
@@ -982,6 +982,7 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="pattern">The pattern.</param>
         /// <param name="index">The index of the <c>[</c> on entry, of the character after <c>]</c> on return.</param>
         /// <param name="caseless">Whether the <c>i</c> flag is in force, so a literal stands for both cases.</param>
+        /// <param name="three">Whether the 3.0 grammar is in force, which decides the name-character sets behind <c>\i</c> and <c>\c</c>.</param>
         private static ClassSet ReadClassSet(string pattern, ref int index, bool caseless, bool three)
         {
             ClassSet result = new ClassSet();
@@ -1133,6 +1134,7 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="index">The index of the backslash on entry, of the character after it on return.</param>
         /// <param name="into">The class being built.</param>
         /// <param name="caseless">Whether the <c>i</c> flag is in force.</param>
+        /// <param name="three">Whether the 3.0 grammar is in force, which decides the name-character sets behind <c>\i</c> and <c>\c</c>.</param>
         private static void AddEscape(string pattern, ref int index, ClassSet into, bool caseless, bool three)
         {
             char kind = pattern[index + 1];

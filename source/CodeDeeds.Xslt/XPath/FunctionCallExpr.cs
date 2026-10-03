@@ -274,7 +274,7 @@ namespace CodeDeeds.Xslt.XPath
         /// </summary>
         /// <remarks>
         /// Read by <c>function-available()</c> in its two-argument form. The range comes from the same
-        /// entry <see cref="Create"/> checks against, so what the function reports available is what a call
+        /// entry <see cref="Create(string, Expr[], XsltVersion)"/> checks against, so what the function reports available is what a call
         /// would actually be allowed to write — the alternative was a second table of arities to keep in
         /// step, and a table that drifts answers worse than no table at all.
         /// </remarks>

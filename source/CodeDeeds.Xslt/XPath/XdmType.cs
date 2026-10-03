@@ -422,24 +422,6 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
-        /// Casts a value to a built-in type, as the type's constructor function does.
-        /// </summary>
-        /// <param name="value">The value to cast.</param>
-        /// <param name="type">The type to cast it to.</param>
-        /// <returns>The converted value.</returns>
-        /// <exception cref="XsltException">The value is not in the type's lexical space or its range.</exception>
-        /// <summary>
-        /// Casts text to a name, resolving any prefix against the namespaces the cast was written among.
-        /// </summary>
-        /// <remarks>
-        /// A prefix means whatever it meant where the cast stands, so the bindings have to travel with the
-        /// expression: XPath 2.0 would not have it at all outside a literal, and 3.0 settled that the static
-        /// context is what answers. Where no bindings came with the cast — a context that has none to give —
-        /// only a name without a prefix can be cast.
-        /// </remarks>
-        /// <param name="text">The lexical name.</param>
-        /// <param name="namespaces">The bindings in scope where the cast was written.</param>
-        /// <summary>
         /// Refuses a cast to <c>xs:QName</c> from anything but a literal, which is all XPath 2.0 allowed.
         /// </summary>
         /// <remarks>
@@ -467,6 +449,18 @@ namespace CodeDeeds.Xslt.XPath
                 + "where it was written, and only a literal was there to be read then.");
         }
 
+        /// <summary>
+        /// Casts text to a name, resolving any prefix against the namespaces the cast was written among.
+        /// </summary>
+        /// <remarks>
+        /// A prefix means whatever it meant where the cast stands, so the bindings have to travel with the
+        /// expression: XPath 2.0 would not have it at all outside a literal, and 3.0 settled that the static
+        /// context is what answers. Where no bindings came with the cast — a context that has none to give —
+        /// only a name without a prefix can be cast.
+        /// </remarks>
+        /// <param name="text">The lexical name.</param>
+        /// <param name="namespaces">The bindings in scope where the cast was written.</param>
+        /// <param name="defaultElementNamespace">The namespace an unprefixed name takes, as an unprefixed element name would.</param>
         internal static XPathValue CastToQName(
             string text, IReadOnlyDictionary<string, string>? namespaces, string defaultElementNamespace = "")
         {
@@ -499,6 +493,15 @@ namespace CodeDeeds.Xslt.XPath
                 $"'{text}' carries the prefix '{prefix}', and nothing where the cast is written binds it.");
         }
 
+        /// <summary>
+        /// Casts a value to a built-in type, as the type's constructor function does.
+        /// </summary>
+        /// <param name="value">The value to cast.</param>
+        /// <param name="type">The type to cast it to.</param>
+        /// <param name="namespaces">The bindings in scope where the cast was written, which a cast to <c>xs:QName</c> resolves a prefix against.</param>
+        /// <param name="defaultElementNamespace">The namespace an unprefixed <c>xs:QName</c> takes.</param>
+        /// <returns>The converted value.</returns>
+        /// <exception cref="XsltException">The value is not in the type's lexical space or its range.</exception>
         public static XPathValue Cast(
             XPathValue value,
             BuiltInType type,

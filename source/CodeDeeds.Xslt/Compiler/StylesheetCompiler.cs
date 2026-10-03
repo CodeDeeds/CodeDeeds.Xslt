@@ -1807,6 +1807,10 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="tree">The module to read.</param>
         /// <param name="uri">The module's identity, or <see langword="null"/> for the supplied stylesheet.</param>
         /// <param name="loading">The modules currently being read, used to catch a reference cycle.</param>
+        /// <param name="from">
+        /// The element the module starts at, for a reference that named one by a fragment identifier, or
+        /// -1 to take the document element.
+        /// </param>
         private void LoadModule(XdmTree tree, string? uri, HashSet<string> loading, int from = -1)
         {
             List<(ModuleElement Source, string? Uri)> topLevel = new();
@@ -6085,6 +6089,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="element">The declaration.</param>
         /// <param name="apply">Records a visibility, where the component can hold one.</param>
         /// <param name="isParameter">Whether the declaration is an <c>xsl:param</c>.</param>
+        /// <param name="reach">Records what the principal package ends up holding the component as.</param>
         private PackageComponent Component(
             string kind,
             ExpandedName name,
@@ -11788,15 +11793,10 @@ namespace CodeDeeds.Xslt.Compiler
             return new ChooseInstruction(tests.ToArray(), branches.ToArray(), otherwise);
         }
 
-        /// <summary>
-        /// Compiles the sort keys of an instruction.
-        /// </summary>
-        /// <param name="element">The instruction the keys belong to.</param>
-        /// <param name="wanted">
-        /// Which child names the keys: <c>sort</c> everywhere but an <c>xsl:merge-source</c>, whose
-        /// <c>xsl:merge-key</c> carries the same attributes under a name that says what it decides.
-        /// </param>
         /// <summary>A written ordering attribute of <c>xsl:sort</c> with a value it may not take.</summary>
+        /// <param name="element">The element whose attribute was refused.</param>
+        /// <param name="attribute">The attribute's name.</param>
+        /// <param name="value">The value it was given.</param>
         private XsltException SortAttribute(int element, string attribute, string value)
         {
             m_scopeElement = element;
@@ -11806,6 +11806,14 @@ namespace CodeDeeds.Xslt.Compiler
                 $"'{value}' is not a value the {attribute} attribute of xsl:sort may take.");
         }
 
+        /// <summary>
+        /// Compiles the sort keys of an instruction.
+        /// </summary>
+        /// <param name="element">The instruction the keys belong to.</param>
+        /// <param name="wanted">
+        /// Which child names the keys: <c>sort</c> everywhere but an <c>xsl:merge-source</c>, whose
+        /// <c>xsl:merge-key</c> carries the same attributes under a name that says what it decides.
+        /// </param>
         private SortKey[] CompileSortKeys(int element, string wanted = "sort")
         {
             List<SortKey> keys = new List<SortKey>();
@@ -12361,8 +12369,6 @@ namespace CodeDeeds.Xslt.Compiler
             m_tree = reading;
         }
 
-        /// <summary>Reads one declaration's <c>use-accumulators</c>, in the module it was written in.</summary>
-        /// <param name="written">Where the declaration is.</param>
         /// <summary>
         /// Finds which declaration of a mode settles one attribute: the first, in precedence order, to
         /// write it.
@@ -12418,6 +12424,8 @@ namespace CodeDeeds.Xslt.Compiler
             return GetAttribute(written.Element, attribute) is not null;
         }
 
+        /// <summary>Reads one declaration's <c>use-accumulators</c>, in the module it was written in.</summary>
+        /// <param name="written">Where the declaration is.</param>
         private AccumulatorSet AccumulatorsOf(ModuleElement written)
         {
             m_tree = written.Tree;
@@ -12686,6 +12694,10 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="WarnOnNoMatch">Its warning-on-no-match, where written.</param>
         /// <param name="WarnOnMultipleMatch">Its warning-on-multiple-match, where written.</param>
         /// <param name="Written">The element, for the attributes read later.</param>
+        /// <param name="OnMultipleMatch">Its on-multiple-match, where written.</param>
+        /// <param name="Visibility">Its visibility, where written.</param>
+        /// <param name="Typed">Its typed, where written.</param>
+        /// <param name="StrictlyTyped">Whether its typed is <c>strict</c>.</param>
         private readonly record struct ModeAttributes(
             int Precedence,
             OnNoMatch? OnNoMatch,
@@ -13208,31 +13220,6 @@ namespace CodeDeeds.Xslt.Compiler
         }
 
         /// <summary>
-        /// Refuses the schema-validation attributes, which this engine cannot honour.
-        /// </summary>
-        /// <remarks>
-        /// <para>
-        /// A processor that cannot validate has to refuse rather than ignore. A stylesheet asking for strict
-        /// validation is asking to be told when its result does not fit the schema, and quietly handing back
-        /// an unvalidated result answers a question it did not ask.
-        /// </para>
-        /// <para>
-        /// Which of the four is refused is the processor's version to say, and the two languages drew the
-        /// line in different places. XSLT 2.0 refuses everything but <c>strip</c> from a basic processor;
-        /// 3.0 refuses only <c>strict</c>, having noticed that <c>preserve</c> and <c>lax</c> ask for
-        /// nothing a processor without a schema cannot give — with no type annotations anywhere, preserving
-        /// them and stripping them come to the same thing, and validating laxly against no declaration at
-        /// all validates nothing. So the line moves with the version this engine says it implements, as the
-        /// rest of the vocabulary does.
-        /// </para>
-        /// </remarks>
-        /// <param name="element">The element that may carry them.</param>
-        /// <param name="xslt">
-        /// Whether to look for the attributes in the XSLT namespace, which is where a literal result element
-        /// carries them — an unprefixed <c>type</c> there is an attribute of the result, not an instruction
-        /// to this engine.
-        /// </param>
-        /// <summary>
         /// Refuses a <c>default-validation</c> asking for validation this engine cannot do.
         /// </summary>
         /// <remarks>
@@ -13477,6 +13464,31 @@ namespace CodeDeeds.Xslt.Compiler
             return "strip";
         }
 
+        /// <summary>
+        /// Refuses the schema-validation attributes, which this engine cannot honour.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A processor that cannot validate has to refuse rather than ignore. A stylesheet asking for strict
+        /// validation is asking to be told when its result does not fit the schema, and quietly handing back
+        /// an unvalidated result answers a question it did not ask.
+        /// </para>
+        /// <para>
+        /// Which of the four is refused is the processor's version to say, and the two languages drew the
+        /// line in different places. XSLT 2.0 refuses everything but <c>strip</c> from a basic processor;
+        /// 3.0 refuses only <c>strict</c>, having noticed that <c>preserve</c> and <c>lax</c> ask for
+        /// nothing a processor without a schema cannot give — with no type annotations anywhere, preserving
+        /// them and stripping them come to the same thing, and validating laxly against no declaration at
+        /// all validates nothing. So the line moves with the version this engine says it implements, as the
+        /// rest of the vocabulary does.
+        /// </para>
+        /// </remarks>
+        /// <param name="element">The element that may carry them.</param>
+        /// <param name="xslt">
+        /// Whether to look for the attributes in the XSLT namespace, which is where a literal result element
+        /// carries them — an unprefixed <c>type</c> there is an attribute of the result, not an instruction
+        /// to this engine.
+        /// </param>
         private void RejectSchemaValidation(int element, bool xslt = false)
         {
             // A schema-aware processor honours validation and type; what it does with them is settled where
@@ -13679,7 +13691,6 @@ namespace CodeDeeds.Xslt.Compiler
             };
         }
 
-        /// <summary>Reads <c>copy-namespaces</c>, which defaults to copying them.</summary>
         /// <summary>
         /// Reads <c>inherit-namespaces</c>, which is yes unless written: whether the element being built
         /// passes its namespaces on to the children built inside it.
@@ -13695,6 +13706,8 @@ namespace CodeDeeds.Xslt.Compiler
             return said is null || said.Trim() is "yes" or "true" or "1";
         }
 
+        /// <summary>Reads <c>copy-namespaces</c>, which defaults to copying them.</summary>
+        /// <param name="element">The instruction.</param>
         private bool ReadCopyNamespaces(int element)
         {
             return GetAttribute(element, "copy-namespaces") is null
@@ -13714,22 +13727,9 @@ namespace CodeDeeds.Xslt.Compiler
         }
 
         /// <summary>
-        /// Reads a yes-or-no attribute that decides what a declaration means: <c>tunnel</c> and
-        /// <c>required</c> on a parameter.
-        /// </summary>
-        /// <remarks>
-        /// Stricter than <see cref="IsYes"/>, which is used where a misread value only changes formatting.
-        /// Here a misspelling would leave the stylesheet running and quietly doing something else — binding a
-        /// parameter from the wrong place, or falling back to a default that ought not to exist — so anything
-        /// but a boolean is refused. The words beyond <c>yes</c> and <c>no</c> are what XSLT 3.0 added;
-        /// accepting them costs nothing and spares a stylesheet written against the later spec a puzzling
-        /// failure.
-        /// </remarks>
-        /// <param name="element">The element carrying the attribute.</param>
-        /// <param name="attributeName">The attribute to read.</param>
-        /// <summary>
         /// Reads <c>new-each-time</c>, whose third value is the reason it is not an ordinary boolean.
         /// </summary>
+        /// <param name="element">The element carrying the attribute.</param>
         /// <returns>
         /// True where the function must build afresh on every call, false where it must not, and
         /// <see langword="null"/> for <c>maybe</c> — and for the attribute being absent, <c>maybe</c> being
@@ -13751,6 +13751,20 @@ namespace CodeDeeds.Xslt.Compiler
             };
         }
 
+        /// <summary>
+        /// Reads a yes-or-no attribute that decides what a declaration means: <c>tunnel</c> and
+        /// <c>required</c> on a parameter.
+        /// </summary>
+        /// <remarks>
+        /// Stricter than <see cref="IsYes"/>, which is used where a misread value only changes formatting.
+        /// Here a misspelling would leave the stylesheet running and quietly doing something else — binding a
+        /// parameter from the wrong place, or falling back to a default that ought not to exist — so anything
+        /// but a boolean is refused. The words beyond <c>yes</c> and <c>no</c> are what XSLT 3.0 added;
+        /// accepting them costs nothing and spares a stylesheet written against the later spec a puzzling
+        /// failure.
+        /// </remarks>
+        /// <param name="element">The element carrying the attribute.</param>
+        /// <param name="attributeName">The attribute to read.</param>
         private bool ReadDeclarationFlag(int element, string attributeName)
         {
             string? value = GetAttribute(element, attributeName)?.Trim();

@@ -2316,6 +2316,10 @@ namespace CodeDeeds.Xslt.Compiler
         /// <c>xsl:result-document</c> asks: 3.0 lets one be written there and not inside a temporary tree.
         /// </param>
         /// <param name="baseUri">The base URI a node built at the top of the sequence takes.</param>
+        /// <param name="finalOutput">
+        /// Whether the capture stands in for the final output, so that an <c>xsl:result-document</c> inside it is
+        /// writing a result of the transformation rather than into a variable.
+        /// </param>
         internal static XPathValue CaptureSequence(
             Instruction[]? body,
             ref DynamicContext context,
@@ -2483,6 +2487,7 @@ namespace CodeDeeds.Xslt.Compiler
         private readonly string? m_baseUri;
 
         /// <summary>Initializes a document instruction.</summary>
+        /// <param name="body">What fills the document node.</param>
         /// <param name="baseUri">The base URI of the instruction, which the document node takes (§11.4.3).</param>
         public DocumentInstruction(Instruction[] body, string? baseUri = null)
         {
@@ -2548,6 +2553,17 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="copyAccumulators">
         /// Whether the copy answers for the accumulators as the node it was copied from does, which is
         /// XSLT 3.0's <c>copy-accumulators="yes"</c>.
+        /// </param>
+        /// <param name="inheritNamespaces">
+        /// Whether the copied element's descendants inherit its namespaces, which is <c>inherit-namespaces</c>.
+        /// </param>
+        /// <param name="preserveTypes">
+        /// Whether the copy carries the type annotation of the original, which is <c>validation="preserve"</c>
+        /// and not <c>"strip"</c>.
+        /// </param>
+        /// <param name="anyTypeOnPreserve">
+        /// Whether a shallow copy of an element is annotated <c>xs:anyType</c> and not nilled, which is what
+        /// <c>validation="preserve"</c> gives it, since its content is no longer the source's.
         /// </param>
         public CopyInstruction(
             Instruction[] body,
@@ -3390,6 +3406,10 @@ namespace CodeDeeds.Xslt.Compiler
         /// What validation settled for the nodes, which the copies then carry in place of whatever the
         /// originals do; null where the originals' own annotations, or none, are what is copied.
         /// </param>
+        /// <param name="rawText">
+        /// Whether a text node keeps the escaping it was written with, which is only so where the destination
+        /// stands in for the final output; see <see cref="CopyShallow"/>.
+        /// </param>
         public static void CopyDeep(
             XdmTree tree,
             int node,
@@ -3498,6 +3518,10 @@ namespace CodeDeeds.Xslt.Compiler
         /// </param>
         /// <param name="preserveTypes">Whether the copy carries the original's type annotation.</param>
         /// <param name="types">What validation settled for the node, or null; see <see cref="CopyDeep"/>.</param>
+        /// <param name="rawText">
+        /// Whether a text node written without escaping keeps that, which is only so where the caller says the
+        /// destination stands in for the final output rather than holding a value somebody kept.
+        /// </param>
         public static void CopyShallow(
             XdmTree tree,
             int node,

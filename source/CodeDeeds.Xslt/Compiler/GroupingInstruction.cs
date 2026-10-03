@@ -827,6 +827,19 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="body">What to write there.</param>
         /// <param name="insideAStringIsAllowed">Whether XSLT 3.0's narrower reading of temporary output
         /// state is in force.</param>
+        /// <param name="templated">The serialization attributes written as templates, by name, applied over a copy of
+        /// <paramref name="settings"/> each time the instruction runs.</param>
+        /// <param name="format">The <c>format</c> attribute, or <see langword="null"/> when there is none.</param>
+        /// <param name="formats">The output definitions the stylesheet declares, by name; where <paramref name="format"/> is looked up.</param>
+        /// <param name="prefixes">The prefixes in scope where the instruction was written, for resolving prefixed
+        /// names in the serialization attributes.</param>
+        /// <param name="validate">Whether the result tree is validated before it is written.</param>
+        /// <param name="strictValidation">Whether validation is strict rather than lax.</param>
+        /// <param name="validationType">The type the result element is validated against, or <see langword="null"/>
+        /// to validate it as a document.</param>
+        /// <param name="parameterDocument">The <c>parameter-document</c> reference, or <see langword="null"/>.</param>
+        /// <param name="baseUri">The base URI the parameter document reference is resolved against.</param>
+        /// <param name="implements30">Whether the stylesheet is processed by the XSLT 3.0 rules.</param>
         public ResultDocumentInstruction(
             AttributeValueTemplate? href,
             OutputSettings settings,

@@ -15,10 +15,6 @@ namespace CodeDeeds.Xslt.XPath
     internal static class XdmTypeConversion
     {
         /// <summary>Applies a declared type to a value.</summary>
-        /// <param name="value">The value produced.</param>
-        /// <param name="type">The declared type, or <see langword="null"/> where nothing was declared.</param>
-        /// <returns>The value, converted where the rules allow it.</returns>
-        /// <exception cref="XsltException">The value cannot be made to fit the type.</exception>
         /// <param name="value">The value to check, and to convert where conversion is allowed.</param>
         /// <param name="type">The declared type, or <see langword="null"/> where nothing was declared.</param>
         /// <param name="code">
@@ -26,6 +22,8 @@ namespace CodeDeeds.Xslt.XPath
         /// has a different one for each place an <c>as</c> may be written, so the caller says which of them
         /// this is: a test asking for <c>XTTE0570</c> is asking about a variable in particular.
         /// </param>
+        /// <returns>The value, converted where the rules allow it.</returns>
+        /// <exception cref="XsltException">The value cannot be made to fit the type.</exception>
         public static XPathValue Apply(
             XPathValue value,
             XdmSequenceType? type,

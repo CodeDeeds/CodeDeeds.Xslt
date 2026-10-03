@@ -74,6 +74,7 @@ namespace CodeDeeds.Xslt.XPath
         /// What a repeated key means: <c>use-first</c>, <c>use-last</c>, <c>use-any</c>, <c>combine</c> or
         /// <c>reject</c>, as <c>map:merge</c> names them.
         /// </param>
+        /// <param name="rejection">The error code raised when a key repeats and <c>reject</c> was asked for.</param>
         /// <exception cref="XsltException">A key repeats and <c>reject</c> was asked for.</exception>
         public static XdmMap Build(
             IEnumerable<KeyValuePair<XPathValue, XPathValue>> entries,
