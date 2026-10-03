@@ -40,6 +40,24 @@ namespace CodeDeeds.Xslt.UnitTests
         }
 
         [TestMethod]
+        public void TheExampleOnTransformJsonGivesWhatItSays()
+        {
+            // Kept word for word with the <example> on Xslt.TransformJson(string).
+            Xslt xslt = new Xslt(
+                """
+                <xsl:stylesheet version="3.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
+                                xmlns:fn="http://www.w3.org/2005/xpath-functions">
+                  <xsl:output method="text"/>
+                  <xsl:template match="fn:map">
+                    <xsl:value-of select="fn:string[@key = 'name'], 'is', fn:number[@key = 'age']"/>
+                  </xsl:template>
+                </xsl:stylesheet>
+                """);
+
+            Assert.AreEqual("Ada is 36", xslt.TransformJson("""{"name":"Ada","age":36}"""));
+        }
+
+        [TestMethod]
         public void EveryJsonTypeMapsToItsOwnElement()
         {
             string result = Compile(Sheet(

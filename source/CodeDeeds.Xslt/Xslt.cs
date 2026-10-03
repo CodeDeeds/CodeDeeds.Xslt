@@ -731,7 +731,55 @@ namespace CodeDeeds.Xslt
             Transform(ParseXmlText(xmlInput), output);
         }
 
-
+        /// <summary>
+        /// Transforms a JSON document, which the stylesheet sees as the XML representation of JSON that
+        /// <c>fn:json-to-xml()</c> returns.
+        /// </summary>
+        /// <param name="jsonInput">The JSON to transform.</param>
+        /// <returns>The result.</returns>
+        /// <remarks>
+        /// <para>
+        /// The tree is the standard one from XPath and XQuery Functions and Operators 3.1 §17.5, so a
+        /// stylesheet written for it runs unchanged on any XSLT 3.0 processor. Its elements are in the
+        /// namespace <c>http://www.w3.org/2005/xpath-functions</c>, conventionally bound to <c>fn</c>. An
+        /// object is a <c>map</c>, an array an <c>array</c>, and the values <c>string</c>, <c>number</c>,
+        /// <c>boolean</c> and <c>null</c>. A member of an object carries its name in a <c>key</c> attribute,
+        /// since a JSON name can be any string and an XML element name cannot.
+        /// </para>
+        /// <para>
+        /// Nothing is lost on the way in: <c>36</c> and <c>"36"</c> are told apart, as are <c>null</c> and
+        /// <c>""</c>, and <c>[]</c> and <c>{}</c>. So <c>fn:xml-to-json()</c> gives the JSON back.
+        /// </para>
+        /// <para>
+        /// The input is read liberally: comments and trailing commas are accepted.
+        /// </para>
+        /// </remarks>
+        /// <example>
+        /// <c>{"name":"Ada","age":36,"tags":["math"]}</c> is seen by the stylesheet as
+        /// <code><![CDATA[
+        /// <map xmlns="http://www.w3.org/2005/xpath-functions">
+        ///   <string key="name">Ada</string>
+        ///   <number key="age">36</number>
+        ///   <array key="tags"><string>math</string></array>
+        /// </map>
+        /// ]]></code>
+        /// and a stylesheet reads it by those names and keys:
+        /// <code><![CDATA[
+        /// Xslt xslt = new Xslt(
+        ///     """
+        ///     <xsl:stylesheet version="3.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
+        ///                     xmlns:fn="http://www.w3.org/2005/xpath-functions">
+        ///       <xsl:output method="text"/>
+        ///       <xsl:template match="fn:map">
+        ///         <xsl:value-of select="fn:string[@key = 'name'], 'is', fn:number[@key = 'age']"/>
+        ///       </xsl:template>
+        ///     </xsl:stylesheet>
+        ///     """);
+        ///
+        /// string result = xslt.TransformJson("""{"name":"Ada","age":36}"""); // "Ada is 36"
+        /// ]]></code>
+        /// </example>
+        /// <exception cref="XsltException">The input is not well-formed JSON.</exception>
         public string TransformJson(string jsonInput)
         {
             ArgumentNullException.ThrowIfNull(jsonInput);
@@ -741,6 +789,13 @@ namespace CodeDeeds.Xslt
             return writer.Finish();
         }
 
+        /// <summary>
+        /// Transforms a JSON document, writing the result. The stylesheet sees the JSON as
+        /// <see cref="TransformJson(string)"/> describes.
+        /// </summary>
+        /// <param name="jsonInput">The JSON to transform.</param>
+        /// <param name="writer">Where to write the result.</param>
+        /// <exception cref="XsltException">The input is not well-formed JSON.</exception>
         public void TransformJson(string jsonInput, TextWriter writer)
         {
             ArgumentNullException.ThrowIfNull(jsonInput);
@@ -749,6 +804,13 @@ namespace CodeDeeds.Xslt
             Transform(JsonTreeBuilder.FromJsonPooled(jsonInput), writer);
         }
 
+        /// <summary>
+        /// Transforms a JSON document read from a text reader, writing the result. The stylesheet sees the
+        /// JSON as <see cref="TransformJson(string)"/> describes.
+        /// </summary>
+        /// <param name="jsonInput">The JSON to transform. The caller retains ownership and must dispose it.</param>
+        /// <param name="writer">Where to write the result.</param>
+        /// <exception cref="XsltException">The input is not well-formed JSON.</exception>
         public void TransformJson(TextReader jsonInput, TextWriter writer)
         {
             ArgumentNullException.ThrowIfNull(jsonInput);
@@ -759,6 +821,7 @@ namespace CodeDeeds.Xslt
 
         /// <summary>
         /// Transforms a JSON document read from a stream.
+        /// The stylesheet sees the JSON as <see cref="TransformJson(string)"/> describes.
         /// </summary>
         /// <param name="jsonInput">The JSON to transform. The caller retains ownership and must dispose it.</param>
         /// <param name="writer">Where to write the result.</param>
@@ -777,6 +840,7 @@ namespace CodeDeeds.Xslt
 
         /// <summary>
         /// Transforms a JSON document, writing the result in the encoding the stylesheet declared.
+        /// The stylesheet sees the JSON as <see cref="TransformJson(string)"/> describes.
         /// </summary>
         /// <param name="jsonInput">The JSON to transform. The caller retains ownership and must dispose it.</param>
         /// <param name="output">Where to write the result. Left open, and flushed but not disposed.</param>
@@ -794,6 +858,7 @@ namespace CodeDeeds.Xslt
 
         /// <summary>
         /// Transforms a JSON document, writing the result in the encoding the stylesheet declared.
+        /// The stylesheet sees the JSON as <see cref="TransformJson(string)"/> describes.
         /// </summary>
         /// <param name="jsonInput">The JSON to transform. The caller retains ownership and must dispose it.</param>
         /// <param name="output">Where to write the result. Left open, and flushed but not disposed.</param>
@@ -807,6 +872,7 @@ namespace CodeDeeds.Xslt
 
         /// <summary>
         /// Transforms a JSON document, writing the result in the encoding the stylesheet declared.
+        /// The stylesheet sees the JSON as <see cref="TransformJson(string)"/> describes.
         /// </summary>
         /// <param name="jsonInput">The JSON to transform.</param>
         /// <param name="output">Where to write the result. Left open, and flushed but not disposed.</param>
