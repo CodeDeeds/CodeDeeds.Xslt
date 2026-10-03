@@ -6,8 +6,30 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <PropertyGroup Label="Package">
+    <PackageId>CodeDeeds.Xslt</PackageId>
+    <Version>1.0.0-preview.1</Version>
+    <Authors>Henning Nybro Johnsrud</Authors>
+    <Company>CodeDeeds</Company>
+    <Product>CodeDeeds.Xslt</Product>
+    <Copyright>Copyright (c) 2026 CodeDeeds</Copyright>
+    <Description>A lightweight XSLT 3.0 and XPath 3.1 processor for .NET with no dependencies beyond the base class library. Interpreted or compiled to IL, XML and JSON input, packages, maps and arrays, and over 99% of the W3C XSLT 3.0 and QT3 conformance suites.</Description>
+    <PackageTags>xslt;xslt3;xpath;xpath3;xml;json;transform;transformation;xsl</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/CodeDeeds/CodeDeeds.Xslt</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/CodeDeeds/CodeDeeds.Xslt.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
   <ItemGroup>
-    <Folder Include="Documentation\" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>
