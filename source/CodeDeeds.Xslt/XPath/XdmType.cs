@@ -785,7 +785,7 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>Replaces tab, newline and carriage return with spaces, as <c>xs:normalizedString</c>.</summary>
         private static string Replace(string text)
         {
-            return text.IndexOfAny(new[] { '\t', '\n', '\r' }) < 0
+            return text.AsSpan().IndexOfAny('\t', '\n', '\r') < 0
                 ? text
                 : string.Create(text.Length, text, static (span, source) =>
                 {
@@ -799,27 +799,88 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>Collapses runs of whitespace to one space and trims the ends, as <c>xs:token</c>.</summary>
         private static string Collapse(string text)
         {
-            System.Text.StringBuilder builder = new System.Text.StringBuilder(text.Length);
+            // Most text cast to a token is one already, and is then its own answer: a builder, its
+            // buffer and a copy of the text were made to find that out.
+            return IsCollapsed(text) ? text : Collapsed(text);
+        }
+
+        /// <summary>
+        /// Whether text has no whitespace but single spaces between other characters, so that collapsing
+        /// it would change nothing.
+        /// </summary>
+        private static bool IsCollapsed(string text)
+        {
+            bool space = true;
+
+            foreach (char character in text)
+            {
+                if (character is '\t' or '\n' or '\r')
+                {
+                    return false;
+                }
+
+                if (character == ' ')
+                {
+                    // A space at the start, or straight after another.
+                    if (space)
+                    {
+                        return false;
+                    }
+
+                    space = true;
+                }
+                else
+                {
+                    space = false;
+                }
+            }
+
+            // A space at the end, unless there was nothing at all.
+            return !space || text.Length == 0;
+        }
+
+        /// <summary>The collapsed form of text that is not collapsed already.</summary>
+        /// <remarks>
+        /// Written once into space of the text's own length, which is the most it can come to, and made
+        /// a string from there: on the stack for a text of ordinary length and in a rented array for a
+        /// longer one. The characters are put where they go by index and not through
+        /// <see cref="CharStringBuilder"/>, whose checks for room, at every character of a text that
+        /// may be as long as it likes, read slower than the builder this replaced; so did measuring the
+        /// result first and writing it second, which is two passes for the one.
+        /// </remarks>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static string Collapsed(string text)
+        {
+            char[]? rented = text.Length <= 256 ? null : System.Buffers.ArrayPool<char>.Shared.Rent(text.Length);
+            Span<char> written = rented ?? stackalloc char[text.Length];
+            int at = 0;
             bool pending = false;
 
             foreach (char character in text)
             {
                 if (character is ' ' or '\t' or '\n' or '\r')
                 {
-                    pending = builder.Length != 0;
+                    pending = at != 0;
                     continue;
                 }
 
                 if (pending)
                 {
-                    builder.Append(' ');
+                    written[at++] = ' ';
                     pending = false;
                 }
 
-                builder.Append(character);
+                written[at++] = character;
             }
 
-            return builder.ToString();
+            string collapsed = new string(written[..at]);
+
+            if (rented is not null)
+            {
+                System.Buffers.ArrayPool<char>.Shared.Return(rented);
+            }
+
+            return collapsed;
         }
 
         /// <summary>

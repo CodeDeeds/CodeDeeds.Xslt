@@ -76,7 +76,7 @@ namespace CodeDeeds.Xslt.XPath
                 return s_units[0];
             }
 
-            StringBuilder builder = new StringBuilder();
+            CharStringBuilder builder = new CharStringBuilder(stackalloc char[128]);
             ulong rest = value;
 
             foreach ((ulong scale, string singular, string plural, _) in s_scales)
@@ -89,23 +89,25 @@ namespace CodeDeeds.Xslt.XPath
                 }
 
                 rest -= part * scale;
-                Separate(builder);
+                Separate(ref builder);
 
                 if (part == 1)
                 {
-                    builder.Append("un ").Append(singular);
+                    builder.Append("un ");
+                    builder.Append(singular);
                 }
                 else
                 {
-                    AppendBelowMillion(builder, part, apocope: true);
-                    builder.Append(' ').Append(plural);
+                    AppendBelowMillion(ref builder, part, apocope: true);
+                    builder.Append(' ');
+                    builder.Append(plural);
                 }
             }
 
             if (rest > 0)
             {
-                Separate(builder);
-                AppendBelowMillion(builder, rest, apocope: false);
+                Separate(ref builder);
+                AppendBelowMillion(ref builder, rest, apocope: false);
             }
 
             return builder.ToString();
@@ -119,7 +121,7 @@ namespace CodeDeeds.Xslt.XPath
                 return s_units[0];
             }
 
-            StringBuilder builder = new StringBuilder();
+            CharStringBuilder builder = new CharStringBuilder(stackalloc char[128]);
             ulong rest = value;
 
             foreach ((ulong scale, _, _, string ordinal) in s_scales)
@@ -132,15 +134,15 @@ namespace CodeDeeds.Xslt.XPath
                 }
 
                 rest -= part * scale;
-                Separate(builder);
+                Separate(ref builder);
 
                 // The multiplier runs into the scale as one word, and a multiplier of one is not written:
                 // millonésimo, dosmillonésimo.
                 if (part > 1)
                 {
-                    StringBuilder multiplier = new StringBuilder();
-                    AppendBelowMillion(multiplier, part, apocope: true);
-                    builder.Append(multiplier.Replace(" ", string.Empty));
+                    int multiplier = builder.Length;
+                    AppendBelowMillion(ref builder, part, apocope: true);
+                    builder.RemoveAll(' ', multiplier);
                 }
 
                 builder.Append(ordinal);
@@ -151,13 +153,13 @@ namespace CodeDeeds.Xslt.XPath
 
             if (thousands > 0)
             {
-                Separate(builder);
+                Separate(ref builder);
 
                 if (thousands > 1)
                 {
-                    StringBuilder multiplier = new StringBuilder();
-                    AppendBelowThousand(multiplier, thousands, apocope: true);
-                    builder.Append(multiplier.Replace(" ", string.Empty));
+                    int multiplier = builder.Length;
+                    AppendBelowThousand(ref builder, thousands, apocope: true);
+                    builder.RemoveAll(' ', multiplier);
                 }
 
                 builder.Append("milésimo");
@@ -165,8 +167,8 @@ namespace CodeDeeds.Xslt.XPath
 
             if (rest > 0)
             {
-                Separate(builder);
-                AppendOrdinalBelowThousand(builder, rest);
+                Separate(ref builder);
+                AppendOrdinalBelowThousand(ref builder, rest);
             }
 
             string words = builder.ToString();
@@ -179,7 +181,7 @@ namespace CodeDeeds.Xslt.XPath
             return IsFeminine(variation, "a") ? "ª" : "º";
         }
 
-        private static void Separate(StringBuilder builder)
+        private static void Separate(ref CharStringBuilder builder)
         {
             if (builder.Length > 0)
             {
@@ -187,7 +189,7 @@ namespace CodeDeeds.Xslt.XPath
             }
         }
 
-        private static void AppendBelowMillion(StringBuilder builder, ulong value, bool apocope)
+        private static void AppendBelowMillion(ref CharStringBuilder builder, ulong value, bool apocope)
         {
             ulong thousands = value / 1000;
             ulong rest = value % 1000;
@@ -197,7 +199,7 @@ namespace CodeDeeds.Xslt.XPath
                 // Mil takes no article and no plural: mil, dos mil, veintiún mil.
                 if (thousands > 1)
                 {
-                    AppendBelowThousand(builder, thousands, apocope: true);
+                    AppendBelowThousand(ref builder, thousands, apocope: true);
                     builder.Append(' ');
                 }
 
@@ -211,11 +213,11 @@ namespace CodeDeeds.Xslt.XPath
 
             if (rest > 0 || thousands == 0)
             {
-                AppendBelowThousand(builder, rest, apocope);
+                AppendBelowThousand(ref builder, rest, apocope);
             }
         }
 
-        private static void AppendBelowThousand(StringBuilder builder, ulong value, bool apocope)
+        private static void AppendBelowThousand(ref CharStringBuilder builder, ulong value, bool apocope)
         {
             if (value == 100)
             {
@@ -238,11 +240,11 @@ namespace CodeDeeds.Xslt.XPath
 
             if (rest > 0 || hundreds == 0)
             {
-                AppendBelowHundred(builder, rest, apocope);
+                AppendBelowHundred(ref builder, rest, apocope);
             }
         }
 
-        private static void AppendBelowHundred(StringBuilder builder, ulong value, bool apocope)
+        private static void AppendBelowHundred(ref CharStringBuilder builder, ulong value, bool apocope)
         {
             if (value < 30)
             {
@@ -256,11 +258,12 @@ namespace CodeDeeds.Xslt.XPath
 
             if (unit != 0)
             {
-                builder.Append(" y ").Append(apocope && unit == 1 ? "un" : s_units[unit]);
+                builder.Append(" y ");
+                builder.Append(apocope && unit == 1 ? "un" : s_units[unit]);
             }
         }
 
-        private static void AppendOrdinalBelowThousand(StringBuilder builder, ulong value)
+        private static void AppendOrdinalBelowThousand(ref CharStringBuilder builder, ulong value)
         {
             ulong hundreds = value / 100;
             ulong rest = value % 100;
@@ -290,7 +293,8 @@ namespace CodeDeeds.Xslt.XPath
 
             if (rest % 10 != 0)
             {
-                builder.Append(' ').Append(s_ordinalUnits[rest % 10]);
+                builder.Append(' ');
+                builder.Append(s_ordinalUnits[rest % 10]);
             }
         }
     }

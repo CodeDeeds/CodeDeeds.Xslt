@@ -49,7 +49,7 @@ namespace CodeDeeds.Xslt.XPath
                 return s_units[0];
             }
 
-            StringBuilder builder = new StringBuilder();
+            CharStringBuilder builder = new CharStringBuilder(stackalloc char[128]);
             ulong rest = value;
 
             foreach ((ulong scale, string singular, string plural) in s_scales)
@@ -62,23 +62,25 @@ namespace CodeDeeds.Xslt.XPath
                 }
 
                 rest -= part * scale;
-                Separate(builder);
+                Separate(ref builder);
 
                 if (part == 1)
                 {
-                    builder.Append("un ").Append(singular);
+                    builder.Append("un ");
+                    builder.Append(singular);
                 }
                 else
                 {
-                    AppendBelowMillion(builder, part, terminal: false);
-                    builder.Append(' ').Append(plural);
+                    AppendBelowMillion(ref builder, part, terminal: false);
+                    builder.Append(' ');
+                    builder.Append(plural);
                 }
             }
 
             if (rest > 0)
             {
-                Separate(builder);
-                AppendBelowMillion(builder, rest, terminal: true);
+                Separate(ref builder);
+                AppendBelowMillion(ref builder, rest, terminal: true);
             }
 
             return builder.ToString();
@@ -133,7 +135,7 @@ namespace CodeDeeds.Xslt.XPath
             };
         }
 
-        private static void Separate(StringBuilder builder)
+        private static void Separate(ref CharStringBuilder builder)
         {
             if (builder.Length > 0)
             {
@@ -141,7 +143,7 @@ namespace CodeDeeds.Xslt.XPath
             }
         }
 
-        private static void AppendBelowMillion(StringBuilder builder, ulong value, bool terminal)
+        private static void AppendBelowMillion(ref CharStringBuilder builder, ulong value, bool terminal)
         {
             ulong thousands = value / 1000;
             ulong rest = value % 1000;
@@ -151,7 +153,7 @@ namespace CodeDeeds.Xslt.XPath
                 // Mille is invariable and takes no article: mille, deux mille, quatre-vingt mille.
                 if (thousands > 1)
                 {
-                    AppendBelowThousand(builder, thousands, terminal: false);
+                    AppendBelowThousand(ref builder, thousands, terminal: false);
                     builder.Append(' ');
                 }
 
@@ -165,11 +167,11 @@ namespace CodeDeeds.Xslt.XPath
 
             if (rest > 0 || thousands == 0)
             {
-                AppendBelowThousand(builder, rest, terminal);
+                AppendBelowThousand(ref builder, rest, terminal);
             }
         }
 
-        private static void AppendBelowThousand(StringBuilder builder, ulong value, bool terminal)
+        private static void AppendBelowThousand(ref CharStringBuilder builder, ulong value, bool terminal)
         {
             ulong hundreds = value / 100;
             ulong rest = value % 100;
@@ -178,7 +180,8 @@ namespace CodeDeeds.Xslt.XPath
             {
                 if (hundreds > 1)
                 {
-                    builder.Append(s_units[hundreds]).Append(' ');
+                    builder.Append(s_units[hundreds]);
+                    builder.Append(' ');
                 }
 
                 builder.Append("cent");
@@ -196,11 +199,11 @@ namespace CodeDeeds.Xslt.XPath
 
             if (rest > 0 || hundreds == 0)
             {
-                AppendBelowHundred(builder, rest, terminal);
+                AppendBelowHundred(ref builder, rest, terminal);
             }
         }
 
-        private static void AppendBelowHundred(StringBuilder builder, ulong value, bool terminal)
+        private static void AppendBelowHundred(ref CharStringBuilder builder, ulong value, bool terminal)
         {
             if (value < 20)
             {
@@ -219,7 +222,8 @@ namespace CodeDeeds.Xslt.XPath
                 }
                 else if (unit != 0)
                 {
-                    builder.Append('-').Append(s_units[unit]);
+                    builder.Append('-');
+                    builder.Append(s_units[unit]);
                 }
 
                 return;
@@ -228,7 +232,9 @@ namespace CodeDeeds.Xslt.XPath
             if (value < 80)
             {
                 // Sixty-ten to sixty-nineteen, with the et that seventy-one alone keeps.
-                builder.Append("soixante").Append(value == 71 ? "-et-" : "-").Append(s_units[value - 60]);
+                builder.Append("soixante");
+                builder.Append(value == 71 ? "-et-" : "-");
+                builder.Append(s_units[value - 60]);
                 return;
             }
 
@@ -244,7 +250,8 @@ namespace CodeDeeds.Xslt.XPath
                 return;
             }
 
-            builder.Append('-').Append(s_units[value - 80]);
+            builder.Append('-');
+            builder.Append(s_units[value - 80]);
         }
     }
 }

@@ -98,8 +98,8 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="value">The number.</param>
         public static string Cardinal(ulong value)
         {
-            StringBuilder builder = new StringBuilder();
-            Append(builder, value, null);
+            CharStringBuilder builder = new CharStringBuilder(stackalloc char[128]);
+            Append(ref builder, value, null);
             return builder.ToString();
         }
 
@@ -108,8 +108,8 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="variation">The variation the picture named, which chooses the ending.</param>
         public static string Ordinal(ulong value, string? variation)
         {
-            StringBuilder builder = new StringBuilder();
-            Append(builder, value, EndingOf(variation));
+            CharStringBuilder builder = new CharStringBuilder(stackalloc char[128]);
+            Append(ref builder, value, EndingOf(variation));
             return builder.ToString();
         }
 
@@ -134,7 +134,7 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="builder">Where to write it.</param>
         /// <param name="value">The number.</param>
         /// <param name="ending">The ordinal ending, or <see langword="null"/> for a cardinal.</param>
-        private static void Append(StringBuilder builder, ulong value, string? ending)
+        private static void Append(ref CharStringBuilder builder, ulong value, string? ending)
         {
             ulong rest = value;
 
@@ -169,13 +169,15 @@ namespace CodeDeeds.Xslt.XPath
                 }
                 else
                 {
-                    AppendBelowMillion(builder, part, null, terminal: false);
-                    builder.Append(' ').Append(last ? singular : plural);
+                    AppendBelowMillion(ref builder, part, null, terminal: false);
+                    builder.Append(' ');
+                    builder.Append(last ? singular : plural);
                 }
 
                 if (last)
                 {
-                    builder.Append("st").Append(ending);
+                    builder.Append("st");
+                    builder.Append(ending);
                 }
             }
 
@@ -186,7 +188,7 @@ namespace CodeDeeds.Xslt.XPath
                     builder.Append(' ');
                 }
 
-                AppendBelowMillion(builder, rest, ending, terminal: true);
+                AppendBelowMillion(ref builder, rest, ending, terminal: true);
             }
         }
 
@@ -196,25 +198,26 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="ending">The ordinal ending, or <see langword="null"/> for a cardinal.</param>
         /// <param name="terminal">Whether nothing follows this in the word.</param>
         private static void AppendBelowMillion(
-            StringBuilder builder, ulong value, string? ending, bool terminal)
+            ref CharStringBuilder builder, ulong value, string? ending, bool terminal)
         {
             ulong thousands = value / 1000;
             ulong rest = value % 1000;
 
             if (thousands > 0)
             {
-                AppendBelowThousand(builder, thousands, null, terminal: false);
+                AppendBelowThousand(ref builder, thousands, null, terminal: false);
                 builder.Append("tausend");
 
                 if (rest == 0 && ending is not null)
                 {
-                    builder.Append("st").Append(ending);
+                    builder.Append("st");
+                    builder.Append(ending);
                 }
             }
 
             if (rest > 0 || thousands == 0)
             {
-                AppendBelowThousand(builder, rest, ending, terminal);
+                AppendBelowThousand(ref builder, rest, ending, terminal);
             }
         }
 
@@ -224,7 +227,7 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="ending">The ordinal ending, or <see langword="null"/> for a cardinal.</param>
         /// <param name="terminal">Whether nothing follows this in the word.</param>
         private static void AppendBelowThousand(
-            StringBuilder builder, ulong value, string? ending, bool terminal)
+            ref CharStringBuilder builder, ulong value, string? ending, bool terminal)
         {
             ulong hundreds = value / 100;
             ulong rest = value % 100;
@@ -233,17 +236,19 @@ namespace CodeDeeds.Xslt.XPath
             {
                 // "einhundert" rather than the bare "hundert", which is how the suite spells it and the
                 // form that keeps a hundred and a thousand written the same way.
-                builder.Append(hundreds == 1 ? "ein" : s_units[hundreds]).Append("hundert");
+                builder.Append(hundreds == 1 ? "ein" : s_units[hundreds]);
+                builder.Append("hundert");
 
                 if (rest == 0 && ending is not null)
                 {
-                    builder.Append("st").Append(ending);
+                    builder.Append("st");
+                    builder.Append(ending);
                 }
             }
 
             if (rest > 0 || hundreds == 0)
             {
-                AppendBelowHundred(builder, rest, ending, terminal);
+                AppendBelowHundred(ref builder, rest, ending, terminal);
             }
         }
 
@@ -253,13 +258,14 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="ending">The ordinal ending, or <see langword="null"/> for a cardinal.</param>
         /// <param name="terminal">Whether nothing follows this in the word.</param>
         private static void AppendBelowHundred(
-            StringBuilder builder, ulong value, string? ending, bool terminal)
+            ref CharStringBuilder builder, ulong value, string? ending, bool terminal)
         {
             if (value < 20)
             {
                 if (ending is not null)
                 {
-                    builder.Append(s_ordinals[value]).Append(ending);
+                    builder.Append(s_ordinals[value]);
+                    builder.Append(ending);
                 }
                 else
                 {
@@ -273,7 +279,8 @@ namespace CodeDeeds.Xslt.XPath
 
             if (value % 10 != 0)
             {
-                builder.Append(value % 10 == 1 ? "ein" : s_units[value % 10]).Append("und");
+                builder.Append(value % 10 == 1 ? "ein" : s_units[value % 10]);
+                builder.Append("und");
             }
 
             builder.Append(s_tens[value / 10]);
@@ -282,7 +289,8 @@ namespace CodeDeeds.Xslt.XPath
             {
                 // From twenty up the ordinal is built with "st" rather than the "t" the smaller numbers
                 // take, and it goes on the tens: 21st is "einundzwanzigste".
-                builder.Append("st").Append(ending);
+                builder.Append("st");
+                builder.Append(ending);
             }
         }
     }

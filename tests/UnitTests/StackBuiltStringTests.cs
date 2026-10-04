@@ -20,7 +20,11 @@ namespace CodeDeeds.Xslt.UnitTests
     /// from a string for every part. They are written into stack space now. The content of an
     /// <c>xsl:attribute</c>, an <c>xsl:comment</c> or an <c>xsl:processing-instruction</c> was captured in
     /// a target made for the instruction, with a list and a builder of its own; the transformation lends
-    /// one and takes it back, and content that is one string is that string.
+    /// one and takes it back, and content that is one string is that string. Four more followed: a
+    /// number written in words, in each of the languages that has them; <c>codepoints-to-string()</c>;
+    /// the key a memoized function's arguments are remembered under; and the whitespace a cast to
+    /// <c>xs:token</c> or a type derived from it collapses, which is none where the text is collapsed
+    /// already.
     /// </para>
     /// <para>
     /// A stack buffer has a size and what is written may be longer, so each of these is asked for an
@@ -446,6 +450,183 @@ namespace CodeDeeds.Xslt.UnitTests
                     method: "xml"));
         }
 
+        // ---- a number written in words ---------------------------------------------------------------------
+
+        [TestMethod]
+        public void ANumberIsSpelledOutInTheLanguageAsked()
+        {
+            Assert.AreEqual("twenty-three", Value("format-integer(23, 'w')"));
+            Assert.AreEqual("ONE HUNDRED AND TWENTY-ONE", Value("format-integer(121, 'W')"));
+            Assert.AreEqual("One Hundred And Twenty-One", Value("format-integer(121, 'Ww')"));
+            Assert.AreEqual("-twenty-one", Value("format-integer(-21, 'w')"));
+            Assert.AreEqual("einundzwanzig", Value("format-integer(21, 'w', 'de')"));
+            Assert.AreEqual("soixante-et-onze|quatre-vingts|deux millions", Value("string-join((71, 80, 2000000) ! format-integer(., 'w', 'fr'), '|')"));
+            Assert.AreEqual("ett hundre og tjueen", Value("format-integer(121, 'w', 'nb')"));
+            Assert.AreEqual("tjueein", Value("format-integer(21, 'w', 'nn')"));
+            Assert.AreEqual("etthundratjugoett", Value("format-integer(121, 'w', 'sv')"));
+            Assert.AreEqual("et hundrede og enogtyve", Value("format-integer(121, 'w', 'da')"));
+            Assert.AreEqual("dezasseis", Value("format-integer(16, 'w', 'pt-PT')"));
+
+            // Cento loses its o before a word that begins with one, which is a character taken out of
+            // what has been written.
+            Assert.AreEqual("centotto|centottanta|un milione", Value("string-join((108, 180, 1000000) ! format-integer(., 'w', 'it'), '|')"));
+
+            Assert.AreEqual("two|TWO|Two|second", Writes(
+                "<xsl:number value=\"2\" format=\"w\"/>|<xsl:number value=\"2\" format=\"W\"/>|"
+                + "<xsl:number value=\"2\" format=\"Ww\"/>|<xsl:number value=\"2\" format=\"w\" ordinal=\"yes\"/>"));
+        }
+
+        [TestMethod]
+        public void AnOrdinalIsTheCardinalWithItsLastWordChanged()
+        {
+            Assert.AreEqual(
+                "first|second|third|fifth|eighth|ninth|twelfth|twentieth|twenty-first|fortieth|one hundredth|one hundred and first|one millionth",
+                Value("string-join((1, 2, 3, 5, 8, 9, 12, 20, 21, 40, 100, 101, 1000000) ! format-integer(., 'w;o'), '|')"));
+
+            Assert.AreEqual("One Thousand And First", Value("format-integer(1001, 'Ww;o')"));
+            Assert.AreEqual("Dritten", Value("format-integer(3, 'Ww;o(-en)', 'de')"));
+
+            // The multiplier runs into the scale as one word in Spanish, the spaces it was written with
+            // closed up where it stands; and the feminine is the masculine with its endings changed.
+            Assert.AreEqual("dosmillonésimo", Value("format-integer(2000000, 'w;o', 'es')"));
+            Assert.AreEqual("veintiúnmilésimo", Value("format-integer(21000, 'w;o', 'es')"));
+            Assert.AreEqual("vigésima primera", Value("format-integer(21, 'w;o(-a)', 'es')"));
+            Assert.AreEqual("centésima vigésima primeira", Value("format-integer(121, 'w;o(-a)', 'pt')"));
+            Assert.AreEqual("terza", Value("format-integer(3, 'w;o(-a)', 'it')"));
+        }
+
+        [TestMethod]
+        public void ANumberWhoseWordsAreLongerThanTheStackSpaceIsSpelledWhole()
+        {
+            // A hundred and twenty-eight characters are set aside, and these are two hundred and ten and
+            // a hundred and forty-nine.
+            Assert.AreEqual(
+                "nine quintillion two hundred and twenty-three quadrillion three hundred and seventy-two trillion thirty-six billion "
+                + "eight hundred and fifty-four million seven hundred and seventy-five thousand eight hundred and seven",
+                Value("format-integer(9223372036854775807, 'w')"));
+
+            Assert.AreEqual(
+                "nine quintillion two hundred and twenty-three quadrillion three hundred and seventy-two trillion thirty-six billion "
+                + "eight hundred and fifty-four million seven hundred and seventy-five thousand eight hundred and seventh",
+                Value("format-integer(9223372036854775807, 'w;o')"));
+
+            Assert.AreEqual(
+                "One Billion Two Hundred And Thirty-Four Million Five Hundred And Sixty-Seven Thousand Eight Hundred And Ninety",
+                Value("format-integer(1234567890, 'Ww')"));
+
+            Assert.AreEqual(
+                "neunhundertneunundneunzig millionen neunhundertneunundneunzigtausendneunhundertneunundneunzig",
+                Value("format-integer(999999999, 'w', 'de')"));
+
+            // Past what the words reach, a number is written in digits.
+            Assert.AreEqual("18446744073709551616", Value("format-integer(18446744073709551616, 'w')"));
+        }
+
+        // ---- codepoints-to-string --------------------------------------------------------------------------
+
+        [TestMethod]
+        public void CodePointsAreMadeAStringACharacterAtATime()
+        {
+            Assert.AreEqual("Hi!", Value("codepoints-to-string((72, 105, 33))"));
+            Assert.AreEqual(string.Empty, Value("codepoints-to-string(())"));
+            Assert.AreEqual("0", Value("string-length(codepoints-to-string(()))"));
+
+            // Two chars for a character outside the basic plane, the high half first.
+            Assert.AreEqual(
+                "a" + char.ConvertFromUtf32(0x1F600) + "€" + char.ConvertFromUtf32(0x10FFFF) + "z",
+                Value("codepoints-to-string((97, 128512, 8364, 1114111, 122))"));
+
+            Assert.AreEqual("true", Value("codepoints-to-string(string-to-codepoints('a&#x1F600;b&#x104A5;c&#xE9;')) = 'a&#x1F600;b&#x104A5;c&#xE9;'"));
+
+            // Longer than the hundred and twenty-eight characters set aside: three hundred, of which a
+            // hundred are pairs.
+            string expected = string.Concat(Enumerable.Repeat("ab" + char.ConvertFromUtf32(0x1F600), 100));
+            Assert.AreEqual(expected, Value("codepoints-to-string(for $i in 1 to 100 return (97, 98, 128512))"));
+        }
+
+        [TestMethod]
+        [DataRow("0")]
+        [DataRow("55296")]
+        [DataRow("57343")]
+        [DataRow("65534")]
+        [DataRow("1114112")]
+        [DataRow("-1")]
+        public void ACodePointThatIsNoCharacterIsRefused(string code)
+        {
+            XsltException error = Assert.ThrowsExactly<XsltException>(() => Value($"codepoints-to-string((97, {code}))"));
+            Assert.AreEqual("FOCH0001", error.Code);
+        }
+
+        // ---- the key a memoized function's arguments are remembered under --------------------------------------
+
+        [TestMethod]
+        public void AMemoizedFunctionAnswersAsTheFunctionWould()
+        {
+            // The same calls made of a function that remembers and of one that does not, each call's
+            // answer saying which arguments it was given: nodes of one text and two identities, 1 and
+            // '1', sequences that divide the same items differently, names of one spelling in two
+            // namespaces, a date, texts longer than the stack space, and each of them twice over.
+            const string Calls =
+                "(i[1], i[1]/@n)|(i[2]/@d, i[1]/@d)|(i[1]/@d, i[2]/@d)|(1, '1')|('1', 1)|((1, 2), ())|((1), (2))|((), (1, 2))"
+                + "|(QName('urn:p', 'x:a'), 1)|(QName('urn:q', 'x:a'), 1)|(xs:date('2024-03-05'), 1.0)|(xs:date('2024-03-06'), 1)"
+                + "|(true(), 'true')|('true', true())|(i, ())|((), i)|(i[3], i[4])";
+
+            string wide = new string('w', 300);
+
+            string Answers(string kind)
+            {
+                string functions =
+                    $"<xsl:function name=\"p:{kind}\"{(kind == "kept" ? " cache=\"yes\"" : string.Empty)}>"
+                    + "<xsl:param name=\"a\"/><xsl:param name=\"b\"/>"
+                    + "<xsl:sequence select=\"string-join((for $x in $a return if ($x instance of node()) "
+                    + "then concat(name($x), string($x), $x/../@n, name($x/..)) "
+                    + "else if ($x instance of xs:QName) then namespace-uri-from-QName($x) "
+                    + "else concat(string($x), $x instance of xs:string, $x instance of xs:integer), "
+                    + "'/', for $y in $b return string($y)), ',')\"/></xsl:function>";
+
+                string body = string.Concat(Calls.Split('|').Select(call =>
+                    $"<xsl:value-of select=\"p:{kind}{call}\"/>;<xsl:value-of select=\"p:{kind}{call}\"/>;"))
+                    + $"<xsl:value-of select=\"p:{kind}('{wide}', '{wide}x')\"/>;"
+                    + $"<xsl:value-of select=\"p:{kind}('{wide}x', '{wide}')\"/>";
+
+                return Writes(body, functions);
+            }
+
+            string plain = Answers("plain");
+
+            StringAssert.Contains(plain, "1falsetrue,/,1;1falsetrue,/,1;1truefalse,/,1;1truefalse,/,1;");
+            StringAssert.Contains(plain, "d2024-03-052i,/,2024-03-05;d2024-03-052i,/,2024-03-05;d2024-03-051i,/,2024-03-05;");
+            StringAssert.Contains(plain, "urn:p,/,1;urn:p,/,1;urn:q,/,1;urn:q,/,1;");
+            Assert.AreEqual(plain, Answers("kept"));
+        }
+
+        // ---- the whitespace a cast collapses ---------------------------------------------------------------
+
+        [TestMethod]
+        public void ACastToATokenCollapsesItsWhitespaceAndOneToANormalizedStringReplacesIt()
+        {
+            Assert.AreEqual("[a b c]", Value("concat('[', xs:token('  a   b &#9; c&#10;'), ']')"));
+            Assert.AreEqual("[a b c]", Value("concat('[', xs:token('a b c'), ']')"));
+            Assert.AreEqual("[]", Value("concat('[', xs:token('   '), ']')"));
+            Assert.AreEqual("[]", Value("concat('[', xs:token(''), ']')"));
+            Assert.AreEqual("[a]", Value("concat('[', xs:token(' a'), ']')"));
+            Assert.AreEqual("[a]", Value("concat('[', xs:token('a '), ']')"));
+            Assert.AreEqual("[a b]", Value("concat('[', xs:token('a  b'), ']')"));
+            Assert.AreEqual("[a b]", Value("concat('[', xs:token('a&#13;b'), ']')"));
+            Assert.AreEqual("[abc]", Value("concat('[', xs:NCName(' abc '), ']')"));
+            Assert.AreEqual("[en-GB]", Value("concat('[', xs:language('&#10;en-GB'), ']')"));
+            Assert.AreEqual("[ a  b ]", Value("concat('[', xs:normalizedString('&#9;a&#10;&#13;b '), ']')"));
+            Assert.AreEqual("[ a  b ]", Value("concat('[', xs:normalizedString(' a  b '), ']')"));
+
+            // Collapsed first and judged after: a space left inside is still a space.
+            XsltException error = Assert.ThrowsExactly<XsltException>(() => Value("xs:NMTOKEN(' f   f')"));
+            Assert.AreEqual("FORG0001", error.Code);
+
+            // Longer than the two hundred and fifty-six characters set aside.
+            string words = string.Join("   ", Enumerable.Repeat("word", 120));
+            Assert.AreEqual(string.Join(" ", Enumerable.Repeat("word", 120)), Value($"xs:token(' {words} ')"));
+        }
+
         // ---- what they allocate ----------------------------------------------------------------------------
 
         /// <summary>A thousand items, each with a number, a date and a text that needs escaping in a URI.</summary>
@@ -455,8 +636,10 @@ namespace CodeDeeds.Xslt.UnitTests
         private static Xslt Each(string body, XsltBackend backend)
         {
             return new Xslt(
-                $"<xsl:stylesheet version=\"3.0\" xmlns:xsl=\"{Xsl}\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">"
+                $"<xsl:stylesheet version=\"3.0\" xmlns:xsl=\"{Xsl}\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:p=\"urn:p\">"
                 + "<xsl:output method=\"xml\"/>"
+                + "<xsl:function name=\"p:kept\" cache=\"yes\"><xsl:param name=\"v\"/><xsl:sequence select=\"$v\"/></xsl:function>"
+                + "<xsl:function name=\"p:plain\"><xsl:param name=\"v\"/><xsl:sequence select=\"$v\"/></xsl:function>"
                 + "<xsl:variable name=\"d\" select=\"xs:date('2024-03-05')\"/>"
                 + "<xsl:variable name=\"dt\" select=\"xs:dateTime('2024-03-05T14:07:09')\"/>"
                 + $"<xsl:template match=\"/r\"><o><xsl:for-each select=\"i\">{body}</xsl:for-each></o></xsl:template></xsl:stylesheet>",
@@ -598,6 +781,40 @@ namespace CodeDeeds.Xslt.UnitTests
                 (8, "<xsl:comment>c</xsl:comment>", string.Empty),
                 (8, "<xsl:processing-instruction name=\"p\">d</xsl:processing-instruction>", string.Empty),
                 (56, "<a><xsl:attribute name=\"href\">p/<xsl:value-of select=\"@n\"/>.html</xsl:attribute></a>", "<a/>"));
+        }
+
+        [TestMethod]
+        public void SpellingANumberCostsItsWordsAndNoBuilder()
+        {
+            // The words of the numbers to a thousand come to seventy-three bytes of string on average, and
+            // a builder grown to hold them was a hundred and ninety-five more. Title case is a second
+            // string of the same length, where it was a builder made of the first as well.
+            AssertBytesEach(
+                (88, "<xsl:value-of select=\"format-integer(position(), 'w')\"/>", string.Empty),
+                (96, "<xsl:value-of select=\"format-integer(position(), 'w;o')\"/>", string.Empty),
+                (168, "<xsl:value-of select=\"format-integer(position(), 'Ww')\"/>", string.Empty),
+                (88, "<xsl:value-of select=\"format-integer(position(), 'w', 'de')\"/>", string.Empty));
+        }
+
+        [TestMethod]
+        public void TheOtherThreeCostWhatTheyMakeAndNoMore()
+        {
+            AssertBytesEach(
+                // Over the same sequence made and nothing taken from it: 'Hi!' is thirty-two bytes, the
+                // list the function is handed its items in is as many, and writing it is as many again.
+                // It was those, a builder, its buffer and a string for each of the three.
+                (104, "<xsl:value-of select=\"codepoints-to-string((72, 105, 33))\"/>", "<xsl:value-of select=\"(72, 105, 33)[4]\"/>"),
+
+                // A token that is one already is the text it was given, and so is a name.
+                (8, "<xsl:value-of select=\"string-length(xs:token(@g))\"/>", "<xsl:value-of select=\"string-length(xs:string(@g))\"/>"),
+                (8, "<xsl:value-of select=\"xs:NCName('abc')\"/>", "abc"),
+
+                // One with whitespace to collapse is the collapsed string and no more.
+                (48, "<xsl:value-of select=\"string-length(xs:token(' a   b '))\"/>", "<xsl:value-of select=\"string-length(' a   b ')\"/>"),
+
+                // Over the same call of a function that remembers nothing: the key, and the string of
+                // the number it is made from. It was those, a builder, its buffer and two strings more.
+                (120, "<xsl:value-of select=\"p:kept(position() mod 7)\"/>", "<xsl:value-of select=\"p:plain(position() mod 7)\"/>"));
         }
 
         private static readonly Func<XPathValue, string> KeyIdentity = BindKeyIdentity();

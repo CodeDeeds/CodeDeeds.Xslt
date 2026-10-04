@@ -596,17 +596,14 @@ namespace CodeDeeds.Xslt.XPath
         /// </summary>
         private static string TitleCase(string words)
         {
-            StringBuilder builder = new StringBuilder(words);
-
-            for (int i = 0; i < builder.Length; i++)
+            // Written once, into a string of the same length.
+            return string.Create(words.Length, words, static (span, source) =>
             {
-                if (i == 0 || builder[i - 1] == ' ' || builder[i - 1] == '-')
+                for (int i = 0; i < source.Length; i++)
                 {
-                    builder[i] = char.ToUpperInvariant(builder[i]);
+                    span[i] = i == 0 || source[i - 1] is ' ' or '-' ? char.ToUpperInvariant(source[i]) : source[i];
                 }
-            }
-
-            return builder.ToString();
+            });
         }
 
         /// <summary>Appends a code point, which the digit families and separators may need a pair for.</summary>
@@ -668,7 +665,24 @@ namespace CodeDeeds.Xslt.XPath
                 return s_units[value];
             }
 
-            StringBuilder builder = new StringBuilder();
+            // Written on the stack: the words of a number are a few dozen characters, and a builder
+            // grown to hold them was four or five allocations for the one string.
+            CharStringBuilder builder = new CharStringBuilder(stackalloc char[128]);
+            AppendCardinal(ref builder, value);
+            return builder.ToString();
+        }
+
+        /// <summary>Writes a number out in lower-case words, into something larger.</summary>
+        /// <param name="builder">What the words are appended to, which must have nothing in it yet.</param>
+        /// <param name="value">The number.</param>
+        private static void AppendCardinal(ref CharStringBuilder builder, ulong value)
+        {
+            if (value < 20)
+            {
+                builder.Append(s_units[value]);
+                return;
+            }
+
             ulong scale = 1_000_000_000_000_000_000UL;
 
             for (int i = s_scales.Length - 1; i >= 0; i--, scale /= 1000UL)
@@ -685,8 +699,9 @@ namespace CodeDeeds.Xslt.XPath
                     builder.Append(' ');
                 }
 
-                AppendUnderThousand(builder, (int)part);
-                builder.Append(' ').Append(s_scales[i]);
+                AppendUnderThousand(ref builder, (int)part);
+                builder.Append(' ');
+                builder.Append(s_scales[i]);
                 value -= part * scale;
             }
 
@@ -699,10 +714,8 @@ namespace CodeDeeds.Xslt.XPath
                     builder.Append(value < 100 ? " and " : " ");
                 }
 
-                AppendUnderThousand(builder, (int)value);
+                AppendUnderThousand(ref builder, (int)value);
             }
-
-            return builder.ToString();
         }
 
         /// <summary>Writes a number out as a lower-case ordinal.</summary>
@@ -714,9 +727,33 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="value">The number.</param>
         public static string Ordinal(ulong value)
         {
-            string cardinal = Cardinal(value);
-            int last = cardinal.LastIndexOfAny(new[] { ' ', '-' }) + 1;
-            return string.Concat(cardinal.AsSpan(0, last), OrdinalWord(cardinal[last..]));
+            // The cardinal, its last word and the ordinal of that word were three strings and the array
+            // of the two characters looked for, on the way to the one. Written on the stack, the last
+            // word is changed where it stands.
+            CharStringBuilder builder = new CharStringBuilder(stackalloc char[128]);
+            AppendCardinal(ref builder, value);
+
+            int last = builder.AsSpan().LastIndexOfAny(' ', '-') + 1;
+            ReadOnlySpan<char> word = builder.AsSpan()[last..];
+
+            if (IrregularOrdinal(word) is string irregular)
+            {
+                builder.Remove(last, builder.Length - last);
+                builder.Append(irregular);
+            }
+            else if (word[^1] == 'y')
+            {
+                // The tens all end in y and all become -ieth.
+                builder.Remove(builder.Length - 1, 1);
+                builder.Append("ieth");
+            }
+            else
+            {
+                // Everything else that is left takes -th, including zero, the teens, and the scales.
+                builder.Append("th");
+            }
+
+            return builder.ToString();
         }
 
         /// <summary>The suffix that turns digits into an ordinal — <c>1st</c>, <c>12th</c>, <c>23rd</c>.</summary>
@@ -739,29 +776,28 @@ namespace CodeDeeds.Xslt.XPath
             };
         }
 
-        private static string OrdinalWord(string word)
+        /// <summary>The ordinal of a word that does not make one by rule, or null for a word that does.</summary>
+        private static string? IrregularOrdinal(ReadOnlySpan<char> word)
         {
-            switch (word)
+            return word switch
             {
-                case "one": return "first";
-                case "two": return "second";
-                case "three": return "third";
-                case "five": return "fifth";
-                case "eight": return "eighth";
-                case "nine": return "ninth";
-                case "twelve": return "twelfth";
-            }
-
-            // The tens all end in y and all become -ieth; everything else that is left takes -th, including
-            // zero, the teens, and the scales.
-            return word.EndsWith('y') ? string.Concat(word.AsSpan(0, word.Length - 1), "ieth") : word + "th";
+                "one" => "first",
+                "two" => "second",
+                "three" => "third",
+                "five" => "fifth",
+                "eight" => "eighth",
+                "nine" => "ninth",
+                "twelve" => "twelfth",
+                _ => null,
+            };
         }
 
-        private static void AppendUnderThousand(StringBuilder builder, int value)
+        private static void AppendUnderThousand(ref CharStringBuilder builder, int value)
         {
             if (value >= 100)
             {
-                builder.Append(s_units[value / 100]).Append(" hundred");
+                builder.Append(s_units[value / 100]);
+                builder.Append(" hundred");
                 value %= 100;
 
                 if (value == 0)
@@ -782,7 +818,8 @@ namespace CodeDeeds.Xslt.XPath
 
             if (value % 10 != 0)
             {
-                builder.Append('-').Append(s_units[value % 10]);
+                builder.Append('-');
+                builder.Append(s_units[value % 10]);
             }
         }
     }

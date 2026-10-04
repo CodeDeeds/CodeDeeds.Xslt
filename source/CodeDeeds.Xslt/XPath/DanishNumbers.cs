@@ -64,7 +64,7 @@ namespace CodeDeeds.Xslt.XPath
 
         private static string Compose(ulong value, bool ordinal)
         {
-            StringBuilder builder = new StringBuilder();
+            CharStringBuilder builder = new CharStringBuilder(stackalloc char[128]);
             ulong rest = value;
 
             foreach ((ulong scale, string singular, string plural) in s_scales)
@@ -78,7 +78,7 @@ namespace CodeDeeds.Xslt.XPath
 
                 rest -= part * scale;
                 bool last = ordinal && rest == 0;
-                Separate(builder, following: part);
+                Separate(ref builder, following: part);
 
                 if (part == 1)
                 {
@@ -89,7 +89,7 @@ namespace CodeDeeds.Xslt.XPath
                 }
                 else
                 {
-                    AppendBelowMillion(builder, part, ordinal: false);
+                    AppendBelowMillion(ref builder, part, ordinal: false);
                     builder.Append(' ');
                 }
 
@@ -98,15 +98,15 @@ namespace CodeDeeds.Xslt.XPath
 
             if (rest > 0 || builder.Length == 0)
             {
-                Separate(builder, following: rest);
-                AppendBelowMillion(builder, rest, ordinal);
+                Separate(ref builder, following: rest);
+                AppendBelowMillion(ref builder, rest, ordinal);
             }
 
             return builder.ToString();
         }
 
         /// <summary>Separates the next piece from what came before, with <c>og</c> where it is under a hundred.</summary>
-        private static void Separate(StringBuilder builder, ulong following)
+        private static void Separate(ref CharStringBuilder builder, ulong following)
         {
             if (builder.Length > 0)
             {
@@ -114,7 +114,7 @@ namespace CodeDeeds.Xslt.XPath
             }
         }
 
-        private static void AppendBelowMillion(StringBuilder builder, ulong value, bool ordinal)
+        private static void AppendBelowMillion(ref CharStringBuilder builder, ulong value, bool ordinal)
         {
             ulong thousands = value / 1000;
             ulong rest = value % 1000;
@@ -132,7 +132,7 @@ namespace CodeDeeds.Xslt.XPath
                 }
                 else
                 {
-                    AppendBelowThousand(builder, thousands, ordinal: false);
+                    AppendBelowThousand(ref builder, thousands, ordinal: false);
                     builder.Append(' ');
                 }
 
@@ -140,17 +140,17 @@ namespace CodeDeeds.Xslt.XPath
 
                 if (rest > 0)
                 {
-                    Separate(builder, following: rest);
+                    Separate(ref builder, following: rest);
                 }
             }
 
             if (rest > 0 || thousands == 0)
             {
-                AppendBelowThousand(builder, rest, ordinal);
+                AppendBelowThousand(ref builder, rest, ordinal);
             }
         }
 
-        private static void AppendBelowThousand(StringBuilder builder, ulong value, bool ordinal)
+        private static void AppendBelowThousand(ref CharStringBuilder builder, ulong value, bool ordinal)
         {
             ulong hundreds = value / 100;
             ulong rest = value % 100;
@@ -168,7 +168,8 @@ namespace CodeDeeds.Xslt.XPath
                 }
                 else
                 {
-                    builder.Append(s_units[hundreds]).Append(' ');
+                    builder.Append(s_units[hundreds]);
+                    builder.Append(' ');
                 }
 
                 builder.Append("hundrede");
@@ -181,11 +182,11 @@ namespace CodeDeeds.Xslt.XPath
 
             if (rest > 0 || hundreds == 0)
             {
-                AppendBelowHundred(builder, rest, ordinal);
+                AppendBelowHundred(ref builder, rest, ordinal);
             }
         }
 
-        private static void AppendBelowHundred(StringBuilder builder, ulong value, bool ordinal)
+        private static void AppendBelowHundred(ref CharStringBuilder builder, ulong value, bool ordinal)
         {
             if (value < 20)
             {
@@ -197,7 +198,8 @@ namespace CodeDeeds.Xslt.XPath
 
             if (unit != 0)
             {
-                builder.Append(s_units[unit]).Append("og");
+                builder.Append(s_units[unit]);
+                builder.Append("og");
             }
 
             builder.Append(ordinal ? s_ordinalTens[value / 10] : s_tens[value / 10]);

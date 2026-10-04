@@ -47,6 +47,41 @@ namespace CodeDeeds.Xslt
             m_length = 0;
         }
 
+        /// <summary>Gets a character already written.</summary>
+        /// <param name="index">Its place, counted from zero.</param>
+        public readonly char this[int index] => m_buffer[..m_length][index];
+
+        /// <summary>Takes characters out, closing the gap they leave.</summary>
+        /// <param name="start">The place of the first to go.</param>
+        /// <param name="count">How many go.</param>
+        public void Remove(int start, int count)
+        {
+            m_buffer[(start + count)..m_length].CopyTo(m_buffer[start..]);
+            m_length -= count;
+        }
+
+        /// <summary>Takes every occurrence of a character out of what was written from a place onwards.</summary>
+        /// <remarks>
+        /// For a part written by something that spaces its words, where the part is wanted as one word:
+        /// it is written where it goes and closed up there, rather than written apart and copied in.
+        /// </remarks>
+        /// <param name="value">The character to take out.</param>
+        /// <param name="start">The place to begin at; what stands before it is left alone.</param>
+        public void RemoveAll(char value, int start)
+        {
+            int write = start;
+
+            for (int read = start; read < m_length; read++)
+            {
+                if (m_buffer[read] != value)
+                {
+                    m_buffer[write++] = m_buffer[read];
+                }
+            }
+
+            m_length = write;
+        }
+
         /// <summary>Appends one character.</summary>
         public void Append(char value)
         {

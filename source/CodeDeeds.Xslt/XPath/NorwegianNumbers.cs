@@ -86,7 +86,7 @@ namespace CodeDeeds.Xslt.XPath
 
         private string Compose(ulong value, bool ordinal)
         {
-            StringBuilder builder = new StringBuilder();
+            CharStringBuilder builder = new CharStringBuilder(stackalloc char[128]);
             ulong rest = value;
 
             foreach ((ulong scale, string singular, string plural) in s_scales)
@@ -100,18 +100,19 @@ namespace CodeDeeds.Xslt.XPath
 
                 rest -= part * scale;
                 bool last = ordinal && rest == 0;
-                Separate(builder, following: part);
+                Separate(ref builder, following: part);
 
                 if (part == 1)
                 {
                     if (!last)
                     {
-                        builder.Append(One).Append(' ');
+                        builder.Append(One);
+                        builder.Append(' ');
                     }
                 }
                 else
                 {
-                    AppendBelowMillion(builder, part, ordinal: false);
+                    AppendBelowMillion(ref builder, part, ordinal: false);
                     builder.Append(' ');
                 }
 
@@ -120,15 +121,15 @@ namespace CodeDeeds.Xslt.XPath
 
             if (rest > 0 || builder.Length == 0)
             {
-                Separate(builder, following: rest);
-                AppendBelowMillion(builder, rest, ordinal);
+                Separate(ref builder, following: rest);
+                AppendBelowMillion(ref builder, rest, ordinal);
             }
 
             return builder.ToString();
         }
 
         /// <summary>Separates the next piece from what came before, with <c>og</c> where it is under a hundred.</summary>
-        private static void Separate(StringBuilder builder, ulong following)
+        private static void Separate(ref CharStringBuilder builder, ulong following)
         {
             if (builder.Length > 0)
             {
@@ -136,7 +137,7 @@ namespace CodeDeeds.Xslt.XPath
             }
         }
 
-        private void AppendBelowMillion(StringBuilder builder, ulong value, bool ordinal)
+        private void AppendBelowMillion(ref CharStringBuilder builder, ulong value, bool ordinal)
         {
             ulong thousands = value / 1000;
             ulong rest = value % 1000;
@@ -149,12 +150,13 @@ namespace CodeDeeds.Xslt.XPath
                 {
                     if (!last)
                     {
-                        builder.Append(OneNeuter).Append(' ');
+                        builder.Append(OneNeuter);
+                        builder.Append(' ');
                     }
                 }
                 else
                 {
-                    AppendBelowThousand(builder, thousands, ordinal: false);
+                    AppendBelowThousand(ref builder, thousands, ordinal: false);
                     builder.Append(' ');
                 }
 
@@ -162,17 +164,17 @@ namespace CodeDeeds.Xslt.XPath
 
                 if (rest > 0)
                 {
-                    Separate(builder, following: rest);
+                    Separate(ref builder, following: rest);
                 }
             }
 
             if (rest > 0 || thousands == 0)
             {
-                AppendBelowThousand(builder, rest, ordinal);
+                AppendBelowThousand(ref builder, rest, ordinal);
             }
         }
 
-        private void AppendBelowThousand(StringBuilder builder, ulong value, bool ordinal)
+        private void AppendBelowThousand(ref CharStringBuilder builder, ulong value, bool ordinal)
         {
             ulong hundreds = value / 100;
             ulong rest = value % 100;
@@ -185,12 +187,14 @@ namespace CodeDeeds.Xslt.XPath
                 {
                     if (!last)
                     {
-                        builder.Append(OneNeuter).Append(' ');
+                        builder.Append(OneNeuter);
+                        builder.Append(' ');
                     }
                 }
                 else
                 {
-                    builder.Append(s_units[hundreds]).Append(' ');
+                    builder.Append(s_units[hundreds]);
+                    builder.Append(' ');
                 }
 
                 builder.Append(last ? Hundredth : "hundre");
@@ -203,11 +207,11 @@ namespace CodeDeeds.Xslt.XPath
 
             if (rest > 0 || hundreds == 0)
             {
-                AppendBelowHundred(builder, rest, ordinal);
+                AppendBelowHundred(ref builder, rest, ordinal);
             }
         }
 
-        private void AppendBelowHundred(StringBuilder builder, ulong value, bool ordinal)
+        private void AppendBelowHundred(ref CharStringBuilder builder, ulong value, bool ordinal)
         {
             if (value < 20)
             {
@@ -223,7 +227,8 @@ namespace CodeDeeds.Xslt.XPath
                 if (ordinal)
                 {
                     // Tjue drops its final e before the ending: tjuende, where tretti keeps its i in trettiende.
-                    builder.Append(tens.EndsWith('e') ? tens.AsSpan(0, tens.Length - 1) : tens).Append(TensEnding);
+                    builder.Append(tens.EndsWith('e') ? tens.AsSpan(0, tens.Length - 1) : tens);
+                    builder.Append(TensEnding);
                 }
                 else
                 {
@@ -233,7 +238,8 @@ namespace CodeDeeds.Xslt.XPath
                 return;
             }
 
-            builder.Append(tens).Append(ordinal ? Ordinals[unit] : unit == 1 ? One : s_units[unit]);
+            builder.Append(tens);
+            builder.Append(ordinal ? Ordinals[unit] : unit == 1 ? One : s_units[unit]);
         }
     }
 }

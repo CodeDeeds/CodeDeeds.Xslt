@@ -55,7 +55,7 @@ namespace CodeDeeds.Xslt.XPath
                 return s_units[0];
             }
 
-            StringBuilder builder = new StringBuilder();
+            CharStringBuilder builder = new CharStringBuilder(stackalloc char[128]);
             ulong rest = value;
 
             foreach ((ulong scale, string singular, string plural) in s_scales)
@@ -68,23 +68,25 @@ namespace CodeDeeds.Xslt.XPath
                 }
 
                 rest -= part * scale;
-                Separate(builder);
+                Separate(ref builder);
 
                 if (part == 1)
                 {
-                    builder.Append("un ").Append(singular);
+                    builder.Append("un ");
+                    builder.Append(singular);
                 }
                 else
                 {
-                    AppendBelowMillion(builder, part);
-                    builder.Append(' ').Append(plural);
+                    AppendBelowMillion(ref builder, part);
+                    builder.Append(' ');
+                    builder.Append(plural);
                 }
             }
 
             if (rest > 0)
             {
-                Separate(builder);
-                AppendBelowMillion(builder, rest);
+                Separate(ref builder);
+                AppendBelowMillion(ref builder, rest);
             }
 
             return builder.ToString();
@@ -143,7 +145,7 @@ namespace CodeDeeds.Xslt.XPath
             return word[^1] is 'a' or 'e' or 'i' or 'o' ? word[..^1] : word;
         }
 
-        private static void Separate(StringBuilder builder)
+        private static void Separate(ref CharStringBuilder builder)
         {
             if (builder.Length > 0)
             {
@@ -151,7 +153,7 @@ namespace CodeDeeds.Xslt.XPath
             }
         }
 
-        private static void AppendBelowMillion(StringBuilder builder, ulong value)
+        private static void AppendBelowMillion(ref CharStringBuilder builder, ulong value)
         {
             ulong thousands = value / 1000;
             ulong rest = value % 1000;
@@ -164,14 +166,14 @@ namespace CodeDeeds.Xslt.XPath
                 }
                 else
                 {
-                    AppendBelowThousand(builder, thousands, apocope: true, compound: true);
+                    AppendBelowThousand(ref builder, thousands, apocope: true, compound: true);
                     builder.Append("mila");
                 }
             }
 
             if (rest > 0 || thousands == 0)
             {
-                AppendBelowThousand(builder, rest, apocope: false, compound: thousands > 0);
+                AppendBelowThousand(ref builder, rest, apocope: false, compound: thousands > 0);
             }
         }
 
@@ -179,7 +181,7 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="value">The number to append, below one thousand.</param>
         /// <param name="apocope">Whether a final one loses its vowel, as it does before mila.</param>
         /// <param name="compound">Whether something already stands before this in the word.</param>
-        private static void AppendBelowThousand(StringBuilder builder, ulong value, bool apocope, bool compound)
+        private static void AppendBelowThousand(ref CharStringBuilder builder, ulong value, bool apocope, bool compound)
         {
             ulong hundreds = value / 100;
             ulong rest = value % 100;
@@ -198,7 +200,7 @@ namespace CodeDeeds.Xslt.XPath
             if (rest > 0 || hundreds == 0)
             {
                 int start = builder.Length;
-                AppendBelowHundred(builder, rest, apocope, compound);
+                AppendBelowHundred(ref builder, rest, apocope, compound);
 
                 // Cento loses its o before a word beginning with one: centotto, centottanta.
                 if (hundreds > 0 && builder[start] == 'o')
@@ -208,7 +210,7 @@ namespace CodeDeeds.Xslt.XPath
             }
         }
 
-        private static void AppendBelowHundred(StringBuilder builder, ulong value, bool apocope, bool compound)
+        private static void AppendBelowHundred(ref CharStringBuilder builder, ulong value, bool apocope, bool compound)
         {
             if (value < 20)
             {

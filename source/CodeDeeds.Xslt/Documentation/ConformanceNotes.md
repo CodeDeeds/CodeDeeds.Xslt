@@ -10120,6 +10120,111 @@ each stylesheet has ever allocated, which only falls, and run again until what i
 seconds have gone by: waiting cannot make a stylesheet that allocates too much look as if it did not.
 3,112 unit tests in all.
 
+### The four the section above left
+
+Each a method of its own that nothing there shared, and done the same way: measured at `7ec7d94`,
+changed, and measured again.
+
+**A number written in words.** `format-integer()` with a picture of `w`, `W` or `Ww`, and `xsl:number`
+with a format of the same, spell a number in one of eleven languages, each of which built its words in
+a `StringBuilder` grown from sixteen characters: for the numbers to a thousand, 195 bytes of builders
+and buffers around 73 of string. Each writes into 128 characters of stack now, the helpers taking the
+builder by reference; a chain of appends is a statement for each, `CharStringBuilder`'s returning
+nothing. Three things the builders did besides append have a method each: Italian's *cento* loses its
+*o* before a word beginning with one, which is a character read back and one taken out,
+`CharStringBuilder.Remove`; Spanish runs a multiplier into its scale as one word, *dosmillonésimo*,
+which was a second builder written apart, its spaces replaced and the result copied in, and is the
+multiplier written where it goes and closed up there, `RemoveAll`; and title case and the feminine of
+a phrase, each a builder made of the string to change a few characters of it, are `string.Create` over
+the string. The English ordinal was the cardinal, its last word cut out, the ordinal of that word and
+the two joined, with an array of the two characters looked for made at every call; it is the cardinal
+written on the stack and its last word changed there.
+
+Thirteen language tags, thirteen pictures and 1,287 numbers from nought to past sixty-four bits, with
+`xsl:number` and the words `format-date()` writes, on both backends: 435,358 lines, the same to the
+byte before and after.
+
+**`codepoints-to-string()`.** A builder, its buffer and a string for every code point, from
+`char.ConvertFromUtf32`. Written into 128 characters of stack a character at a time, two for one
+outside the basic plane.
+
+**The key of a memoized call.** A function declared `cache="yes"` keeps its answers under a key made
+of its arguments: a builder, and for every item a string of its type and value, made by
+interpolation, to be appended with its length in front. The item is written beside the whole on the
+stack and copied in, as a composite key's parts are.
+
+**The whitespace a cast collapses.** A cast to `xs:token` or a type derived from it —
+`xs:NCName`, `xs:language`, `xs:NMTOKEN` — collapsed its text through a builder whether or not there
+was anything to collapse: `xs:NCName('abc')` was 112 bytes for a string it already had. A text that
+is collapsed already is its own answer now, found by one pass that makes nothing. One that is not is
+written once into space of its own length, on the stack to 256 characters and rented past that, and
+made a string from there. **That method was written three times.** Through `CharStringBuilder`, it
+read slower than the builder it replaced in three rounds of three, 720 microseconds to 790 for the
+thousand; measured first and written second with `string.Create`, slower in four of four, 723 to 787,
+two passes over a text with a mispredicted branch at every space being more than a builder costs.
+Written by index into a span the size of the text, with no check for room because there is always
+room, it is level: 727 to 718. `xs:normalizedString` looked for its three characters with an array of
+them made at every call, and asks the span now.
+
+Bytes each time, the loop taken off:
+
+| | was | is |
+|---|---:|---:|
+| `format-integer(position(), 'w')` | 268 | 73 |
+| `format-integer(position(), 'W')` | 342 | 147 |
+| `format-integer(position(), 'Ww')` | 467 | 147 |
+| `format-integer(position(), 'w;o')` | 427 | 77 |
+| The same `'w'` in German, French, Spanish, Italian, Norwegian, Swedish, Danish | 230 to 271 | 58 to 73 |
+| The same in Portuguese | 294 | 103 |
+| `format-integer(position(), 'w;o', 'es')` | 318 | 113 |
+| `xsl:number value="position()" format="w"` | 622 | 427 |
+| `codepoints-to-string((72, 105, 33))`, the sequence itself being 464 of each | 680 | 528 |
+| `codepoints-to-string(string-to-codepoints(name))` | 2,734 | 2,197 |
+| A memoized function of one string, over the same function not memoized | 323 | 94 |
+| A memoized function of an integer and a string, likewise | 313 | 145 |
+| `xs:token(description)`, over `xs:string(description)` | 308 | 0 |
+| `xs:token()` of a text with whitespace to collapse, over the text | 322 | 133 |
+| `xs:NCName('abc')`, `xs:language('en')` | 112 | 0 |
+| `xs:normalizedString(description)`, over `xs:string(description)` | 32 | 0 |
+
+In microseconds for the thousand, each the mean of three runs in fresh processes taken turn about:
+
+| | was | is |
+|---|---:|---:|
+| `format-integer(position(), 'w')` | 262 | 221 |
+| `format-integer(position(), 'Ww')` | 402 | 288 |
+| `format-integer(position(), 'w;o')` | 329 | 250 |
+| `format-integer(position(), 'w', 'de')` | 347 | 293 |
+| `format-integer(position(), 'w', 'es')` | 299 | 265 |
+| `xsl:number value="position()" format="w"` | 299 | 267 |
+| `codepoints-to-string((72, 105, 33))` | 430 | 440 |
+| `codepoints-to-string(string-to-codepoints(name))` | 2,173 | 2,190 |
+| A memoized function of one string | 436 | 376 |
+| A memoized function of an integer and a string | 373 | 351 |
+| `xs:token(description)` | 532 | 450, four runs |
+| `xs:token()` of a text with whitespace to collapse | 727 | 718, four runs, one of the four left out of each side |
+| `xs:NCName('abc')` | 114 | 85 |
+| `format-integer(position(), '000')`, which nothing here touches | 180 | 179 |
+| The products stylesheet, likewise | 3,551 | 3,514 |
+
+Words are a sixth to a quarter faster, a memoized call a tenth, and a cast that collapses nothing a
+sixth to a quarter; `codepoints-to-string()` takes the time it took, the sequence it is handed being
+most of it.
+
+Nothing moves on any conformance run, every failure set identical test for test: 8,061 of 8,071 at
+3.0, 5,678 of 5,701 at 2.0 and 8,668 of 8,683 schema-aware, each on both backends, and 18,268 of
+18,285 and 14,553 of 14,577 on the XPath runs.
+
+Fourteen more unit tests in `StackBuiltStringTests`, counting each row of one that is asked six times.
+Twelve ask for answers and pass against the engine as it was: words in eleven languages and their
+ordinals, the Italian elision and the Spanish multiplier among them, and numbers whose words are two
+hundred characters; code points to a string with pairs in it, three hundred characters long, and six
+that are no character and are refused; thirty-six calls of a function that remembers set beside the same
+calls of one that does not, nodes of one text and two identities and texts of three hundred
+characters among the arguments; and casts that collapse, replace, find nothing to do, and refuse. Two
+measure and do not pass against it, reading 268 bytes and 248 where 88 and 104 are asked. 3,126 unit
+tests in all.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error

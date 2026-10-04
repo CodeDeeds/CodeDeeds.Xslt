@@ -2112,7 +2112,11 @@ namespace CodeDeeds.Xslt.Runtime
         /// </remarks>
         private bool TryKeyArguments(XPathValue[] arguments, out string key)
         {
-            System.Text.StringBuilder built = new();
+            // Both on the stack, each item written beside the whole so that its length is known before it
+            // is copied in: a builder, its buffer and a string for every item were made for each call
+            // on the way to the one string the key is.
+            CharStringBuilder built = new CharStringBuilder(stackalloc char[128]);
+            CharStringBuilder part = new CharStringBuilder(stackalloc char[64]);
 
             foreach (XPathValue argument in arguments)
             {
@@ -2121,21 +2125,40 @@ namespace CodeDeeds.Xslt.Runtime
                     // A QName is keyed by the name it is and not by the name it is written with: two
                     // elements called x:alpha in different namespaces have one lexical form between them,
                     // and a cache keyed on that would answer the second call with the first one's result.
-                    string? part = item.Kind switch
-                    {
-                        XPathValueKind.Node => $"n{GetTreeId(item.NodeTree)}:{item.NodeId}",
-                        XPathValueKind.Map or XPathValueKind.Array or XPathValueKind.Function => null,
-                        _ when item.TypeCode == XdmTypeCode.QName => Keyed(item.AsQName()),
-                        _ => $"{(int)item.TypeCode}:{XdmSequence.StringValueOf(item)}",
-                    };
+                    part.Clear();
 
-                    if (part is null)
+                    switch (item.Kind)
                     {
-                        key = string.Empty;
-                        return false;
+                        case XPathValueKind.Node:
+                            part.Append('n');
+                            part.Append(GetTreeId(item.NodeTree));
+                            part.Append(':');
+                            part.Append(item.NodeId);
+                            break;
+
+                        case XPathValueKind.Map or XPathValueKind.Array or XPathValueKind.Function:
+                            key = string.Empty;
+                            return false;
+
+                        default:
+                            if (item.TypeCode == XdmTypeCode.QName)
+                            {
+                                part.Append(Keyed(item.AsQName()));
+                            }
+                            else
+                            {
+                                part.Append((int)item.TypeCode);
+                                part.Append(':');
+                                part.Append(XdmSequence.StringValueOf(item));
+                            }
+
+                            break;
                     }
 
-                    built.Append(part.Length).Append(':').Append(part).Append(',');
+                    built.Append(part.Length);
+                    built.Append(':');
+                    built.Append(part.AsSpan());
+                    built.Append(',');
                 }
 
                 // The end of one argument, so that f((1,2), ()) and f((1), (2)) are different calls.

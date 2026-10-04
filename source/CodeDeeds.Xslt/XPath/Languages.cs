@@ -77,17 +77,15 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="words">The masculine form.</param>
         protected static string Feminine(string words)
         {
-            StringBuilder builder = new StringBuilder(words);
-
-            for (int i = 0; i < builder.Length; i++)
+            // Written once, into a string of the same length: a builder made of the words, changed and
+            // made a string of again was three allocations for the one.
+            return string.Create(words.Length, words, static (span, source) =>
             {
-                if (builder[i] == 'o' && (i + 1 == builder.Length || builder[i + 1] == ' '))
+                for (int i = 0; i < source.Length; i++)
                 {
-                    builder[i] = 'a';
+                    span[i] = source[i] == 'o' && (i + 1 == source.Length || source[i + 1] == ' ') ? 'a' : source[i];
                 }
-            }
-
-            return builder.ToString();
+            });
         }
     }
 

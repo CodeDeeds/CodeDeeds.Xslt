@@ -2995,7 +2995,9 @@ namespace CodeDeeds.Xslt.XPath
 
         private static XPathValue CodepointsToString(List<XPathValue> items)
         {
-            StringBuilder builder = new StringBuilder(items.Count);
+            // Written on the stack, a character at a time: a builder, its buffer and a string for every
+            // code point were what this made on the way to the one string.
+            CharStringBuilder builder = new CharStringBuilder(stackalloc char[128]);
 
             foreach (XPathValue item in items)
             {
@@ -3007,7 +3009,19 @@ namespace CodeDeeds.Xslt.XPath
                         XsltErrorCode.FOCH0001, $"{number} is not a valid XML character.");
                 }
 
-                builder.Append(char.ConvertFromUtf32((int)number));
+                int code = (int)number;
+
+                if (code < 0x10000)
+                {
+                    builder.Append((char)code);
+                }
+                else
+                {
+                    // Outside the basic plane a character is two chars, the high half and then the low.
+                    code -= 0x10000;
+                    builder.Append((char)(0xD800 + (code >> 10)));
+                    builder.Append((char)(0xDC00 + (code & 0x3FF)));
+                }
             }
 
             return XPathValue.FromString(builder.ToString());
