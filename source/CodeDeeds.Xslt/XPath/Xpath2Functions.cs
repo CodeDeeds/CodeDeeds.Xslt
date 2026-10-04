@@ -1626,9 +1626,18 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         private static string EscapeUri(string text, bool Reserved, bool Html)
         {
-            StringBuilder builder = new StringBuilder(text.Length);
+            // The octets and what is written of them both stand on the stack, for a text short enough
+            // to: a builder and its buffer, an array of the octets and a string for every octet escaped
+            // were what this allocated, and a text with nothing in it to escape is now its own answer.
+            int most = Encoding.UTF8.GetMaxByteCount(text.Length);
+            byte[]? rented = most <= 512 ? null : System.Buffers.ArrayPool<byte>.Shared.Rent(most);
+            Span<byte> octets = rented ?? stackalloc byte[512];
+            int count = Encoding.UTF8.GetBytes(text, octets);
 
-            foreach (byte unit in Encoding.UTF8.GetBytes(text))
+            CharStringBuilder builder = new CharStringBuilder(stackalloc char[256]);
+            bool escaped = false;
+
+            foreach (byte unit in octets[..count])
             {
                 char character = (char)unit;
 
@@ -1646,11 +1655,21 @@ namespace CodeDeeds.Xslt.XPath
                 }
                 else
                 {
-                    builder.Append('%').Append(unit.ToString("X2", CultureInfo.InvariantCulture));
+                    builder.Append('%');
+                    builder.Append("0123456789ABCDEF"[unit >> 4]);
+                    builder.Append("0123456789ABCDEF"[unit & 0xF]);
+                    escaped = true;
                 }
             }
 
-            return builder.ToString();
+            if (rented is not null)
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(rented);
+            }
+
+            // Nothing escaped is every octet kept, and the octets kept are all ASCII, so the text is what
+            // was written.
+            return escaped ? builder.ToString() : text;
         }
 
         private string NormalizeUnicode(ref DynamicContext context)
@@ -2092,18 +2111,42 @@ namespace CodeDeeds.Xslt.XPath
         /// wider than that along with them. A whole number keys by its digits instead, which is exact at
         /// any size and which an xs:integer, an xs:decimal and an xs:double of the same value all reach.
         /// </remarks>
-        private static string NumericKey(XPathValue value)
+        private static void AppendNumericKey(ref CharStringBuilder key, XPathValue value)
         {
             if (value.TypeCode == XdmTypeCode.Integer)
             {
-                return value.ToBigInteger().ToString(CultureInfo.InvariantCulture);
+                if (value.IsWideInteger)
+                {
+                    key.Append(value.ToBigInteger());
+                }
+                else
+                {
+                    key.Append(value.ToInteger());
+                }
+
+                return;
             }
 
             double number = value.ToNumber();
 
-            return !double.IsNaN(number) && !double.IsInfinity(number) && number == Math.Floor(number)
-                ? new System.Numerics.BigInteger(number).ToString(CultureInfo.InvariantCulture)
-                : number.ToString("R", CultureInfo.InvariantCulture);
+            if (!double.IsNaN(number) && !double.IsInfinity(number) && number == Math.Floor(number))
+            {
+                // A whole number is keyed by its digits, so that it meets the integer it equals. One that
+                // fits sixty-four bits is written as that, which is the same digits and no wide integer
+                // made to write them.
+                if (Math.Abs(number) < 9.0e18)
+                {
+                    key.Append((long)number);
+                }
+                else
+                {
+                    key.Append(new System.Numerics.BigInteger(number));
+                }
+            }
+            else
+            {
+                key.Append(number, "R");
+            }
         }
 
         /// <summary>
@@ -2143,9 +2186,35 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="collation">The collation strings are keyed under.</param>
         private static string DistinctKey(XPathValue value, Collation collation)
         {
+            // A string's key is the collation's, not the string: under one that ignores case, 'DATA' and
+            // 'data' are one value and have to land in one bucket. Untyped text is a string here, which
+            // is what it is until something compares it with a number. Asked first and answered here,
+            // being what most values are and one concatenation as it stands; everything else is
+            // written out by a method that has the stack space to write it in.
+            if (value.Kind != XPathValueKind.Number
+                && value.TypeCode is XdmTypeCode.String or XdmTypeCode.AnyUri or XdmTypeCode.UntypedAtomic or XdmTypeCode.None)
+            {
+                return "s:" + collation.Key(value.ToStringValue());
+            }
+
+            return WrittenDistinctKey(value, collation);
+        }
+
+        /// <summary>The key of a value that is not a string, written out and made a string once.</summary>
+        /// <remarks>
+        /// A number's key was the number as a string and then the key, and a date's was a string for
+        /// each of its parts on the way to one.
+        /// </remarks>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static string WrittenDistinctKey(XPathValue value, Collation collation)
+        {
+            CharStringBuilder key = new CharStringBuilder(stackalloc char[64]);
+
             if (value.Kind == XPathValueKind.Number)
             {
-                return "n:" + NumericKey(value);
+                key.Append("n:");
+                AppendNumericKey(ref key, value);
+                return key.ToString();
             }
 
             switch (value.TypeCode)
@@ -2164,7 +2233,13 @@ namespace CodeDeeds.Xslt.XPath
                     XdmDateTime moment = value.AsDateTime();
                     XdmDateTime.Moment instant = moment.Instant;
 
-                    return "m:" + (int)value.TypeCode + ":" + instant.Day + ":" + instant.Tick;
+                    key.Append("m:");
+                    key.Append((int)value.TypeCode);
+                    key.Append(':');
+                    key.Append(instant.Day);
+                    key.Append(':');
+                    key.Append(instant.Tick);
+                    return key.ToString();
                 }
 
                 case XdmTypeCode.Duration:
@@ -2174,8 +2249,11 @@ namespace CodeDeeds.Xslt.XPath
                     // No type in this one: the three compare with one another, a year-month duration
                     // being one with no seconds and a day-time one having no months.
                     XdmDuration length = value.AsDuration();
-                    return "t:" + length.Months + ":"
-                        + length.Seconds.ToString(CultureInfo.InvariantCulture);
+                    key.Append("t:");
+                    key.Append(length.Months);
+                    key.Append(':');
+                    key.Append(length.Seconds);
+                    return key.ToString();
                 }
 
                 case XdmTypeCode.Gregorian:
@@ -2188,15 +2266,17 @@ namespace CodeDeeds.Xslt.XPath
                 case XdmTypeCode.AnyUri:
                 case XdmTypeCode.UntypedAtomic:
                 case XdmTypeCode.None:
-                    // A string's key is the collation's, not the string: under one that ignores case,
-                    // 'DATA' and 'data' are one value and have to land in one bucket. Untyped text is
-                    // a string here, which is what it is until something compares it with a number.
+                    // Answered by the caller before it gets here, and the same answer if it does.
                     return "s:" + collation.Key(value.ToStringValue());
 
                 default:
                     // Everything else reads as itself and is told apart by its type, so that a boolean
                     // and the string of it, or an xs:hexBinary and the text of one, stay two values.
-                    return "v:" + (int)value.TypeCode + ":" + value.ToCanonicalString();
+                    key.Append("v:");
+                    key.Append((int)value.TypeCode);
+                    key.Append(':');
+                    key.Append(value.ToCanonicalString());
+                    return key.ToString();
             }
         }
 

@@ -9994,6 +9994,132 @@ else named, where it was 512; one reads fifteen lexical forms as a string and as
 the middle of a longer buffer and requires the same answer of both, a value or either way of failing;
 and one runs the example on the new overload word for word.
 
+### Strings put together on the stack, and content captured without a target of its own
+
+After `fn:parse-ietf-date`, the other places that still built a string in a `StringBuilder` made for
+the call: sixty of them, of which about half run while a stylesheet is being compiled, or only for
+input that needs it, or write something with no bound, and are left as they were. Each of the rest was
+measured as the survey above measures, a body run for each of a thousand products with the loop taken
+off, and five were converted to `CharStringBuilder` over stack space.
+
+**`format-date()`, `format-time()` and `format-dateTime()`.** `DateFormatting.Format` writes into a
+hundred and twenty-eight characters of stack, passed by reference to the five helpers that wrote into
+the builder; a digit outside the basic plane is written as its two halves rather than as a string
+made of them. **`xsl:number`.** `NumberInstruction.Format`, sixty-four characters. **`format-integer()`
+with a picture of digits.** `IntegerPicture.Digits`, sixty-four characters, and the plain digits it is
+given are formatted into twenty characters of stack rather than into a string. **`encode-for-uri()`,
+`iri-to-uri()` and `escape-html-uri()`.** `EscapeUri` encodes into 512 octets of stack, or a rented
+array for a longer text, and writes into 256 characters; an octet escaped was a string of its own, two
+hexadecimal digits made by `ToString("X2")`, and is two characters appended; and a text with nothing
+in it to escape is returned as it came. **The identity of a key.** `ForEachGroupInstruction.KeyIdentity`,
+which `xsl:for-each-group` and `key()` share, `KeyDefinition.CompositeIdentity`, and the key
+`distinct-values()` keeps a value under: a number was its digits as a string and then the identity, a
+date a string for each part of its moment, the moment and then the identity, and a composite key a
+builder and a string for every part. Each is written once into stack space and made a string once;
+`XdmDateTime.Key` writes itself into whatever it is given.
+
+**A string key, which builds nothing, has a method to itself.** A string's identity is `"s:"` and the
+string, one concatenation, and was left as that. But with the stack buffers of the other kinds in the
+same method, the three rows that key by strings read slower in three rounds of three, by about five
+percent: `xsl:for-each-group` by a string 292 microseconds to 306, a key built over the products 990
+to 1,040. Whatever a method allocates on the stack is paid for by every call of it. `KeyIdentity` and
+the key of `distinct-values()` now answer for a string and a boolean themselves and hand everything
+else to a method that is not inlined, and the rows are level: 301 to 294, and 965 to 951.
+
+**The content of an instruction was captured in a target made for it.** `xsl:attribute` with content,
+which is how XSLT 1.0 writes every attribute whose value is computed, and `xsl:comment` and
+`xsl:processing-instruction`, run their content with a `StringCaptureTarget` as the output and take
+its string. The target was made for each: the target, a list, the list's array, a builder, the
+builder's buffer, and then a copy of the text out of the builder — 280 bytes for
+`<xsl:attribute name="href"><xsl:value-of select="id"/></xsl:attribute>`, where
+`<a href="{id}"/>` is 80, the path. A `ref struct` cannot be a field, so this one is not a stack
+buffer: the transformation lends a target, `XsltRuntime.RentCapture`, and takes it back when the
+content has run, whatever it did, four of them kept for content captured inside content. And text
+that is one string — one `xsl:value-of`, or one run of literal text — is kept as that string and
+handed back, the builder being for the second piece. The attribute allocates nothing.
+
+Bytes each time, the loop taken off:
+
+| | was | is |
+|---|---:|---:|
+| `format-date($d, '[Y0001]-[M01]-[D01]')` | 192 | 80 |
+| `format-date($d, '[D] [MNn] [Y]')` | 280 | 176 |
+| `format-dateTime($dt, '[H01]:[m01]:[s01]')` | 152 | 40 |
+| `xsl:number` | 256 | 152 |
+| `xsl:number value="position()" format="1."` | 416 | 312 |
+| `format-integer(position(), '000')` | 142 | 32 |
+| `format-integer(position() * 1000, '#,##0')` | 175 | 40 |
+| `encode-for-uri(name)`, `iri-to-uri(name)`, a name with a space in it | 472 | 147 |
+| `escape-html-uri(name)`, which has nothing to escape in it | 297 | 80 |
+| `xsl:for-each-group` by `number(rating)`, for each product | 423 | 391 |
+| `xsl:for-each-group` by an `xs:date`, for each product | 422 | 350 |
+| `xsl:for-each-group` by `category, inStock`, composite, for each product | 1,524 | 1,229 |
+| `distinct-values()` of a thousand numbers, for each | 423 | 394 |
+| `xsl:attribute` with one `xsl:value-of` in it, or with literal text | 280 | 0 |
+| `xsl:attribute` with text, an `xsl:value-of` and more text | 292 | 44 |
+| `xsl:comment`, `xsl:processing-instruction` with literal text | 272 | 0 |
+
+What is left of the first seven is the result and, for `xsl:number`, the list of numbers it is given;
+of the URI functions, the path to `name` and the result. Not done, each a method of its own that
+nothing here shares: `format-integer()` in words, 268 bytes and spread over the ten language files;
+`codepoints-to-string()`, a string for every character; the key of a memoized function; and the
+whitespace an `xs:token` cast collapses.
+
+In microseconds for the thousand, each figure the mean of three runs in fresh processes taken turn
+about with the engine as it was, on a machine that was in use, where single runs of one row differ by
+five percent and more:
+
+| | was | is |
+|---|---:|---:|
+| `format-date($d, '[Y0001]-[M01]-[D01]')` | 462 | 441 |
+| `format-dateTime($dt, '[H01]:[m01]:[s01]')` | 412 | 377 |
+| `xsl:number` | 3,885 | 3,774 |
+| `xsl:number value="position()" format="1."` | 193 | 193 |
+| `format-integer(position(), '000')` | 188 | 180 |
+| `encode-for-uri(name)` | 457 | 380 |
+| `escape-html-uri(name)` | 380 | 357 |
+| `xsl:for-each-group` by a string | 301 | 294 |
+| `xsl:for-each-group` by an `xs:date` | 328 | 318 |
+| `xsl:for-each-group`, composite | 806 | 771 |
+| `distinct-values()` of strings | 133 | 129 |
+| `distinct-values()` of numbers | 401 | 409, four runs, the two sides' runs overlapping |
+| A key built over the products and used once | 965 | 951 |
+| `count(key('id', id))` for each product | 1,314 | 1,307 |
+| `xsl:attribute` with one `xsl:value-of` | 405 | 342 |
+| `xsl:attribute` with text, an `xsl:value-of` and more text | 426 | 387 |
+| `xsl:comment` with literal text | 112 | 59 |
+| `<a href="{id}"/>`, which nothing here touches | 287 | 283 |
+| The products stylesheet, likewise | 3,508 | 3,520 |
+
+An attribute with content is a sixth faster and a comment takes half the time; escaping a URI is a
+sixth faster; the rest are level or a few percent better, and nothing is slower by more than its own
+runs differ.
+
+Nothing moves on any conformance run, every failure set identical test for test: 8,061 of 8,071 at
+3.0, 5,678 of 5,701 at 2.0 and 8,668 of 8,683 schema-aware, each on both backends, and 18,268 of
+18,285 and 14,553 of 14,577 on the XPath runs.
+
+Twenty-three new unit tests, `StackBuiltStringTests`. Eighteen ask for answers and pass against the
+engine as it was: dates in pictures of digits, names and widths, in a digit family outside the basic
+plane, and in a picture that writes two hundred and twenty characters; numbers in six formats against
+`XslCompiledTransform` and one of a hundred and seventy characters; integers padded, grouped, ordinal,
+wider than sixty-four bits and ninety digits wide; URIs escaped an octet at a time, with nothing to
+escape, and three hundred characters long; values grouped and told apart as numbers, dates, booleans
+and names, composite keys of parts longer than their buffers; and content captured as one piece, as
+several, with a separator, inside other content being captured, and after content that failed
+halfway. Five measure and do not pass against it, where the first of each read 192 bytes, 255, 319,
+64 and 280.
+
+**What the measuring tests wait for.** Writing an attribute and formatting a date each allocate
+ninety-six bytes a time in code the runtime has not yet optimised and none once it has, and it
+optimises in the background, some while after the code has run often enough. Twenty runs and the best
+of five read these tests a hundred bytes high, or did not, by what had run before them, and a version
+that waited for a pass to go by with nothing falling passed alone three times running and failed
+once among three thousand other tests. They keep the least
+each stylesheet has ever allocated, which only falls, and run again until what is asked holds or ten
+seconds have gone by: waiting cannot make a stylesheet that allocates too much look as if it did not.
+3,112 unit tests in all.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error

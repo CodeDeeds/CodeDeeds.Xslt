@@ -133,20 +133,24 @@ namespace CodeDeeds.Xslt.Compiler
             XsltRuntime runtime,
             string separator = " ")
         {
-            StringCaptureTarget capture = new StringCaptureTarget(separator);
+            // Lent by the transformation and given back, whatever the content does: an xsl:attribute with
+            // content is written once for every element that has one, and a target, its list and its
+            // builder made afresh each time were five allocations for a string that is usually there
+            // already.
+            StringCaptureTarget capture = runtime.RentCapture(separator);
             OutputTarget previous = runtime.Output;
             runtime.Output = capture;
 
             try
             {
                 ExecuteAll(body, ref context, runtime);
+                return capture.ToString();
             }
             finally
             {
                 runtime.Output = previous;
+                runtime.ReturnCapture(capture);
             }
-
-            return capture.ToString();
         }
 
         /// <summary>
@@ -3787,7 +3791,12 @@ namespace CodeDeeds.Xslt.Compiler
     {
         private readonly List<string> m_items = new();
         private readonly StringBuilder m_text = new();
-        private readonly string m_separator;
+        private string m_separator;
+
+        // The text written since the last item, where it is one string and nothing has been written
+        // after it: kept as it came, so that content which is one xsl:value-of or one run of literal
+        // text is that string and not a copy of it. A second piece moves it into the builder.
+        private string? m_only;
         private bool m_hasText;
         private bool m_lastWasAtomic;
         private int m_depth;
@@ -3797,6 +3806,55 @@ namespace CodeDeeds.Xslt.Compiler
         public StringCaptureTarget(string separator)
         {
             m_separator = separator;
+        }
+
+        /// <summary>
+        /// Makes this target ready to capture again, as one newly made would be.
+        /// </summary>
+        /// <remarks>
+        /// A transformation keeps the targets it has used and lends them out again; see
+        /// <see cref="XsltRuntime.RentCapture"/>. Whatever a capture that ended in an error left behind
+        /// is cleared here, where the next one begins.
+        /// </remarks>
+        /// <param name="separator">What goes between the items captured.</param>
+        internal void Reset(string separator)
+        {
+            m_separator = separator;
+            m_items.Clear();
+            m_text.Clear();
+            m_only = null;
+            m_hasText = false;
+            m_lastWasAtomic = false;
+            m_depth = 0;
+        }
+
+        /// <summary>Adds to the text written since the last item.</summary>
+        private void Append(string text)
+        {
+            if (m_only is null && m_text.Length == 0)
+            {
+                m_only = text;
+                return;
+            }
+
+            if (m_only is not null)
+            {
+                m_text.Append(m_only);
+                m_only = null;
+            }
+
+            m_text.Append(text);
+        }
+
+        /// <summary>Takes the text written since the last item, leaving none.</summary>
+        private string TakeText()
+        {
+            string text = m_only ?? m_text.ToString();
+
+            m_only = null;
+            m_text.Clear();
+            m_hasText = false;
+            return text;
         }
 
         /// <inheritdoc/>
@@ -3857,9 +3915,7 @@ namespace CodeDeeds.Xslt.Compiler
             if (--m_depth == 0)
             {
                 // The element is one item, and its string value is all the text beneath it.
-                m_items.Add(m_text.ToString());
-                m_text.Clear();
-                m_hasText = false;
+                m_items.Add(TakeText());
             }
         }
 
@@ -3875,7 +3931,7 @@ namespace CodeDeeds.Xslt.Compiler
                 return;
             }
 
-            m_text.Append(text);
+            Append(text);
             m_hasText = true;
         }
 
@@ -3890,10 +3946,10 @@ namespace CodeDeeds.Xslt.Compiler
                 // Text of the element, a space before it where an atomic value came just before, as in a tree.
                 if (m_lastWasAtomic)
                 {
-                    m_text.Append(' ');
+                    Append(" ");
                 }
 
-                m_text.Append(text);
+                Append(text);
                 m_lastWasAtomic = true;
                 return;
             }
@@ -3934,16 +3990,20 @@ namespace CodeDeeds.Xslt.Compiler
                 return;
             }
 
-            m_items.Add(m_text.ToString());
-            m_text.Clear();
-            m_hasText = false;
+            m_items.Add(TakeText());
         }
 
         /// <inheritdoc/>
         public override string ToString()
         {
             EndText();
-            return string.Join(m_separator, m_items);
+
+            return m_items.Count switch
+            {
+                0 => string.Empty,
+                1 => m_items[0],
+                _ => string.Join(m_separator, m_items),
+            };
         }
     }
 }

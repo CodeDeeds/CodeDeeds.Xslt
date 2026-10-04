@@ -427,24 +427,113 @@ namespace CodeDeeds.Xslt.Compiler
             // composite key and a value that happens to spell the same cannot meet either.
             if (key.Kind is XPathValueKind.Sequence or XPathValueKind.NodeSet)
             {
-                System.Text.StringBuilder joined = new System.Text.StringBuilder("q");
-
-                foreach (XPathValue part in XdmSequence.Items(key))
-                {
-                    string identity = KeyIdentity(part, collation);
-                    joined.Append(':').Append(identity.Length).Append(':').Append(identity);
-                }
-
-                return joined.ToString();
+                return JoinedIdentity(key, collation);
             }
 
+            // A string, which is what most keys are, is one concatenation as it stands, and a boolean is
+            // one of two strings that are already there. Only what has parts to put together is written
+            // out first, and by methods of their own: the stack space they write in is theirs, so that
+            // a string key, which needs none, is not given a frame shaped for it.
+            if (key.Kind == XPathValueKind.Boolean)
+            {
+                return key.ToBoolean() ? "b:1" : "b:0";
+            }
+
+            if (TextOf(key) is string text)
+            {
+                return "s:" + Keyed(text, collation);
+            }
+
+            return WrittenIdentity(key, collation);
+        }
+
+        /// <summary>The identity of a composite key: those of its parts, each with its length in front.</summary>
+        /// <remarks>
+        /// Both on the stack, the part written beside the whole so that its length is known before it is
+        /// copied in: a builder and its buffer, and a string for every part, were what a composite key
+        /// cost on top of the one string it is.
+        /// </remarks>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static string JoinedIdentity(XPathValue key, Collation? collation)
+        {
+            CharStringBuilder joined = new CharStringBuilder(stackalloc char[128]);
+            CharStringBuilder part = new CharStringBuilder(stackalloc char[64]);
+            joined.Append('q');
+
+            foreach (XPathValue item in XdmSequence.Items(key))
+            {
+                part.Clear();
+                AppendIdentity(ref part, item, collation);
+
+                joined.Append(':');
+                joined.Append(part.Length);
+                joined.Append(':');
+                joined.Append(part.AsSpan());
+            }
+
+            return joined.ToString();
+        }
+
+        /// <summary>The identity of a value that is neither a string nor a boolean, written out and made a string once.</summary>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static string WrittenIdentity(XPathValue key, Collation? collation)
+        {
+            CharStringBuilder identity = new CharStringBuilder(stackalloc char[64]);
+            AppendIdentity(ref identity, key, collation);
+            return identity.ToString();
+        }
+
+        /// <summary>
+        /// The text a key is keyed by, where the key is a string or a node nothing has typed, and null
+        /// where it is a value of some other kind.
+        /// </summary>
+        private static string? TextOf(XPathValue key)
+        {
             switch (key.Kind)
             {
                 case XPathValueKind.Number:
-                    return "n:" + key.ToNumber().ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+                case XPathValueKind.Boolean:
+                case XPathValueKind.Sequence:
+                case XPathValueKind.NodeSet:
+                    return null;
+
+                case XPathValueKind.Node:
+                    return key.NodeTree.HasTypeAnnotations ? null : XdmSequence.StringValueOf(key);
+            }
+
+            return key.TypeCode is XdmTypeCode.String or XdmTypeCode.UntypedAtomic or XdmTypeCode.AnyUri or XdmTypeCode.None
+                ? key.ToStringValue()
+                : null;
+        }
+
+        /// <summary>
+        /// Writes the identity of one value, which <see cref="KeyIdentity"/> makes a string of.
+        /// </summary>
+        /// <remarks>
+        /// A number, a date and a value of any other type are a letter, the type and the value: written
+        /// here part by part, where they were a string for the type's number, a string for the value and
+        /// then the two joined.
+        /// </remarks>
+        /// <param name="identity">What the identity is appended to.</param>
+        /// <param name="key">The key value.</param>
+        /// <param name="collation">The collation strings are keyed under, or null for the code point one.</param>
+        private static void AppendIdentity(ref CharStringBuilder identity, XPathValue key, Collation? collation)
+        {
+            switch (key.Kind)
+            {
+                case XPathValueKind.Sequence:
+                case XPathValueKind.NodeSet:
+                    identity.Append(KeyIdentity(key, collation));
+                    return;
+
+                case XPathValueKind.Number:
+                    identity.Append("n:");
+                    identity.Append(key.ToNumber(), "R");
+                    return;
 
                 case XPathValueKind.Boolean:
-                    return key.ToBoolean() ? "b:1" : "b:0";
+                    identity.Append(key.ToBoolean() ? "b:1" : "b:0");
+                    return;
 
                 case XPathValueKind.Node:
                 {
@@ -458,32 +547,47 @@ namespace CodeDeeds.Xslt.Compiler
 
                         if (typed.Kind != XPathValueKind.Sequence)
                         {
-                            return KeyIdentity(typed, collation);
+                            AppendIdentity(ref identity, typed, collation);
+                            return;
                         }
                     }
 
-                    return "s:" + Keyed(XdmSequence.StringValueOf(key), collation);
+                    identity.Append("s:");
+                    identity.Append(Keyed(XdmSequence.StringValueOf(key), collation));
+                    return;
                 }
             }
 
             switch (key.TypeCode)
             {
                 case XdmTypeCode.String or XdmTypeCode.UntypedAtomic or XdmTypeCode.AnyUri or XdmTypeCode.None:
-                    return "s:" + Keyed(key.ToStringValue(), collation);
+                    identity.Append("s:");
+                    identity.Append(Keyed(key.ToStringValue(), collation));
+                    return;
 
                 case XdmTypeCode.QName:
                 {
                     XdmQName name = key.AsQName();
-                    return "q:" + name.NamespaceUri + "}" + name.LocalName;
+                    identity.Append("q:");
+                    identity.Append(name.NamespaceUri);
+                    identity.Append('}');
+                    identity.Append(name.LocalName);
+                    return;
                 }
 
                 case XdmTypeCode.DateTime or XdmTypeCode.Date or XdmTypeCode.Time:
-                    return "d:" + ((int)key.TypeCode).ToString(System.Globalization.CultureInfo.InvariantCulture)
-                        + ":" + key.AsDateTime().Key;
+                    identity.Append("d:");
+                    identity.Append((int)key.TypeCode);
+                    identity.Append(':');
+                    key.AsDateTime().AppendKey(ref identity);
+                    return;
 
                 default:
-                    return "t:" + ((int)key.TypeCode).ToString(System.Globalization.CultureInfo.InvariantCulture)
-                        + ":" + key.ToStringValue();
+                    identity.Append("t:");
+                    identity.Append((int)key.TypeCode);
+                    identity.Append(':');
+                    identity.Append(key.ToStringValue());
+                    return;
             }
         }
 

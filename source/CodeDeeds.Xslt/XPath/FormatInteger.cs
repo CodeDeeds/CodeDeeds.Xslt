@@ -505,17 +505,23 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>Renders as digits of the picture's family, padded and grouped as the picture asks.</summary>
         private string Digits(ulong magnitude, string? language)
         {
-            return Digits(magnitude.ToString(CultureInfo.InvariantCulture), magnitude, language);
+            // Twenty digits is the longest a magnitude of sixty-four bits is written.
+            Span<char> plain = stackalloc char[20];
+            magnitude.TryFormat(plain, out int written, default, CultureInfo.InvariantCulture);
+            return Digits(plain[..written], magnitude, language);
         }
 
         /// <summary>Renders digits already written out, which is the one thing a wide value shares.</summary>
         /// <param name="plain">The magnitude in Latin digits, with no sign.</param>
         /// <param name="ordinal">The magnitude, or its last digits, for the ordinal suffix.</param>
         /// <param name="language">The language the suffix is spelled in.</param>
-        private string Digits(string plain, ulong ordinal, string? language)
+        private string Digits(scoped ReadOnlySpan<char> plain, ulong ordinal, string? language)
         {
             int width = Math.Max(plain.Length, m_mandatory);
-            StringBuilder builder = new StringBuilder(width + width);
+
+            // On the stack, the digits read from where they were formatted: a builder, its buffer and a
+            // string of the plain digits were three allocations for a result that is one.
+            CharStringBuilder builder = new CharStringBuilder(stackalloc char[64]);
 
             for (int i = 0; i < width; i++)
             {
@@ -525,11 +531,11 @@ namespace CodeDeeds.Xslt.XPath
 
                 if (i > 0 && SeparatorAt(position) is int separator)
                 {
-                    AppendCodePoint(builder, separator);
+                    AppendCodePoint(ref builder, separator);
                 }
 
                 int leading = width - plain.Length;
-                AppendCodePoint(builder, m_zero + (i < leading ? 0 : plain[i - leading] - '0'));
+                AppendCodePoint(ref builder, m_zero + (i < leading ? 0 : plain[i - leading] - '0'));
             }
 
             if (!m_ordinal)
@@ -538,7 +544,8 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             // An ordinal written in digits is a suffix in English and a full stop in German: 3rd against 3.
-            return builder.Append(Languages.Words(language).OrdinalSuffix(ordinal, m_variation)).ToString();
+            builder.Append(Languages.Words(language).OrdinalSuffix(ordinal, m_variation));
+            return builder.ToString();
         }
 
         /// <summary>The separator that belongs this many digits from the right, if any.</summary>
@@ -603,7 +610,7 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>Appends a code point, which the digit families and separators may need a pair for.</summary>
-        private static void AppendCodePoint(StringBuilder builder, int code)
+        private static void AppendCodePoint(ref CharStringBuilder builder, int code)
         {
             if (code <= 0xFFFF)
             {
@@ -612,7 +619,8 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             int offset = code - 0x10000;
-            builder.Append((char)(0xD800 + (offset >> 10))).Append((char)(0xDC00 + (offset & 0x3FF)));
+            builder.Append((char)(0xD800 + (offset >> 10)));
+            builder.Append((char)(0xDC00 + (offset & 0x3FF)));
         }
     }
 

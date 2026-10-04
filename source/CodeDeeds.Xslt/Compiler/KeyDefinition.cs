@@ -147,11 +147,16 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="identities">The identities of the values, in order.</param>
         public static string CompositeIdentity(IReadOnlyList<string> identities)
         {
-            System.Text.StringBuilder joined = new System.Text.StringBuilder().Append(identities.Count);
+            CharStringBuilder joined = new CharStringBuilder(stackalloc char[128]);
+            joined.Append(identities.Count);
 
-            foreach (string identity in identities)
+            for (int i = 0; i < identities.Count; i++)
             {
-                joined.Append(':').Append(identity.Length).Append(':').Append(identity);
+                string identity = identities[i];
+                joined.Append(':');
+                joined.Append(identity.Length);
+                joined.Append(':');
+                joined.Append(identity);
             }
 
             return joined.ToString();

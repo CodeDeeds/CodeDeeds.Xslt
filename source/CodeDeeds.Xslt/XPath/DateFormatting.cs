@@ -61,7 +61,10 @@ namespace CodeDeeds.Xslt.XPath
                 _ => DateComponents + TimeComponents + ZoneComponents,
             };
 
-            StringBuilder result = new StringBuilder(picture.Length);
+            // Written on the stack: a date is a few dozen characters however its picture spells it, and
+            // one that is not grows on to the heap as a builder would have. The builder and its buffer
+            // were two allocations a call for a result that is one.
+            CharStringBuilder result = new CharStringBuilder(stackalloc char[128]);
 
             // The names are the language's, where it is one this engine has, and the only calendar is the
             // Gregorian one. A call asking for anything else is answered in English, or in that calendar,
@@ -127,7 +130,7 @@ namespace CodeDeeds.Xslt.XPath
                 // Words are spelled in the same language as the names, and an unknown language gets
                 // English for both.
                 AppendComponent(
-                    result, value, picture.AsSpan(i + 1, end - i - 1), allowed, function, scratch, roundsFraction,
+                    ref result, value, picture.AsSpan(i + 1, end - i - 1), allowed, function, scratch, roundsFraction,
                     names, known is null ? null : language);
                 i = end;
             }
@@ -151,7 +154,7 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="names">The names of the language the value is written in.</param>
         /// <param name="language">The language tag its words are spelled in, or null for English.</param>
         private static void AppendComponent(
-            StringBuilder result,
+            ref CharStringBuilder result,
             XdmDateTime value,
             ReadOnlySpan<char> written,
             string allowed,
@@ -201,7 +204,7 @@ namespace CodeDeeds.Xslt.XPath
             {
                 case 'Y':
                     Fit(
-                        result,
+                        ref result,
                         // The absolute value, which is what the specification asks the Y component
                         // for: the era is a component of its own, and a year written with a sign would
                         // also defeat the truncation to a number of digits that [Y,2-2] asks for.
@@ -213,7 +216,7 @@ namespace CodeDeeds.Xslt.XPath
 
                 case 'M':
                     Fit(
-                        result,
+                        ref result,
                         IsName(presentation)
                             ? Name(Abbreviated(names.Months, names.MonthAbbreviations, instant.Month - 1, maximum), presentation)
                             : Number(instant.Month, presentation, ordinal, scratch, language),
@@ -223,11 +226,11 @@ namespace CodeDeeds.Xslt.XPath
                     return;
 
                 case 'D':
-                    Fit(result, Number(instant.Day, presentation, ordinal, scratch, language), minimum, maximum, presentation);
+                    Fit(ref result, Number(instant.Day, presentation, ordinal, scratch, language), minimum, maximum, presentation);
                     return;
 
                 case 'd':
-                    Fit(result, Number(instant.DayOfYear, presentation, ordinal, scratch, language), minimum, maximum, presentation);
+                    Fit(ref result, Number(instant.DayOfYear, presentation, ordinal, scratch, language), minimum, maximum, presentation);
                     return;
 
                 case 'F':
@@ -235,7 +238,7 @@ namespace CodeDeeds.Xslt.XPath
                     // ISO numbering, where Monday is 1 — not the .NET enumeration, which starts on Sunday.
                     int day = ((int)instant.DayOfWeek + 6) % 7;
                     Fit(
-                        result,
+                        ref result,
                         IsName(presentation)
                             ? Name(Abbreviated(names.Days, names.DayAbbreviations, day, maximum), presentation)
                             : Number(day + 1, presentation, ordinal, scratch, language),
@@ -246,12 +249,12 @@ namespace CodeDeeds.Xslt.XPath
                 }
 
                 case 'W':
-                    Fit(result, Number(WeekOfYear(instant), presentation, ordinal, scratch, language), minimum, maximum, presentation);
+                    Fit(ref result, Number(WeekOfYear(instant), presentation, ordinal, scratch, language), minimum, maximum, presentation);
                     return;
 
                 case 'w':
                     Fit(
-                        result,
+                        ref result,
                         Number(WeekOfMonth(instant), presentation, ordinal, scratch, language),
                         minimum,
                         maximum,
@@ -259,30 +262,30 @@ namespace CodeDeeds.Xslt.XPath
                     return;
 
                 case 'H':
-                    Fit(result, Number(instant.Hour, presentation, ordinal, scratch, language), minimum, maximum, presentation);
+                    Fit(ref result, Number(instant.Hour, presentation, ordinal, scratch, language), minimum, maximum, presentation);
                     return;
 
                 case 'h':
                 {
                     int hour = instant.Hour % 12;
-                    Fit(result, Number(hour == 0 ? 12 : hour, presentation, ordinal, scratch, language), minimum, maximum, presentation);
+                    Fit(ref result, Number(hour == 0 ? 12 : hour, presentation, ordinal, scratch, language), minimum, maximum, presentation);
                     return;
                 }
 
                 case 'P':
-                    Fit(result, Name(names.HalfDay(instant.Hour < 12, maximum), presentation), 0, maximum, presentation);
+                    Fit(ref result, Name(names.HalfDay(instant.Hour < 12, maximum), presentation), 0, maximum, presentation);
                     return;
 
                 case 'm':
-                    Fit(result, Number(instant.Minute, presentation, ordinal, scratch, language), minimum, maximum, presentation);
+                    Fit(ref result, Number(instant.Minute, presentation, ordinal, scratch, language), minimum, maximum, presentation);
                     return;
 
                 case 's':
-                    Fit(result, Number(instant.Second, presentation, ordinal, scratch, language), minimum, maximum, presentation);
+                    Fit(ref result, Number(instant.Second, presentation, ordinal, scratch, language), minimum, maximum, presentation);
                     return;
 
                 case 'f':
-                    AppendFraction(result, instant, presentation, minimum, maximum, roundsFraction);
+                    AppendFraction(ref result, instant, presentation, minimum, maximum, roundsFraction);
                     return;
 
                 case 'E':
@@ -295,7 +298,7 @@ namespace CodeDeeds.Xslt.XPath
 
                 default:
                     AppendTimezone(
-                        result, value, specifier, presentationWritten ? presentation : default, traditional, minimum);
+                        ref result, value, specifier, presentationWritten ? presentation : default, traditional, minimum);
                     return;
             }
         }
@@ -324,7 +327,7 @@ namespace CodeDeeds.Xslt.XPath
         /// </para>
         /// </remarks>
         private static void AppendFraction(
-            StringBuilder result,
+            ref CharStringBuilder result,
             DateTime instant,
             ReadOnlySpan<char> presentation,
             int minimum,
@@ -410,15 +413,18 @@ namespace CodeDeeds.Xslt.XPath
                     }
                 }
 
-                AppendCodePoint(result, family + (i < digits.Length ? digits[i] - '0' : 0));
+                AppendCodePoint(ref result, family + (i < digits.Length ? digits[i] - '0' : 0));
             }
         }
 
-        private static void AppendCodePoint(StringBuilder result, int code)
+        private static void AppendCodePoint(ref CharStringBuilder result, int code)
         {
             if (code > 0xFFFF)
             {
-                result.Append(char.ConvertFromUtf32(code));
+                // The two halves of the pair, written where they go rather than made into a string first.
+                code -= 0x10000;
+                result.Append((char)(0xD800 + (code >> 10)));
+                result.Append((char)(0xDC00 + (code & 0x3FF)));
             }
             else
             {
@@ -816,7 +822,7 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="maximum">The width to cut down to.</param>
         /// <param name="presentation">How the component is presented, which decides which end is cut.</param>
         private static void Fit(
-            StringBuilder result,
+            ref CharStringBuilder result,
             ReadOnlySpan<char> text,
             int minimum,
             int maximum,
@@ -849,14 +855,15 @@ namespace CodeDeeds.Xslt.XPath
 
                 for (int i = text.Length; i < minimum; i++)
                 {
-                    AppendCodePoint(result, zero);
+                    AppendCodePoint(ref result, zero);
                 }
 
                 result.Append(text);
             }
             else
             {
-                result.Append(text).Append(' ', minimum - text.Length);
+                result.Append(text);
+                result.Append(' ', minimum - text.Length);
             }
         }
 
@@ -997,7 +1004,7 @@ namespace CodeDeeds.Xslt.XPath
         /// second modifier <c>t</c> writes a zero offset as <c>Z</c>.
         /// </remarks>
         private static void AppendTimezone(
-            StringBuilder result,
+            ref CharStringBuilder result,
             XdmDateTime value,
             char specifier,
             ReadOnlySpan<char> presentation,
@@ -1110,12 +1117,12 @@ namespace CodeDeeds.Xslt.XPath
                     result.Append(separator);
                 }
 
-                AppendTwoDigits(result, minutes);
+                AppendTwoDigits(ref result, minutes);
             }
         }
 
         /// <summary>Writes a number below a hundred as exactly two digits.</summary>
-        private static void AppendTwoDigits(StringBuilder result, int value)
+        private static void AppendTwoDigits(ref CharStringBuilder result, int value)
         {
             result.Append((char)('0' + (value / 10)));
             result.Append((char)('0' + (value % 10)));

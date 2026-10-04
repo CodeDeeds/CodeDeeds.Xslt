@@ -774,7 +774,9 @@ namespace CodeDeeds.Xslt.Compiler
                 return string.Concat(format.Prefix, format.Suffix);
             }
 
-            StringBuilder builder = new StringBuilder();
+            // A number is a few characters and a level of numbering a few more, so the whole is written
+            // on the stack and only what is longer than that grows on to the heap.
+            CharStringBuilder builder = new CharStringBuilder(stackalloc char[64]);
             builder.Append(format.Prefix);
 
             Span<char> scratch = stackalloc char[64];

@@ -268,12 +268,24 @@ namespace CodeDeeds.Xslt.XPath
         {
             get
             {
-                Moment moment = Offset is null
-                    ? new Moment(DaysFromCivil(AstronomicalYear, m_proxy.Month, m_proxy.Day), TickOfDay)
-                    : Instant;
-
-                return (Offset is null ? "-" : "+") + moment.Day + ":" + moment.Tick;
+                CharStringBuilder key = new CharStringBuilder(stackalloc char[48]);
+                AppendKey(ref key);
+                return key.ToString();
             }
+        }
+
+        /// <summary>Writes <see cref="Key"/> into something larger, without making a string of it first.</summary>
+        /// <param name="builder">What the key is appended to.</param>
+        internal void AppendKey(ref CharStringBuilder builder)
+        {
+            Moment moment = Offset is null
+                ? new Moment(DaysFromCivil(AstronomicalYear, m_proxy.Month, m_proxy.Day), TickOfDay)
+                : Instant;
+
+            builder.Append(Offset is null ? '-' : '+');
+            builder.Append(moment.Day);
+            builder.Append(':');
+            builder.Append(moment.Tick);
         }
 
         /// <summary>The seconds from one moment to another, which is what subtracting two of them gives.</summary>

@@ -414,6 +414,40 @@ namespace CodeDeeds.Xslt.Runtime
         /// <summary>What each positional pattern step last selected, and from where; made on first use.</summary>
         private Dictionary<PatternStep, StepSelection>? m_stepSelections;
 
+        // The capture targets this transformation has used and is not using now, to be lent again. A few
+        // are enough: one is in use for each capture inside another, which is seldom more than two deep.
+        private StringCaptureTarget?[]? m_captures;
+        private int m_captureCount;
+
+        /// <summary>
+        /// Lends a target that captures what is written to it as a string, ready to be written to.
+        /// </summary>
+        /// <param name="separator">What goes between the items captured.</param>
+        internal StringCaptureTarget RentCapture(string separator)
+        {
+            if (m_captureCount == 0)
+            {
+                return new StringCaptureTarget(separator);
+            }
+
+            StringCaptureTarget capture = m_captures![--m_captureCount]!;
+            m_captures[m_captureCount] = null;
+            capture.Reset(separator);
+            return capture;
+        }
+
+        /// <summary>Takes back a target lent by <see cref="RentCapture"/>, which must not be used again.</summary>
+        /// <param name="capture">The target.</param>
+        internal void ReturnCapture(StringCaptureTarget capture)
+        {
+            m_captures ??= new StringCaptureTarget?[4];
+
+            if (m_captureCount < m_captures.Length)
+            {
+                m_captures[m_captureCount++] = capture;
+            }
+        }
+
         /// <summary>
         /// What a pattern step last selected in this transformation, for the step to ask whether that is
         /// what it needs again.
