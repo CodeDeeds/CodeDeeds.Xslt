@@ -342,8 +342,35 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="result">On success, the value.</param>
         public static Reading Read(string text, XdmTypeCode type, out XdmDateTime result)
         {
+            return Read(text.AsSpan(), type, out result);
+        }
+
+        /// <summary>
+        /// Parses the lexical form of <c>xs:date</c>, <c>xs:time</c> or <c>xs:dateTime</c> from characters
+        /// that need not be a string, saying which of the two ways it failed if it did.
+        /// </summary>
+        /// <remarks>
+        /// For a caller that has the lexical form in a buffer of its own, having written it there or cut it
+        /// out of something longer, and would otherwise make a string only to have it read. Whitespace
+        /// either side is ignored, as it is for a string.
+        /// </remarks>
+        /// <example>
+        /// <code>
+        /// ReadOnlySpan&lt;char&gt; header = "Date: 2014-08-20T19:36:01Z";
+        ///
+        /// if (XdmDateTime.Read(header[6..], XdmTypeCode.DateTime, out XdmDateTime sent) == XdmDateTime.Reading.Value)
+        /// {
+        ///     Console.WriteLine(sent.Year);   // 2014
+        /// }
+        /// </code>
+        /// </example>
+        /// <param name="text">The characters to parse.</param>
+        /// <param name="type">Which of the three to expect.</param>
+        /// <param name="result">On success, the value.</param>
+        public static Reading Read(ReadOnlySpan<char> text, XdmTypeCode type, out XdmDateTime result)
+        {
             result = default;
-            ReadOnlySpan<char> span = text.AsSpan().Trim();
+            ReadOnlySpan<char> span = text.Trim();
 
             if (span.Length == 0 || !TrySplitTimezone(ref span, out TimeSpan? offset))
             {

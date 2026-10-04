@@ -156,5 +156,131 @@ namespace CodeDeeds.Xslt.UnitTests
             // Declared xs:string? -> xs:dateTime?, so an absent argument is not a date that failed to parse.
             Assert.AreEqual(string.Empty, Writes("parse-ietf-date(())"));
         }
+
+        // ---- how the parts are put together ----------------------------------------------------------------
+
+        [TestMethod]
+        public void AFractionOfAnyLengthIsRead()
+        {
+            // The parts are written out as a lexical xs:dateTime in forty-eight characters of stack and
+            // read back from there. Twenty-five of them are the date, the time and the offset, so a
+            // fraction of twenty-two digits is the longest that fits and one of twenty-three is the
+            // first that makes the buffer grow; what is read is the same either side of that.
+            string twentyTwo = "1234567890123456789012";
+
+            Assert.AreEqual("2014-08-20T19:36:01.1234567Z", Parsed($"Wed, 20 Aug 2014 19:36:01.{twentyTwo} GMT"));
+            Assert.AreEqual("2014-08-20T19:36:01.1234567Z", Parsed($"Wed, 20 Aug 2014 19:36:01.{twentyTwo}3 GMT"));
+            Assert.AreEqual("2014-08-20T19:36:01.1234567Z", Parsed($"Aug 20 14:36:01.{twentyTwo}{twentyTwo}{twentyTwo} -05:00 (EST) 2014"));
+            Assert.AreEqual("1914-08-21T05:06:01.5Z", Parsed("Aug 20 19:36:01.5 -0930 14"));
+        }
+
+        private delegate bool Reader(string text, out XPath.XdmDateTime result);
+
+        private static readonly Reader TryParse = typeof(Xslt).Assembly
+            .GetType("CodeDeeds.Xslt.XPath.IetfDate")!
+            .GetMethod("TryParse", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)!
+            .CreateDelegate<Reader>();
+
+        /// <summary>Bytes allocated reading one date, the least of several thousand readings.</summary>
+        private static long BytesToRead(string written)
+        {
+            for (int i = 0; i < 2000; i++)
+            {
+                Assert.IsTrue(TryParse(written, out _), written);
+            }
+
+            long best = long.MaxValue;
+
+            for (int round = 0; round < 20; round++)
+            {
+                long before = GC.GetAllocatedBytesForCurrentThread();
+
+                for (int i = 0; i < 100; i++)
+                {
+                    TryParse(written, out _);
+                }
+
+                best = Math.Min(best, (GC.GetAllocatedBytesForCurrentThread() - before) / 100);
+            }
+
+            return best;
+        }
+
+        [TestMethod]
+        public void PuttingThePartsTogetherAllocatesNothing()
+        {
+            // What a reading allocates is the names it folds to lower case, and a name already in lower
+            // case is one string of three letters: thirty-two bytes for the month here, there being no
+            // day name and no timezone. Putting the parts together was a builder, its buffer, a string
+            // for each of eight numbers and a string of the whole, 480 bytes on top of that.
+            Assert.IsLessThanOrEqualTo(32, BytesToRead("20 aug 2014 19:36:01"));
+
+            // In asctime order the month is read twice, once to find that it is not the name of a day.
+            Assert.IsLessThanOrEqualTo(64, BytesToRead("aug 20 19:36 2014"));
+
+            // A fraction is cut out of the text as a string of its own, and an offset is none.
+            Assert.IsLessThanOrEqualTo(64, BytesToRead("20 aug 2014 19:36:01.25 -0500"));
+        }
+
+        // ---- the lexical form, read from characters that are not a string --------------------------------------
+
+        [TestMethod]
+        public void CharactersAreReadAsTheStringOfThemIs()
+        {
+            (string Text, XPath.XdmTypeCode Type)[] cases =
+            {
+                ("2014-08-20T19:36:01Z", XPath.XdmTypeCode.DateTime),
+                ("2014-08-20T19:36:01.25-05:00", XPath.XdmTypeCode.DateTime),
+                ("  2014-08-20T24:00:00  ", XPath.XdmTypeCode.DateTime),
+                ("-0044-03-15T12:00:00", XPath.XdmTypeCode.DateTime),
+                ("2014-08-20", XPath.XdmTypeCode.Date),
+                ("2014-08-20+14:00", XPath.XdmTypeCode.Date),
+                ("19:36:01", XPath.XdmTypeCode.Time),
+                ("24:00:00Z", XPath.XdmTypeCode.Time),
+                ("2014-02-29T00:00:00", XPath.XdmTypeCode.DateTime),
+                ("2014-08-20", XPath.XdmTypeCode.DateTime),
+                ("19:36:01", XPath.XdmTypeCode.Date),
+                ("2014-08-20T19:36:01+15:00", XPath.XdmTypeCode.DateTime),
+                ("", XPath.XdmTypeCode.DateTime),
+                ("   ", XPath.XdmTypeCode.Date),
+                ("999999999999-01-01T00:00:00", XPath.XdmTypeCode.DateTime),
+            };
+
+            foreach ((string text, XPath.XdmTypeCode type) in cases)
+            {
+                XPath.XdmDateTime.Reading ofString = XPath.XdmDateTime.Read(text, type, out XPath.XdmDateTime fromString);
+
+                // The characters stand in the middle of a longer buffer, so that nothing can be read
+                // from either side of them by mistake.
+                char[] buffer = ("#" + text + "#").ToCharArray();
+                XPath.XdmDateTime.Reading ofCharacters = XPath.XdmDateTime.Read(
+                    buffer.AsSpan(1, text.Length), type, out XPath.XdmDateTime fromCharacters);
+
+                Assert.AreEqual(ofString, ofCharacters, $"'{text}' as {type}");
+                Assert.AreEqual(fromString.ToString(), fromCharacters.ToString(), $"'{text}' as {type}");
+                Assert.AreEqual(fromString, fromCharacters, $"'{text}' as {type}");
+            }
+
+            Assert.AreEqual(
+                XPath.XdmDateTime.Reading.NotLexical,
+                XPath.XdmDateTime.Read(ReadOnlySpan<char>.Empty, XPath.XdmTypeCode.DateTime, out _));
+
+            Assert.AreEqual(
+                XPath.XdmDateTime.Reading.NotLexical,
+                XPath.XdmDateTime.Read((string)null!, XPath.XdmTypeCode.DateTime, out _));
+        }
+
+        [TestMethod]
+        public void TheExampleOnReadingFromCharactersRuns()
+        {
+            ReadOnlySpan<char> header = "Date: 2014-08-20T19:36:01Z";
+
+            Assert.AreEqual(
+                XPath.XdmDateTime.Reading.Value,
+                XPath.XdmDateTime.Read(header[6..], XPath.XdmTypeCode.DateTime, out XPath.XdmDateTime sent));
+
+            Assert.AreEqual(2014, sent.Year);
+            Assert.AreEqual("2014-08-20T19:36:01Z", sent.ToString());
+        }
     }
 }

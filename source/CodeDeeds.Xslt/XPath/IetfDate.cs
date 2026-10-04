@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 
 namespace CodeDeeds.Xslt.XPath
 {
@@ -126,30 +125,41 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         private static bool Build(int year, int month, int day, TimeOfDay time, out XdmDateTime result)
         {
-            StringBuilder lexical = new StringBuilder(40);
+            // Written on the stack and read from there. The form is twenty-five characters without a
+            // fraction, so this holds one of twenty-two digits before it has to grow, and each number is
+            // formatted straight into it: a builder, its buffer, a string for each of the eight numbers
+            // and a string of the whole were eleven allocations for a value that is none.
+            CharStringBuilder lexical = new CharStringBuilder(stackalloc char[48]);
 
             // Two digits mean the twentieth century, which is what the grammar says and is a decision the
             // specification made rather than one left open.
-            lexical.Append((year < 100 ? year + 1900 : year).ToString("D4", CultureInfo.InvariantCulture));
-            lexical.Append('-').Append(month.ToString("D2", CultureInfo.InvariantCulture));
-            lexical.Append('-').Append(day.ToString("D2", CultureInfo.InvariantCulture));
-            lexical.Append('T').Append(time.Hour.ToString("D2", CultureInfo.InvariantCulture));
-            lexical.Append(':').Append(time.Minute.ToString("D2", CultureInfo.InvariantCulture));
-            lexical.Append(':').Append(time.Second.ToString("D2", CultureInfo.InvariantCulture));
+            lexical.Append(year < 100 ? year + 1900 : year, "D4");
+            lexical.Append('-');
+            lexical.Append(month, "D2");
+            lexical.Append('-');
+            lexical.Append(day, "D2");
+            lexical.Append('T');
+            lexical.Append(time.Hour, "D2");
+            lexical.Append(':');
+            lexical.Append(time.Minute, "D2");
+            lexical.Append(':');
+            lexical.Append(time.Second, "D2");
 
             if (time.Fraction.Length > 0)
             {
-                lexical.Append('.').Append(time.Fraction);
+                lexical.Append('.');
+                lexical.Append(time.Fraction);
             }
 
             // A date with nothing said about its timezone is read as UTC, not as having no timezone: the
             // function answers xs:dateTime and the specification gives it Z.
             TimeSpan offset = time.Offset ?? TimeSpan.Zero;
             lexical.Append(offset < TimeSpan.Zero ? '-' : '+');
-            lexical.Append(Math.Abs(offset.Hours).ToString("D2", CultureInfo.InvariantCulture));
-            lexical.Append(':').Append(Math.Abs(offset.Minutes).ToString("D2", CultureInfo.InvariantCulture));
+            lexical.Append(Math.Abs(offset.Hours), "D2");
+            lexical.Append(':');
+            lexical.Append(Math.Abs(offset.Minutes), "D2");
 
-            return XdmDateTime.Read(lexical.ToString(), XdmTypeCode.DateTime, out result)
+            return XdmDateTime.Read(lexical.AsSpan(), XdmTypeCode.DateTime, out result)
                 == XdmDateTime.Reading.Value;
         }
 

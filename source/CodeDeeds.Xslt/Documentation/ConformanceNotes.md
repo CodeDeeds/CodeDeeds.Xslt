@@ -9943,6 +9943,57 @@ optimised and nothing once it has, so the two measured one after the other can b
 that. Copying the test's document read 188 kilobytes in one run of the tests and 388 in another, and
 settles at four. 3,064 unit tests in all.
 
+### A date written out on the stack to be read back
+
+`fn:parse-ietf-date` reads its grammar into parts and then, so that the one piece of code that knows
+which years have a twenty-ninth of February is the one that judges them, writes the parts out as a
+lexical `xs:dateTime` and has `XdmDateTime.Read` read that. The writing was a `StringBuilder`, its
+buffer, a string for each of the eight numbers and a string of the whole: eleven allocations and 480
+bytes, for a value that is a struct. `IetfDate.Build` writes into forty-eight characters of stack now,
+through `CharStringBuilder`, each number formatted where it stands, and the form is read from there:
+`XdmDateTime.Read` has an overload taking `ReadOnlySpan<char>`, which does what the string one did
+from its second line on, and the string one calls it. Without a fraction the form is twenty-five
+characters, so a fraction of twenty-two digits fits and a longer one makes the buffer grow, as it
+would any builder.
+
+Measured before the change was made and after it, at `7251620`: the function called directly, and a
+stylesheet writing it for each of a thousand elements of a tree already parsed. Each figure is the mean
+of three runs in fresh processes taken turn about, warmed until time and bytes a call had stopped
+moving.
+
+| `IetfDate.TryParse` | ns, was | is | bytes, was | is |
+|---|---:|---:|---:|---:|
+| `Wed, 06 Jun 1994 07:29:35 GMT` | 498 | 425 | 672 | 192 |
+| `Wed Jun 06 11:54:45 EST 2013` | 511 | 442 | 672 | 192 |
+| `06 Jun 94 07:29:35.123456 +0500` | 535 | 460 | 600 | 104 |
+| `6 Jun 1994 07:29` | 408 | 331 | 544 | 64 |
+| Thirty digits of fraction and `-0800 (PST)` | 845 | 761 | 912 | 432 |
+| `Wed, 31 Feb 1994 07:29:35 GMT`, which is refused | 424 | 352 | 672 | 192 |
+
+| A stylesheet, for each of a thousand elements | microseconds, was | is | bytes, was | is |
+|---|---:|---:|---:|---:|
+| `xsl:value-of select="parse-ietf-date(.)"` | 857, and 861 a second time | 779, and 787 | 879,424 | 399,424 |
+| `xsl:value-of` of an `xs:dateTime` cast from a string | 810 | 813 | 303,424 | 303,424 |
+| `xsl:value-of` of a constant `xs:dateTime`, which nothing here touches | 359 | 348 | 127,424 | 127,424 |
+
+Four hundred and eighty bytes a call in every row, and a tenth to a fifth of the time; through a
+stylesheet, nine percent of a row that also writes the date. The cast is the string overload calling
+the new one, and is level. What a reading still allocates is not `Build`'s: each name read is cut out
+of the text as a string and, where it has a capital in it, folded to another, which is the 192 bytes
+of a day name, a month and a timezone, and a fraction is cut out as a string of its own. The thirty
+digits are longer than the stack space, and the buffer that grows to hold them is half of that row's.
+
+Nothing moves on any conformance run, every failure set identical test for test: 8,061 of 8,071 at
+3.0, 5,678 of 5,701 at 2.0 and 8,668 of 8,683 schema-aware, each on both backends, and 18,268 of
+18,285 and 14,553 of 14,577 on the XPath runs.
+
+Four new unit tests in `IetfDateTests`. One reads fractions of twenty-two digits, twenty-three and
+sixty-six, either side of where the buffer grows, and passes against the engine as it was. Three do
+not: one holds a reading to the bytes of the names it folds, 32 for a date with a month and nothing
+else named, where it was 512; one reads fifteen lexical forms as a string and as characters cut from
+the middle of a longer buffer and requires the same answer of both, a value or either way of failing;
+and one runs the example on the new overload word for word.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error
