@@ -20,9 +20,9 @@ namespace CodeDeeds.Xslt.Benchmarks
     /// <para>
     /// The stylesheet is compiled once, in the setup, so what is measured is the transformation: the
     /// parse of the document, which is small beside the rest, and everything the stylesheets do with it.
-    /// That includes compiling the four stylesheets <c>fn:transform()</c> is handed, each time, for as
-    /// long as they are not kept from one call to the next, and reading the localization and the title
-    /// page templates the stylesheets ask for.
+    /// That includes running the four stylesheets <c>fn:transform()</c> is handed, which are compiled
+    /// the first time and kept, and reading the localization and the title page templates the
+    /// stylesheets ask for, which are read every time.
     /// </para>
     /// <para>
     /// Two things the stylesheets need of a caller. They resolve what they read against their own

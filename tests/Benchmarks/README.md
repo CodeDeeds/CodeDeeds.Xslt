@@ -404,15 +404,21 @@ over the documents under `Data/DocBook`, written to a writer that keeps nothing.
 
 | Document | Mean | Allocated |
 |---|---:|---:|
-| A book of 77 paragraphs, 44 KB | 114.3 ms | 61.6 MB |
-| A table of 100 rows, 26 KB | 228.8 ms | 121.4 MB |
-| A table of 1,000 rows, 257 KB | 1,720.3 ms | 1,110.1 MB |
+| A book of 77 paragraphs, 44 KB | 60.2 ms | 44.8 MB |
+| A table of 100 rows, 26 KB | 165.7 ms | 104.8 MB |
+| A table of 1,000 rows, 257 KB | 1,627.8 ms | 1,094.6 MB |
 
-Two things in those figures are not the documents'. A document of three hundred characters takes 73 ms and
-41 MB: the stylesheets put every document through four stylesheets of their own with `fn:transform()` before
-formatting it, and each of the four is read and compiled again at every transformation, thirty-one modules
-in all. And a row of the table costs 1.7 ms and 1.1 MB, which is the stylesheets' way with a CALS table and
-this engine's way with what they write; where it goes has not been looked into.
+The stylesheets put every document through four stylesheets of their own with `fn:transform()` before
+formatting it. When the class was first run each of the four was read and compiled again at every
+transformation, thirty-one modules in all, and the three rows were 114.3 ms and 61.6 MB, 228.8 ms and
+121.4 MB, and 1,720.3 ms and 1,110.1 MB: some sixty milliseconds and sixteen megabytes of each was that.
+A stylesheet `fn:transform()` has compiled is kept now by the call that named it.
+
+Two things in the figures are still not the documents'. A document of three hundred characters takes 23 ms
+and 24 MB, which is what the stylesheets do for any document at all: four transformations before the one
+that formats, and the localization and the title page templates read each time. And a row of the table
+costs 1.6 ms and 1.1 MB, which is the stylesheets' way with a CALS table and this engine's way with what
+they write. Where either goes has not been looked into.
 
 ## Benchmark Methodology
 

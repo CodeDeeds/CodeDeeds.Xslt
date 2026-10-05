@@ -200,6 +200,17 @@ namespace CodeDeeds.Xslt.Compiler
         /// <summary>The version the principal module claims.</summary>
         internal XsltVersion Version { get; init; }
 
+        /// <summary>
+        /// The static parameters declared anywhere in the stylesheet and the packages it uses, by name.
+        /// </summary>
+        /// <remarks>
+        /// A static parameter is the one thing a caller supplies that the compiled form depends on, the
+        /// stylesheet being compiled differently for what it says. So two callers who supplied the same
+        /// for each of these, or nothing for it, would have been handed the same compiled stylesheet,
+        /// which is what lets <c>fn:transform()</c> keep one: see <see cref="TransformCache"/>.
+        /// </remarks>
+        internal ExpandedName[] StaticParameters { get; init; } = Array.Empty<ExpandedName>();
+
         /// <summary>The accumulators declared, indexed by AccumulatorDefinition.Index.</summary>
         public IReadOnlyList<AccumulatorDefinition> Accumulators { get; init; }
             = Array.Empty<AccumulatorDefinition>();

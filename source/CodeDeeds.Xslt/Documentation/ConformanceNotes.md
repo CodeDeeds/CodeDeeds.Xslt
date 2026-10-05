@@ -10458,9 +10458,74 @@ outside its root. The benchmark uses `UriResolver`; that `FileResolver` hands a 
 that is not one is left as it is and written down here.
 
 With those, every document tried transforms, and the results read as DocBook's. What it costs is in the
-benchmarks' README, under *DocBook*, with the two things found in it: every transformation compiles
-again the four stylesheets `fn:transform()` is handed, and a row of a CALS table is 1.7 milliseconds and
-a megabyte.
+benchmarks' README, under *DocBook*, with the two things found in it: every transformation compiled
+again the four stylesheets `fn:transform()` is handed, which the next section is about, and a row of a
+CALS table is 1.7 milliseconds and a megabyte.
+
+### A stylesheet `fn:transform()` runs, compiled once
+
+The first figures of the DocBook benchmark had a document of three hundred characters at 73 milliseconds
+and 41 megabytes, and every transformation asking the resolver for thirty-one stylesheet modules. The
+DocBook stylesheets put a document through four stylesheets of their own with `fn:transform()` before
+formatting it, and `fn:transform()` read, parsed and compiled whatever it was handed, every time: its
+remarks said "its own compilation", and it was, at each call.
+
+A stylesheet that runs others runs the same ones each time it is run itself, so what a call has compiled
+it now keeps (`TransformCache`), and is found again by two things.
+
+**Where it came from and how it was set going**: the option that named it and what the option said, the
+base the reference resolves against, and the few options the transformation's own settings are made of.
+One string, written before the resolver is asked, so a stylesheet kept is not read again. That is the
+bargain `xsl:import` has always struck, a module being read when the stylesheet that names it is
+compiled and not at every transformation, and it is what the specification's `cache` option is for:
+`true` by default, and a caller who writes `'cache': false()` is saying the stylesheet may have changed
+and has it read each time. A stylesheet given as text is its own name, up to 64,000 characters of it.
+One given as a node is not kept, since telling it from another would mean writing it out.
+
+**What the caller supplied for each of its static parameters.** A static parameter is the one thing a
+caller supplies that a stylesheet is compiled differently for, and the engine takes every supplied
+parameter through one channel, static or not, at whichever point the declaration reads it. So the
+compiler records every static parameter it meets (`CompiledStylesheet.StaticParameters`), in the
+packages a stylesheet uses as well as in itself, and a kept stylesheet is handed to a caller who
+supplies the same items of the same types for each of those, or nothing for it. What is supplied for an
+ordinary parameter is read when the stylesheet runs and is not asked about, which matters: DocBook
+supplies some two hundred, and one static. A value that is not atomic cannot be told from another by
+writing it, so a stylesheet supplied one for a static parameter is compiled each time, as it was.
+
+What is kept belongs to the call: one place in a compiled stylesheet where `fn:transform()` is
+written. It was compiled with that stylesheet's resolvers and settings, as it always was, and lives
+as long as that stylesheet stays compiled. It holds sixteen sources and four ways of supplying each,
+and then keeps no more; a compiled stylesheet being shared between transformations running at once,
+two that compile the same one at the same moment both run what they compiled and one of the two is
+kept.
+
+By BenchmarkDotNet, the stylesheets compiled once and the document parsed and transformed to a writer
+that keeps nothing:
+
+| | was | is |
+|---|---:|---:|
+| A book of 77 paragraphs, 44 KB | 114.3 ms, 61.6 MB | 60.2 ms, 44.8 MB |
+| A CALS table of 100 rows, 26 KB | 228.8 ms, 121.4 MB | 165.7 ms, 104.8 MB |
+| The same table at 1,000 rows, 257 KB | 1,720.3 ms, 1,110.1 MB | 1,627.8 ms, 1,094.6 MB |
+
+And the document of three hundred characters, in a harness of its own, 73 milliseconds and 41 megabytes
+to 23 and 24, with the resolver asked for no stylesheet at all after the first transformation. What is
+left of that is the stylesheets' own: five transformations where one was asked for, and the
+localization and the title page templates read with `doc()` each time, which is a document read once
+for a transformation and not something to keep between two.
+
+All eight conformance runs are identical test for test, the tests of `fn:transform()` among them:
+8,061 of 8,071 at 3.0, 5,678 of 5,701 at 2.0 and 8,668 of 8,683 schema-aware, each on both backends, and
+18,268 of 18,285 and 14,553 of 14,577 on the XPath runs.
+
+Six more unit tests in `TransformFunctionTests`, 3,144 in all. Four count what the resolver is asked
+for and do not pass against the engine as it was: three calls in a transformation and a second
+transformation asking once; `'cache': false()` asking every time, and a stylesheet changed under a
+call that keeps it not being seen; one call asked for a stylesheet with its static parameter supplied
+two ways and not at all, compiling three times in nine calls and never after; and thirty-two
+transformations at once. Two hold answers and pass against it: the initial template, the initial mode
+and the delivery format read for each call of a stylesheet already compiled, and a stylesheet given as
+text beside one given as a node.
 
 ### Which results the suite asks for and does not get
 

@@ -180,6 +180,170 @@ namespace CodeDeeds.Xslt.Compiler
     }
 
     /// <summary>
+    /// The stylesheets one call of <c>fn:transform</c> has compiled, kept so that being asked for the same
+    /// one again does not compile it again.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A stylesheet that runs others with <c>fn:transform()</c> runs the same ones every time it is run
+    /// itself. The DocBook stylesheets put a document through four of their own before formatting it,
+    /// thirty-one modules between them, and reading and compiling those was 70 milliseconds and 40
+    /// megabytes of every transformation, whatever the document: more than formatting a short one costs.
+    /// </para>
+    /// <para>
+    /// One of these belongs to one call, which is to say one place in a compiled stylesheet where
+    /// <c>fn:transform()</c> is written, and lives as long as that stylesheet does. So what it keeps was
+    /// compiled with the resolvers and the settings that stylesheet was compiled with, and is kept no
+    /// longer than the stylesheet that names it is itself kept compiled.
+    /// </para>
+    /// <para>
+    /// A compiled stylesheet is found again by two things. Where it came from and how it was set going,
+    /// which <c>TransformRequest.SourceKey</c> writes as one string. And what the caller supplied for
+    /// each of its static parameters, a static parameter being what a stylesheet is compiled differently
+    /// for: the stylesheet says which it has once it is compiled
+    /// (<see cref="CompiledStylesheet.StaticParameters"/>), and a caller who supplies the same for each
+    /// of them, or nothing, is one compiling again would hand the same stylesheet to. A value that is
+    /// not atomic cannot be told from another by writing it, so a stylesheet supplied one is not kept.
+    /// </para>
+    /// <para>
+    /// It holds a few and then no more, rather than letting go of the oldest: a call that names more
+    /// stylesheets than that, by text that differs every time for one, is not one that keeping them
+    /// helps. A compiled stylesheet is shared between transformations running at once, so this is read
+    /// and written from several threads; two that compile the same stylesheet at the same moment both
+    /// run what they compiled, and one of the two is kept.
+    /// </para>
+    /// </remarks>
+    internal sealed class TransformCache
+    {
+        private const int MostSources = 16;
+        private const int MostOfOneSource = 4;
+
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Kept[]> m_bySource =
+            new System.Collections.Concurrent.ConcurrentDictionary<string, Kept[]>(StringComparer.Ordinal);
+
+        /// <summary>One compiled stylesheet, with what was supplied for each of its static parameters.</summary>
+        private sealed record Kept(CompiledStylesheet Compiled, string? Uri, string?[] Supplied);
+
+        /// <summary>Finds the stylesheet compiled from a source for a caller who supplied these parameters.</summary>
+        /// <param name="source">Where the stylesheet came from and how it was set going.</param>
+        /// <param name="supplied">The parameters this caller supplies, static and otherwise.</param>
+        /// <param name="compiled">The stylesheet, where one is kept.</param>
+        /// <param name="uri">The URI it was read from, which its options are built with.</param>
+        public bool TryFind(
+            string source,
+            IReadOnlyDictionary<string, object?>? supplied,
+            [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out CompiledStylesheet? compiled,
+            out string? uri)
+        {
+            if (m_bySource.TryGetValue(source, out Kept[]? kept))
+            {
+                foreach (Kept one in kept)
+                {
+                    if (SuppliedTheSame(one, supplied))
+                    {
+                        compiled = one.Compiled;
+                        uri = one.Uri;
+                        return true;
+                    }
+                }
+            }
+
+            compiled = null;
+            uri = null;
+            return false;
+        }
+
+        /// <summary>Keeps a stylesheet just compiled, where there is room and it can be found again.</summary>
+        /// <param name="source">Where the stylesheet came from and how it was set going.</param>
+        /// <param name="compiled">The stylesheet.</param>
+        /// <param name="uri">The URI it was read from.</param>
+        /// <param name="supplied">The parameters it was compiled with.</param>
+        public void Keep(
+            string source, CompiledStylesheet compiled, string? uri, IReadOnlyDictionary<string, object?>? supplied)
+        {
+            string?[] written = new string?[compiled.StaticParameters.Length];
+
+            for (int i = 0; i < written.Length; i++)
+            {
+                if (!TryWrite(supplied, compiled.StaticParameters[i], out written[i]))
+                {
+                    return;
+                }
+            }
+
+            Kept kept = new Kept(compiled, uri, written);
+
+            if (m_bySource.TryGetValue(source, out Kept[]? already))
+            {
+                if (already.Length < MostOfOneSource)
+                {
+                    Kept[] grown = new Kept[already.Length + 1];
+                    already.CopyTo(grown, 0);
+                    grown[^1] = kept;
+                    m_bySource[source] = grown;
+                }
+            }
+            else if (m_bySource.Count < MostSources)
+            {
+                m_bySource[source] = new[] { kept };
+            }
+        }
+
+        private static bool SuppliedTheSame(Kept kept, IReadOnlyDictionary<string, object?>? supplied)
+        {
+            ExpandedName[] parameters = kept.Compiled.StaticParameters;
+
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                if (!TryWrite(supplied, parameters[i], out string? now)
+                    || !string.Equals(now, kept.Supplied[i], StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Writes what was supplied for a static parameter so that two values are written alike only
+        /// where they are the same items of the same types; null where nothing was supplied.
+        /// </summary>
+        /// <returns>False where the value cannot be written so, something in it not being atomic.</returns>
+        private static bool TryWrite(
+            IReadOnlyDictionary<string, object?>? supplied, ExpandedName name, out string? written)
+        {
+            written = null;
+
+            if (supplied is null || !StylesheetCompiler.TryFindSuppliedParameter(supplied, name, out object? given))
+            {
+                return true;
+            }
+
+            if (given is not XPathValue value)
+            {
+                return false;
+            }
+
+            System.Text.StringBuilder builder = new System.Text.StringBuilder();
+
+            foreach (XPathValue item in XdmSequence.Items(value))
+            {
+                if (item.Kind is not (XPathValueKind.String or XPathValueKind.Number or XPathValueKind.Boolean))
+                {
+                    return false;
+                }
+
+                string text = XdmSequence.StringValueOf(item);
+                builder.Append((int)item.TypeCode).Append(':').Append(text.Length).Append(':').Append(text).Append(';');
+            }
+
+            written = builder.ToString();
+            return true;
+        }
+    }
+
+    /// <summary>
     /// <c>fn:transform</c>, which runs a second transformation and hands back what it produced.
     /// </summary>
     /// <remarks>
@@ -196,12 +360,20 @@ namespace CodeDeeds.Xslt.Compiler
     /// own result documents. Nothing of the caller's reaches it but the resolvers and the options the map
     /// named, and nothing of it reaches the caller but the map returned.
     /// </para>
+    /// <para>
+    /// Its own compilation, but not a new one for every call: what a call has compiled it keeps, and runs
+    /// again when it is asked for the same stylesheet by a caller who supplies the same. See
+    /// <see cref="TransformCache"/>.
+    /// </para>
     /// </remarks>
     internal sealed class TransformExpr : Expr
     {
         private readonly Expr m_options;
         private readonly XsltOptions m_host;
         private readonly string? m_baseUri;
+
+        /// <summary>The stylesheets this call has compiled, kept for when it is asked for one again.</summary>
+        private readonly TransformCache m_compiled = new TransformCache();
 
         /// <summary>Initializes a call.</summary>
         /// <param name="options">The map of options.</param>
@@ -233,7 +405,7 @@ namespace CodeDeeds.Xslt.Compiler
                     + (given.Count == 1 ? "the value given is not a map." : $"{given.Count} items were given."));
             }
 
-            return new TransformRequest(given[0].AsMap(), m_host, m_baseUri).Run();
+            return new TransformRequest(given[0].AsMap(), m_host, m_baseUri, m_compiled).Run();
         }
     }
 
@@ -258,15 +430,18 @@ namespace CodeDeeds.Xslt.Compiler
         private readonly Dictionary<string, XPathValue> m_options = new(StringComparer.Ordinal);
         private readonly XsltOptions m_host;
         private readonly string? m_baseUri;
+        private readonly TransformCache m_compiled;
 
         /// <summary>Reads the option map, refusing what is not an option.</summary>
         /// <param name="options">The map the call was given.</param>
         /// <param name="host">The options the calling stylesheet was compiled with.</param>
         /// <param name="baseUri">The base URI where the call is written.</param>
-        public TransformRequest(XdmMap options, XsltOptions host, string? baseUri)
+        /// <param name="compiled">What the call has compiled before, and where to keep what it compiles now.</param>
+        public TransformRequest(XdmMap options, XsltOptions host, string? baseUri, TransformCache compiled)
         {
             m_host = host;
             m_baseUri = baseUri;
+            m_compiled = compiled;
 
             foreach (KeyValuePair<XPathValue, XPathValue> entry in options.Entries)
             {
@@ -449,8 +624,21 @@ namespace CodeDeeds.Xslt.Compiler
                             + $"({string.Join(", ", written)}), and exactly one is allowed.");
             }
 
+            // Compiled before by this call, from the same place and for a caller who supplied the same:
+            // then it is the stylesheet that compiling again would make, and is run as it stands. A
+            // stylesheet that puts a document through others of its own, as the DocBook stylesheets do
+            // through four, otherwise compiles every one of them again at every transformation.
+            IReadOnlyDictionary<string, object?>? supplied = Parameters();
+            string? source = SourceKey(written[0]);
+
+            if (source is not null
+                && m_compiled.TryFind(source, supplied, out CompiledStylesheet? kept, out string? keptUri))
+            {
+                return (kept, InnerOptions(keptUri, supplied));
+            }
+
             (TextReader reader, string? uri) = Locate(written[0]);
-            XsltOptions inner = InnerOptions(uri);
+            XsltOptions inner = InnerOptions(uri, supplied);
             XdmTree tree;
 
             try
@@ -463,8 +651,95 @@ namespace CodeDeeds.Xslt.Compiler
                 reader.Dispose();
             }
 
-            return (StylesheetCompiler.Compile(tree, inner), inner);
+            CompiledStylesheet compiled = StylesheetCompiler.Compile(tree, inner);
+
+            if (source is not null)
+            {
+                m_compiled.Keep(source, compiled, uri, supplied);
+            }
+
+            return (compiled, inner);
         }
+
+        /// <summary>
+        /// What a compiled stylesheet is kept under: everything the call says that the compiling of it
+        /// reads, the parameters apart; or null where it is not to be kept.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Where the stylesheet is, by the reference as written and the base it resolves against, so that
+        /// the resolver is not asked again: a stylesheet named by location is read once by the call that
+        /// names it, as a module an <c>xsl:import</c> names is read once by the stylesheet that imports
+        /// it. <c>'cache': false()</c> is the caller saying it may have changed, and reads it every time.
+        /// </para>
+        /// <para>
+        /// The options the transformation is set going with are in the key as well, though most of them
+        /// decide nothing about the compiled form: they are few and seldom differ from one call to the
+        /// next, and a key that says too much costs a compilation where one that says too little would
+        /// cost a wrong answer. The parameters are not in it, being many and different every time: which
+        /// of them the compiled form depends on is asked of the stylesheet once it is compiled.
+        /// </para>
+        /// <para>
+        /// A stylesheet given as a node is not kept. It would have to be written out to be told from
+        /// another, which is most of what reading it costs.
+        /// </para>
+        /// </remarks>
+        private string? SourceKey(string option)
+        {
+            if (m_options.TryGetValue("cache", out XPathValue cache) && !RequireAtomic("cache", cache).ToBoolean())
+            {
+                return null;
+            }
+
+            string named;
+
+            switch (option)
+            {
+                case "stylesheet-node":
+                case "package-node":
+                    return null;
+
+                case "package-name":
+                    named = RequireAtomic(option, m_options[option]).ToStringValue()
+                        + Separator
+                        + (m_options.TryGetValue("package-version", out XPathValue version)
+                            ? RequireAtomic("package-version", version).ToStringValue()
+                            : "*");
+                    break;
+
+                default:
+                    named = RequireAtomic(option, m_options[option]).ToStringValue();
+
+                    // A stylesheet written out in full is its own name, and one long enough is not worth
+                    // holding twice for the chance of being handed it again.
+                    if (named.Length > LongestTextKept)
+                    {
+                        return null;
+                    }
+
+                    break;
+            }
+
+            return string.Join(
+                Separator,
+                option,
+                named,
+                m_baseUri,
+                BaseUriOption(),
+                EntryPoint("initial-template"),
+                EntryPoint("initial-mode"),
+                m_options.TryGetValue("base-output-uri", out XPathValue output)
+                    ? RequireAtomic("base-output-uri", output).ToStringValue()
+                    : null,
+                m_options.TryGetValue("enable-messages", out XPathValue messages)
+                    && !RequireAtomic("enable-messages", messages).ToBoolean() ? "quiet" : null);
+        }
+
+        /// <summary>What stands between the parts of a key, and in none of them: no URI or name has it.</summary>
+        private const string Separator = "\u0001";
+
+        /// <summary>The longest stylesheet given as text that is kept once compiled.</summary>
+        private const int LongestTextKept = 64 * 1024;
 
         /// <summary>Finds the stylesheet text behind whichever option named it.</summary>
         private (TextReader Reader, string? Uri) Locate(string option)
@@ -584,7 +859,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// The resolvers are the caller's, because the transformation being run is being run on the caller's
         /// behalf and may reach no further than the caller could. Everything else the map decides.
         /// </remarks>
-        private XsltOptions InnerOptions(string? uri)
+        private XsltOptions InnerOptions(string? uri, IReadOnlyDictionary<string, object?>? supplied)
         {
             bool messages = !m_options.TryGetValue("enable-messages", out XPathValue enabled)
                 || RequireAtomic("enable-messages", enabled).ToBoolean();
@@ -607,7 +882,7 @@ namespace CodeDeeds.Xslt.Compiler
                 MessageWriter = messages ? m_host.MessageWriter : TextWriter.Null,
                 WarningWriter = messages ? m_host.WarningWriter : TextWriter.Null,
                 BaseUri = BaseUriOption() ?? uri,
-                Parameters = Parameters(),
+                Parameters = supplied,
                 InitialTemplate = EntryPoint("initial-template"),
                 InitialMode = EntryPoint("initial-mode"),
 

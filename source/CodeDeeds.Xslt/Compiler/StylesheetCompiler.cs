@@ -732,6 +732,7 @@ namespace CodeDeeds.Xslt.Compiler
                 PrincipalNamespaces = principalNamespaces,
                 Version = VersionOf(m_scopeElement),
                 Schemas = m_schemas,
+                StaticParameters = m_staticParameterNames.ToArray(),
             };
         }
 
@@ -3842,6 +3843,14 @@ namespace CodeDeeds.Xslt.Compiler
             XPathValue value;
             bool initialized = true;
 
+            // Every static parameter there is, supplied or not: what was supplied for each of them is
+            // all of what a caller gave that the compiled stylesheet depends on, which is what something
+            // keeping a compiled stylesheet for another caller needs to know. See TransformCache.
+            if (isParameter && !m_staticParameterNames.Contains(expanded))
+            {
+                m_staticParameterNames.Add(expanded);
+            }
+
             // A static parameter is supplied to the constructor rather than to the transformation, the whole
             // point of it being that the stylesheet is compiled differently depending on what it says.
             if (isParameter
@@ -3956,8 +3965,11 @@ namespace CodeDeeds.Xslt.Compiler
             }
         }
 
+        /// <summary>The static parameters declared anywhere in what is being compiled, by name.</summary>
+        private readonly List<ExpandedName> m_staticParameterNames = new List<ExpandedName>();
+
         /// <summary>Finds what the caller supplied under a name, in either notation they may have written.</summary>
-        private static bool TryFindSuppliedParameter(
+        internal static bool TryFindSuppliedParameter(
             IReadOnlyDictionary<string, object?> supplied, ExpandedName name, out object? value)
         {
             foreach ((string key, object? given) in supplied)
