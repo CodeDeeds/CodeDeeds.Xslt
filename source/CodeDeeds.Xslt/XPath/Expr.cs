@@ -2076,6 +2076,19 @@ namespace CodeDeeds.Xslt.XPath
         public static List<int> Apply(Expr predicate, List<int> candidates, ref DynamicContext context)
         {
             List<int> survivors = new List<int>(candidates.Count);
+            Apply(predicate, candidates, survivors, ref context);
+            return survivors;
+        }
+
+        /// <summary>
+        /// Filters a sequence by a predicate into a list the caller has, which may be one it keeps.
+        /// </summary>
+        /// <param name="predicate">The predicate expression.</param>
+        /// <param name="candidates">The sequence to filter, in the order positions are counted.</param>
+        /// <param name="survivors">Where the surviving nodes are added, in their original order.</param>
+        /// <param name="context">The context the predicate is evaluated against.</param>
+        public static void Apply(Expr predicate, List<int> candidates, List<int> survivors, ref DynamicContext context)
+        {
             int size = candidates.Count;
             bool booleanOnly = IsNeverPositional(predicate);
 
@@ -2091,8 +2104,6 @@ namespace CodeDeeds.Xslt.XPath
                     survivors.Add(candidates[i]);
                 }
             }
-
-            return survivors;
         }
 
         /// <summary>

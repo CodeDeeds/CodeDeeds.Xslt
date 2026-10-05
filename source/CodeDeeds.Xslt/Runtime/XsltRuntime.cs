@@ -471,6 +471,39 @@ namespace CodeDeeds.Xslt.Runtime
             return selection;
         }
 
+        /// <summary>What each step that counts among an earlier predicate's survivors last worked out; made on first use.</summary>
+        private Dictionary<PatternStep, StepSurvivors>? m_stepSurvivors;
+
+        /// <summary>
+        /// What this transformation remembers of a pattern step's last selection and of what its
+        /// predicates left of it.
+        /// </summary>
+        /// <param name="step">The step, which is its own key.</param>
+        internal StepSurvivors SurvivorsOf(PatternStep step)
+        {
+            m_stepSurvivors ??= new Dictionary<PatternStep, StepSurvivors>();
+
+            if (!m_stepSurvivors.TryGetValue(step, out StepSurvivors? survivors))
+            {
+                survivors = new StepSurvivors(step);
+                m_stepSurvivors.Add(step, survivors);
+            }
+
+            return survivors;
+        }
+
+        /// <summary>
+        /// Puts a new, empty memory in place of the one held for a step, and leaves the old one to
+        /// whatever match is still reading it.
+        /// </summary>
+        /// <param name="step">The step.</param>
+        internal StepSurvivors NewSurvivorsOf(PatternStep step)
+        {
+            StepSurvivors survivors = new StepSurvivors(step);
+            (m_stepSurvivors ??= new Dictionary<PatternStep, StepSurvivors>())[step] = survivors;
+            return survivors;
+        }
+
         /// <summary>
         /// How deep the transformation is in temporary output state that no output target records: a
         /// function being called, a function item, a variable's select expression. What

@@ -340,10 +340,12 @@ position enumerates nothing now, and one whose predicates can keeps what it sele
 so that the siblings are selected once per parent. `position() mod 2 = 1` made some 430 bytes each time it
 was evaluated, 6,948 KB at 16,000 items, and is 258 KB now.
 
-Two shapes this class does not measure are still the square, as a check at this commit found: a step where a
-later predicate counts among what an earlier one left, `item[@type='a'][2]` taking 172 ms over 2,000 items and
-2.8 s over 8,000, and a step on the `descendant::` axis whose predicate reads a position,
-`list/descendant::item[2]` taking 22 ms and 345 ms over the same.
+Two shapes this class does not measure were still the square at this commit, and have been made linear
+since: a step where a later predicate counts among what an earlier one left, `item[@type='a'][2]`, which took
+158 ms over 2,000 items and 2.6 s over 8,000 and takes 0.9 ms and 3.6 ms; and a step on the `descendant::`
+axis whose predicate reads a position, `list/descendant::item[2]`, which took 22 ms and 338 ms and takes
+0.9 ms and 3.6 ms. What is left of the square is the two at once, `list/descendant::item[@type='a'][2]`, and
+a step whose earlier predicate reads `current()` or a variable, which has to be counted for each candidate.
 
 #### Beside the framework's processor
 

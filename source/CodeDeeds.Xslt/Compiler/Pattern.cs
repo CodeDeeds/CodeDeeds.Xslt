@@ -42,7 +42,64 @@ namespace CodeDeeds.Xslt.Compiler
             CountsPosition = Pattern.AnyMayBePositional(predicates, 0);
             RecountsBetweenPredicates = predicates.Length > 1 && Pattern.AnyMayBePositional(predicates, 1);
             AskedForBoolean = Pattern.NeverNumbers(predicates);
+
+            // Asked once here, each being a walk of the predicates that was made for every candidate.
+            bool[] filters = new bool[predicates.Length];
+            bool filtersReadOnlyTheTree = true;
+            bool allReadOnlyTheTree = true;
+
+            for (int i = 0; i < predicates.Length; i++)
+            {
+                bool readsOnlyTheTree = Pattern.ReadsOnlyTheTree(predicates[i]);
+                filters[i] = i + 1 < predicates.Length && Pattern.AnyMayBePositional(predicates, i + 1);
+                filtersReadOnlyTheTree &= !filters[i] || readsOnlyTheTree;
+                allReadOnlyTheTree &= readsOnlyTheTree;
+            }
+
+            FiltersBeforeCounting = filters;
+            RemembersSurvivors = RecountsBetweenPredicates
+                && filtersReadOnlyTheTree
+                && axis is not (Axis.Descendant or Axis.DescendantOrSelf);
+            MatchesNothingElseMeanwhile = allReadOnlyTheTree;
         }
+
+        /// <summary>
+        /// For each predicate, whether what it leaves has to be enumerated before the next is asked,
+        /// some later predicate being one that could select by position.
+        /// </summary>
+        public bool[] FiltersBeforeCounting { get; }
+
+        /// <summary>
+        /// Whether what the predicates leave, of everything the step selects from an anchor, can be
+        /// worked out once for the anchor and kept: see <see cref="StepSurvivors"/>.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// True where the step recounts between predicates and every predicate it filters by reads
+        /// nothing but the tree (<see cref="Pattern.ReadsOnlyTheTree"/>), so that which nodes it keeps
+        /// is the same whichever candidate is asking. <c>item[@type='a'][2]</c> is such a step. A
+        /// predicate that reads <c>current()</c> or a variable is not, and that step is counted afresh
+        /// for every candidate as it always was.
+        /// </para>
+        /// <para>
+        /// Not on the two descendant axes, where the anchor changes as the search climbs and one
+        /// candidate asks at every ancestor: what one anchor's predicates left would be replaced by the
+        /// next anchor's before the next candidate came for it.
+        /// </para>
+        /// </remarks>
+        public bool RemembersSurvivors { get; }
+
+        /// <summary>
+        /// Whether no predicate of this step can cause another pattern to be matched while this one is,
+        /// every one of them reading only the tree.
+        /// </summary>
+        /// <remarks>
+        /// A predicate may call a function that applies templates, and a template's pattern may be this
+        /// very step under another anchor. Where that cannot happen, what is remembered for the step is
+        /// written over in place; where it can, it is replaced by a new one, so that a match under way
+        /// keeps reading the lists it began with.
+        /// </remarks>
+        public bool MatchesNothingElseMeanwhile { get; }
 
         /// <summary>
         /// For each predicate, whether it is asked for a boolean outright, its value being known never to
@@ -67,9 +124,11 @@ namespace CodeDeeds.Xslt.Compiler
         /// <c>foo[@a='c'][2]</c> is the second <c>foo</c> with the attribute. What the earlier predicates
         /// left is found by evaluating them against every node the step selects, and what they answer may
         /// depend on more than the node: on <c>current()</c>, and in an <c>xsl:number</c> or an
-        /// <c>xsl:for-each-group</c> on local variables that differ from one call to the next. So that
-        /// list is worked out afresh for each candidate, as it always was, and only a step that never
-        /// needs one has its selection remembered; see <see cref="StepSelection"/>.
+        /// <c>xsl:for-each-group</c> on local variables that differ from one call to the next. Where it
+        /// may, that list is worked out afresh for each candidate, as it always was. Where the earlier
+        /// predicates read nothing but the tree it is worked out once for the anchor and kept: see
+        /// <see cref="RemembersSurvivors"/>. A step that never needs such a list has only its selection
+        /// remembered; see <see cref="StepSelection"/>.
         /// </remarks>
         public bool RecountsBetweenPredicates { get; }
 
@@ -141,6 +200,11 @@ namespace CodeDeeds.Xslt.Compiler
         private int m_anchor;
         private bool m_ascending;
 
+        // The ids a descendant step was last selected between, first and last inclusive; first is past
+        // last where what is held was not selected on a descendant axis.
+        private int m_first = 1;
+        private int m_last;
+
         /// <summary>How many nodes were selected, which is the context size a predicate sees.</summary>
         public int Count => m_nodes.Count;
 
@@ -148,6 +212,76 @@ namespace CodeDeeds.Xslt.Compiler
         public bool IsFrom(XdmTree tree, int anchor)
         {
             return ReferenceEquals(m_tree, tree) && m_anchor == anchor;
+        }
+
+        /// <summary>
+        /// Whether what is held includes everything a descendant step selects between two ids of this
+        /// tree, so that the selection from an anchor inside the one held can be read out of it.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A node's descendants are the ids after it up to the end of its subtree, and a step on a
+        /// descendant axis selects those of them that pass its test. So what it selects from an anchor
+        /// is a run of what it selects from any ancestor of that anchor, and where the run begins and
+        /// ends is two searches.
+        /// </para>
+        /// <para>
+        /// That is what keeps <c>list/descendant::item[2]</c> from being the square of the list. A
+        /// candidate is asked about at every ancestor in turn, a pattern being matched wherever some
+        /// anchor selects the node, and one selection kept for the last anchor asked was replaced at
+        /// every ancestor of every candidate: the selection from the <c>list</c>, then from each
+        /// element above it, then from the document, and the same again for the next
+        /// <c>item</c>. Kept from the highest anchor asked, it answers for all of them.
+        /// </para>
+        /// </remarks>
+        /// <param name="tree">The tree the anchor is in.</param>
+        /// <param name="first">The first id the anchor's selection may hold.</param>
+        /// <param name="last">The last.</param>
+        public bool Spans(XdmTree tree, int first, int last)
+        {
+            return ReferenceEquals(m_tree, tree) && m_ascending && m_first <= m_last
+                && m_first <= first && last <= m_last;
+        }
+
+        /// <summary>
+        /// The one-based position of a node among those held that lie between two ids, and how many
+        /// of them there are; zero where the node is not one of them.
+        /// </summary>
+        /// <param name="node">The node.</param>
+        /// <param name="first">The first id of the run.</param>
+        /// <param name="last">The last.</param>
+        /// <param name="size">How many of the nodes held lie in the run.</param>
+        public int PositionWithin(int node, int first, int last, out int size)
+        {
+            int from = LowerBound(first);
+            int to = LowerBound(last + 1);
+            size = to - from;
+
+            int index = m_nodes.BinarySearch(from, size, node, null);
+            return index < 0 ? 0 : index - from + 1;
+        }
+
+        /// <summary>The index of the first node held whose id is not below a given one.</summary>
+        private int LowerBound(int id)
+        {
+            int low = 0;
+            int high = m_nodes.Count;
+
+            while (low < high)
+            {
+                int middle = (int)(((uint)low + (uint)high) >> 1);
+
+                if (m_nodes[middle] < id)
+                {
+                    low = middle + 1;
+                }
+                else
+                {
+                    high = middle;
+                }
+            }
+
+            return low;
         }
 
         /// <summary>Selects afresh, replacing whatever was held.</summary>
@@ -174,6 +308,19 @@ namespace CodeDeeds.Xslt.Compiler
                 }
             }
 
+            // What a descendant axis walked, which is what Spans answers from: the anchor's subtree,
+            // the anchor itself left out or not as the axis leaves it.
+            if (step.Axis is Axis.Descendant or Axis.DescendantOrSelf)
+            {
+                m_first = step.Axis == Axis.Descendant ? anchor + 1 : anchor;
+                m_last = tree.SubtreeEndOf(anchor);
+            }
+            else
+            {
+                m_first = 1;
+                m_last = 0;
+            }
+
             m_ascending = ascending;
             m_anchor = anchor;
             m_tree = tree;
@@ -183,6 +330,116 @@ namespace CodeDeeds.Xslt.Compiler
         public int PositionOf(int node)
         {
             int index = m_ascending ? m_nodes.BinarySearch(node) : m_nodes.IndexOf(node);
+            return index < 0 ? 0 : index + 1;
+        }
+    }
+
+    /// <summary>
+    /// What a pattern step selected from an anchor, and what each of its predicates left of that, kept
+    /// so that the next candidate under the same anchor is looked up and nothing is evaluated again.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For a step that counts among what an earlier predicate left: <c>item[@type='a'][2]</c> is the
+    /// second of the items that have the type, so matching one item means knowing which of its siblings
+    /// have it. Evaluating the predicate against every sibling for every candidate is the square of the
+    /// list, and with a larger constant than selecting them was: two thousand items took 170
+    /// milliseconds and eight thousand 2.7 seconds.
+    /// </para>
+    /// <para>
+    /// A <see cref="StepSelection"/> keeps only what depends on nothing but the tree, no predicate
+    /// having been evaluated to arrive at it. This keeps what predicates left, and so is used only for
+    /// a step whose filtering predicates themselves read nothing but the tree:
+    /// <see cref="PatternStep.RemembersSurvivors"/>. What a predicate left is worked out the first time
+    /// a candidate gets that far, and not before, so a predicate is evaluated against the siblings only
+    /// where it always was, after the candidate has passed it itself.
+    /// </para>
+    /// <para>
+    /// One belongs to one transformation, which holds it: see <c>XsltRuntime.SurvivorsOf</c>.
+    /// </para>
+    /// </remarks>
+    internal sealed class StepSurvivors
+    {
+        private readonly List<int> m_selected = new List<int>();
+        private readonly List<int>?[] m_left;
+        private readonly bool[] m_known;
+        private XdmTree? m_tree;
+        private int m_anchor;
+        private bool m_ascending;
+
+        /// <summary>Initializes an empty one for a step.</summary>
+        /// <param name="step">The step, for how many predicates it has.</param>
+        public StepSurvivors(PatternStep step)
+        {
+            m_left = new List<int>?[step.Predicates.Length];
+            m_known = new bool[step.Predicates.Length];
+        }
+
+        /// <summary>Everything the step selects from the anchor, before any predicate.</summary>
+        public List<int> Selected => m_selected;
+
+        /// <summary>Whether what is held was selected from this anchor in this tree.</summary>
+        public bool IsFrom(XdmTree tree, int anchor)
+        {
+            return ReferenceEquals(m_tree, tree) && m_anchor == anchor;
+        }
+
+        /// <summary>Selects afresh from an anchor, forgetting what the predicates left of the last.</summary>
+        public void Fill(XdmTree tree, int anchor, PatternStep step, int[] fingerprintMap)
+        {
+            // Held by nothing while it is being filled, as a StepSelection is.
+            m_tree = null;
+            m_selected.Clear();
+            Array.Clear(m_known);
+
+            AxisWalker.Collect(tree, anchor, step.Axis, step.Test, fingerprintMap, m_selected);
+
+            bool ascending = true;
+
+            for (int i = 1; i < m_selected.Count; i++)
+            {
+                if (m_selected[i] <= m_selected[i - 1])
+                {
+                    ascending = false;
+                    break;
+                }
+            }
+
+            m_ascending = ascending;
+            m_anchor = anchor;
+            m_tree = tree;
+        }
+
+        /// <summary>What a predicate left, or null where no candidate has yet got as far as asking.</summary>
+        /// <param name="predicate">Which predicate, counted from zero.</param>
+        public List<int>? LeftBy(int predicate)
+        {
+            return m_known[predicate] ? m_left[predicate] : null;
+        }
+
+        /// <summary>A list to work out what a predicate leaves into, empty.</summary>
+        /// <param name="predicate">Which predicate.</param>
+        public List<int> ListFor(int predicate)
+        {
+            List<int> list = m_left[predicate] ??= new List<int>();
+            list.Clear();
+            return list;
+        }
+
+        /// <summary>Marks what a predicate left as worked out, the list for it having been filled.</summary>
+        /// <param name="predicate">Which predicate.</param>
+        public void Keep(int predicate)
+        {
+            m_known[predicate] = true;
+        }
+
+        /// <summary>The one-based position of a node in one of the lists held, or zero where it is not there.</summary>
+        /// <param name="nodes">The list: the selection, or what a predicate left of it.</param>
+        /// <param name="node">The node.</param>
+        public int PositionIn(List<int> nodes, int node)
+        {
+            // What a predicate leaves is in the order of what it was given, so one answer does for all.
+            int index = m_ascending ? nodes.BinarySearch(node) : nodes.IndexOf(node);
             return index < 0 ? 0 : index + 1;
         }
     }
@@ -693,6 +950,11 @@ namespace CodeDeeds.Xslt.Compiler
                 return HoldAtRememberedPosition(node, step, anchor, runtime, ref context);
             }
 
+            if (step.RemembersSurvivors && anchor >= 0 && context.Runtime is XsltRuntime remembering)
+            {
+                return HoldAmongRememberedSurvivors(node, step, anchor, remembering, ref context);
+            }
+
             List<int> selected = NodeListPool.Rent();
 
             try
@@ -733,7 +995,7 @@ namespace CodeDeeds.Xslt.Compiler
                         return false;
                     }
 
-                    if (i + 1 == step.Predicates.Length || !AnyMayBePositional(step.Predicates, i + 1))
+                    if (!step.FiltersBeforeCounting[i])
                     {
                         continue;
                     }
@@ -749,6 +1011,77 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 NodeListPool.Return(selected);
             }
+        }
+
+        /// <summary>
+        /// Evaluates a step's predicates where a later one counts among what an earlier one left, reading
+        /// what each left from what the transformation remembers for the step.
+        /// </summary>
+        /// <remarks>
+        /// The same questions in the same order as the walk in <see cref="PredicatesHold"/> that it
+        /// stands in for: the candidate is asked each predicate itself, at its place among what the one
+        /// before left, and what a predicate left is only looked for once the candidate has passed it.
+        /// What differs is that the answer is kept for the anchor. A predicate that raises an error
+        /// against some sibling raises it for every candidate that gets that far, as it did, nothing
+        /// being kept of a list that was not finished.
+        /// </remarks>
+        private static bool HoldAmongRememberedSurvivors(
+            int node, PatternStep step, int anchor, XsltRuntime runtime, ref DynamicContext context)
+        {
+            StepSurvivors survivors = runtime.SurvivorsOf(step);
+
+            if (!survivors.IsFrom(context.Tree, anchor))
+            {
+                // Written over where it stands unless a predicate of this step could have another
+                // match of it under way, which would then be reading the lists this empties.
+                if (!step.MatchesNothingElseMeanwhile)
+                {
+                    survivors = runtime.NewSurvivorsOf(step);
+                }
+
+                survivors.Fill(context.Tree, anchor, step, context.FingerprintMap);
+            }
+
+            List<int> current = survivors.Selected;
+            int position = survivors.PositionIn(current, node);
+
+            for (int i = 0; i < step.Predicates.Length; i++)
+            {
+                if (position == 0)
+                {
+                    return false;
+                }
+
+                DynamicContext inner = context;
+                inner.Node = node;
+                inner.Position = position;
+                inner.Size = current.Count;
+
+                if (!PredicateHolds(step.Predicates[i], step.AskedForBoolean[i], ref inner))
+                {
+                    return false;
+                }
+
+                if (!step.FiltersBeforeCounting[i])
+                {
+                    continue;
+                }
+
+                List<int>? left = survivors.LeftBy(i);
+
+                if (left is null)
+                {
+                    left = survivors.ListFor(i);
+                    DynamicContext over = context;
+                    PredicateFilter.Apply(step.Predicates[i], current, left, ref over);
+                    survivors.Keep(i);
+                }
+
+                current = left;
+                position = survivors.PositionIn(current, node);
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -793,14 +1126,42 @@ namespace CodeDeeds.Xslt.Compiler
             int node, PatternStep step, int anchor, XsltRuntime runtime, ref DynamicContext context)
         {
             StepSelection selection = runtime.SelectionOf(step);
+            int position;
+            int size;
 
-            if (!selection.IsFrom(context.Tree, anchor))
+            if (step.Axis is Axis.Descendant or Axis.DescendantOrSelf)
             {
-                selection.Fill(context.Tree, anchor, step, context.FingerprintMap);
-            }
+                // The anchor changes as the search climbs, and what it selects is a run of what any
+                // anchor above it selects: read out of the selection held where that spans it, so that
+                // the one kept from the highest anchor asked answers for every anchor under it.
+                int first = step.Axis == Axis.Descendant ? anchor + 1 : anchor;
+                int last = context.Tree.SubtreeEndOf(anchor);
 
-            int position = selection.PositionOf(node);
-            int size = selection.Count;
+                if (!selection.Spans(context.Tree, first, last) && !selection.IsFrom(context.Tree, anchor))
+                {
+                    selection.Fill(context.Tree, anchor, step, context.FingerprintMap);
+                }
+
+                if (selection.Spans(context.Tree, first, last))
+                {
+                    position = selection.PositionWithin(node, first, last, out size);
+                }
+                else
+                {
+                    position = selection.PositionOf(node);
+                    size = selection.Count;
+                }
+            }
+            else
+            {
+                if (!selection.IsFrom(context.Tree, anchor))
+                {
+                    selection.Fill(context.Tree, anchor, step, context.FingerprintMap);
+                }
+
+                position = selection.PositionOf(node);
+                size = selection.Count;
+            }
 
             if (position == 0)
             {
@@ -815,6 +1176,69 @@ namespace CodeDeeds.Xslt.Compiler
                 inner.Size = size;
 
                 if (!PredicateHolds(step.Predicates[i], step.AskedForBoolean[i], ref inner))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Whether a predicate's answer for a node depends on nothing but the tree the node is in and
+        /// the node's place in the sequence it is asked among.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// What decides whether the nodes a predicate keeps can be worked out once and kept: see
+        /// <see cref="PatternStep.RemembersSurvivors"/>. A predicate that reads <c>current()</c>, a
+        /// variable, the current group or anything else of the transformation may keep different nodes
+        /// from one candidate to the next, and is counted afresh each time.
+        /// </para>
+        /// <para>
+        /// A list of what is known to be so, and anything not on it is a no: literals and constants, the context
+        /// item, the root, paths and their own predicates, unions, arithmetic, comparisons and the
+        /// logical operators, and the functions XPath 1.0 has, none of which reads anything but its
+        /// arguments, the context node and its position. That is most predicates anyone writes, and a
+        /// no costs what the step cost before.
+        /// </para>
+        /// </remarks>
+        /// <param name="predicate">The predicate, or any expression inside one.</param>
+        internal static bool ReadsOnlyTheTree(Expr predicate)
+        {
+            NestingGuard.DescendExpression();
+            Expr expression = predicate.Unwrapped;
+
+            switch (expression)
+            {
+                case StringLiteralExpr or NumberLiteralExpr or BooleanLiteralExpr or TypedLiteralExpr
+                    or ConstantExpr or EmptySequenceExpr or ContextItemExpr or RootExpr:
+                    return true;
+
+                case PathExpr path:
+                    foreach (AxisStep step in path.Steps)
+                    {
+                        foreach (Expr inner in step.Predicates)
+                        {
+                            if (!ReadsOnlyTheTree(inner))
+                            {
+                                return false;
+                            }
+                        }
+                    }
+
+                    break;
+
+                case BinaryExpr or ValueComparisonExpr or UnionExpr or NegateExpr or FunctionCallExpr:
+                    break;
+
+                default:
+                    return false;
+            }
+
+            foreach (Expr child in expression.Children)
+            {
+                if (!ReadsOnlyTheTree(child))
                 {
                     return false;
                 }

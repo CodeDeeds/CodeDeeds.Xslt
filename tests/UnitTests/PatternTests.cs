@@ -466,5 +466,243 @@ namespace CodeDeeds.Xslt.UnitTests
                 "<out>a d</out>",
                 Run("<xsl:template match=\"/\"><out><xsl:value-of select=\"//x[function-lookup(QName('http://www.w3.org/2005/xpath-functions', 'position'), 0)() = 1]/@id\"/></out></xsl:template>", Input));
         }
+
+        [TestMethod]
+        public void WhatAnEarlierPredicateLeftIsCountedWithinEachParent()
+        {
+            // x[@k][2] is the second of the x's that have a k. Which of a parent's children have one is
+            // worked out once for the parent and kept, so it has to be let go of with the parent, and
+            // has to be what it was when it was worked out for every candidate.
+            const string Input =
+                "<r><g><x id='a' k='1'/><x id='b'/><x id='c' k='2'/><x id='d' k='1'/></g>"
+                + "<g><x id='e' k='2'/><x id='f' k='1'/></g><g><x id='h'/></g></r>";
+
+            Assert.AreEqual("<out>a e </out>", Matched("x[@k][1]", Input));
+            Assert.AreEqual("<out>c f </out>", Matched("x[@k][2]", Input));
+            Assert.AreEqual("<out>d f </out>", Matched("x[@k][last()]", Input));
+            Assert.AreEqual("<out>c d f </out>", Matched("x[@k][position() > 1]", Input));
+            Assert.AreEqual("<out>b h </out>", Matched("x[not(@k)][1]", Input));
+            Assert.AreEqual("<out>d </out>", Matched("x[@k = '1'][2]", Input));
+            Assert.AreEqual("<out>a d f </out>", Matched("x[@k][. = ''][@k = '1']", Input));
+            Assert.AreEqual("<out>d f </out>", Matched("x[@k][last()][@k = '1']", Input));
+
+            // Three deep: those with a k, the odd ones of those, and the second of what is left.
+            Assert.AreEqual("<out>d </out>", Matched("x[@k][position() mod 2 = 1][2]", Input));
+            Assert.AreEqual("<out>a d e </out>", Matched("x[@k][position() mod 2 = 1][position() >= 1]", Input));
+
+            // A predicate that reads the position the step gave it, before one that counts again.
+            Assert.AreEqual("<out>c f </out>", Matched("x[position() > 1][@k][1]", Input));
+            Assert.AreEqual("<out>c e </out>", Matched("x[position() != last()][@k][last()]", Input));
+            Assert.AreEqual("<out>c </out>", Matched("x[position() > 1][2]", Input));
+
+            // Steps either side, and a step that climbs.
+            Assert.AreEqual("<out>c f </out>", Matched("g/x[@k][2]", Input));
+            Assert.AreEqual("<out>c f </out>", Matched("r//x[@k][2]", Input));
+            Assert.AreEqual("<out>e f </out>", Matched("g[x[@k][2]][2]/x", Input));
+            Assert.AreEqual("<out>c </out>", Matched("g[1]/x[@k][2]", Input));
+        }
+
+        [TestMethod]
+        public void WhatAnEarlierPredicateLeftIsRightWhicheverOrderTheCandidatesComeIn()
+        {
+            const string Rules =
+                "<xsl:template match=\"x[@k][last()]\"><xsl:value-of select=\"@id\"/>! </xsl:template>"
+                + "<xsl:template match=\"x\"><xsl:value-of select=\"@id\"/><xsl:text> </xsl:text></xsl:template>";
+
+            // Turn about between two parents, each candidate finding the other parent's survivors kept.
+            Assert.AreEqual(
+                "<out>a d b! e! c </out>",
+                OnBoth(
+                    "<xsl:template match=\"/\"><out><xsl:apply-templates select=\"for $i in 1 to 3 return (/r/g[1]/x[$i], /r/g[2]/x[$i])\"/></out></xsl:template>"
+                    + Rules,
+                    "<r><g><x id='a' k='1'/><x id='b' k='1'/><x id='c'/></g><g><x id='d' k='1'/><x id='e' k='1'/></g></r>"));
+
+            // Turn about between two trees whose nodes have the same numbers: b is the last with a k in
+            // the one and q in the other, and each would be answered from the other's list were the tree
+            // not part of what is kept.
+            Assert.AreEqual(
+                "<out>a p b! q c r! </out>",
+                OnBoth(
+                    "<xsl:variable name=\"t\"><g><x id='p' k='1'/><x id='q' k='1'/><x id='r' k='1'/></g></xsl:variable>"
+                    + "<xsl:template match=\"/\"><out><xsl:apply-templates select=\"for $i in 1 to 3 return (/g/x[$i], $t/g/x[$i])\"/></out></xsl:template>"
+                    + Rules,
+                    "<g><x id='a' k='1'/><x id='b' k='1'/><x id='c'/></g>"));
+
+            // The same stylesheet over a second document, the first one's parent having the number the
+            // second one's has.
+            Xslt twice = new Xslt(
+                Head + Applying("<xsl:template match=\"x[@k][2]\"><xsl:value-of select=\"@id\"/></xsl:template>") + "</xsl:stylesheet>",
+                new XsltOptions { OmitXmlDeclaration = true });
+
+            Assert.AreEqual("<out>c</out>", twice.TransformXml("<g><x id='a' k='1'/><x id='b'/><x id='c' k='1'/></g>"));
+            Assert.AreEqual("<out>b</out>", twice.TransformXml("<g><x id='a' k='1'/><x id='b' k='1'/><x id='c'/></g>"));
+        }
+
+        [TestMethod]
+        public void WhatAnEarlierPredicateLeftIsNotKeptWhereItCouldDiffer()
+        {
+            const string Input = "<r><x id='a' k='1'/><x id='b' k='2'/><x id='c' k='1'/><x id='d' k='2'/><x id='e' k='1'/></r>";
+
+            // current() in a pattern is the candidate, so the first predicate keeps a different set for
+            // every candidate: c is the second of those with its k, and d the second of those with its.
+            // Kept from one candidate for the next, d would be looked for among the ones and not found.
+            Assert.AreEqual("<out>c d </out>", Matched("x[@k = current()/@k][2]", Input));
+            Assert.AreEqual("<out>e </out>", Matched("x[@k = current()/@k][3]", Input));
+
+            // A variable is not read as part of the tree either, though a global one would not differ.
+            Assert.AreEqual("<out>d </out>", Matched("x[@k = $want][2]", Input, "<xsl:variable name=\"want\" select=\"'2'\"/>"));
+
+            // xsl:number's count may read a local variable that differs from one call to the next: each
+            // x is numbered where it is the first of those with its own k, which a and b are.
+            Assert.AreEqual(
+                "<out>a:1 b:1 c: d: e: </out>",
+                OnBoth(
+                    "<xsl:template match=\"/\"><out><xsl:for-each select=\"/r/x\">"
+                    + "<xsl:variable name=\"mine\" select=\"string(@k)\"/>"
+                    + "<xsl:value-of select=\"@id\"/>:<xsl:number count=\"x[@k = $mine][1]\"/><xsl:text> </xsl:text>"
+                    + "</xsl:for-each></out></xsl:template>",
+                    Input));
+
+            // A predicate after the counting one may match this same pattern under another parent while
+            // it is asked, through a function that applies templates. What the outer candidate was
+            // counted among has to be its own parent's still when the predicates after that are asked.
+            const string Probe =
+                "<xsl:function name=\"f:probe\" as=\"xs:string\"><xsl:param name=\"n\" as=\"element()\"/>"
+                + "<xsl:value-of><xsl:if test=\"$n/../@id = 'g1'\"><xsl:apply-templates select=\"$n/../../g[@id = 'g2']/x\"/></xsl:if></xsl:value-of>"
+                + "</xsl:function>";
+
+            Assert.AreEqual(
+                "<out>c e </out>",
+                Matched(
+                    "x[@k][f:probe(.) = f:probe(.) and position() = last()][@id]",
+                    "<r><g id='g1'><x id='a' k='1'/><x id='b'/><x id='c' k='1'/></g><g id='g2'><x id='d' k='1'/><x id='e' k='1'/></g></r>",
+                    Probe));
+        }
+
+        [TestMethod]
+        public void APositionOnADescendantStepIsCountedUnderEachAnchorTheSearchClimbsTo()
+        {
+            // A step on descendant:: counts among everything its anchor selects, and a node matches where
+            // some ancestor is an anchor it holds under. What is kept is what the highest anchor asked
+            // selected, and each anchor beneath it reads its own run out of that.
+            const string Input =
+                "<r id='r'><g id='g1'><x id='a'/><h id='h1'><x id='b'/><x id='c'/></h></g>"
+                + "<g id='g2'><x id='d'/><h id='h2'><x id='e'/></h></g><x id='f'/></r>";
+
+            Assert.AreEqual("<out>b e </out>", Matched("g/descendant::x[2]", Input));
+            Assert.AreEqual("<out>b e </out>", Matched("h/descendant::x[1]", Input));
+            Assert.AreEqual("<out>c e </out>", Matched("h/descendant::x[last()]", Input));
+            Assert.AreEqual("<out>c e </out>", Matched("g/descendant::x[last()]", Input));
+            Assert.AreEqual("<out>f </out>", Matched("r/descendant::x[last()]", Input));
+            Assert.AreEqual("<out>d </out>", Matched("r/descendant::x[4]", Input));
+            Assert.AreEqual("<out>e </out>", Matched("r/descendant::x[last() - 1]", Input));
+            Assert.AreEqual("<out>a b d e </out>", Matched("g/descendant::x[position() &lt; 3]", Input));
+
+            // With nothing to its left the anchor may be any ancestor at all: c is the third x under g1,
+            // and nothing else is the third under anything.
+            Assert.AreEqual("<out>c </out>", Matched("descendant::x[3]", Input));
+            Assert.AreEqual("<out>a b c d e f </out>", Matched("descendant-or-self::x[1]", Input));
+
+            // descendant-or-self:: counts the anchor in: the second element at or under a g is its first x.
+            Assert.AreEqual("<out>a d </out>", Matched("g/descendant-or-self::*[2]", Input));
+            Assert.AreEqual("<out>h1 h2 </out>", Matched("g/descendant-or-self::*[3]", Input));
+
+            // More predicates after the one that counts, all at the one position.
+            Assert.AreEqual("<out>b </out>", Matched("g/descendant::x[2][@id = 'b']", Input));
+            Assert.AreEqual("<out/>", Matched("g/descendant::x[2][@id = 'c']", Input));
+
+            // And one that counts among what an earlier one left, which is counted afresh as it was.
+            Assert.AreEqual("<out>c e </out>", Matched("g/descendant::x[@id != 'a'][2]", Input));
+
+            const string Rules =
+                "<xsl:template match=\"g/descendant::x[last()]\"><xsl:value-of select=\"@id\"/>! </xsl:template>"
+                + "<xsl:template match=\"x\"><xsl:value-of select=\"@id\"/><xsl:text> </xsl:text></xsl:template>";
+
+            // Candidates out of document order, and from a second tree whose nodes have the same numbers.
+            Assert.AreEqual(
+                "<out>f e! d c! b a </out>",
+                OnBoth(
+                    "<xsl:template match=\"/\"><out><xsl:apply-templates select=\"reverse(//x)\"/></out></xsl:template>" + Rules,
+                    Input));
+
+            Assert.AreEqual(
+                "<out>a p b q! c! </out>",
+                OnBoth(
+                    "<xsl:variable name=\"t\"><g><x id='p'/><x id='q'/></g></xsl:variable>"
+                    + "<xsl:template match=\"/\"><out><xsl:apply-templates select=\"/g/x[1], $t/g/x[1], /g/x[2], $t/g/x[2], /g/x[3]\"/></out></xsl:template>"
+                    + Rules,
+                    "<g><x id='a'/><x id='b'/><x id='c'/></g>"));
+        }
+
+        /// <summary>The least time of several a stylesheet takes over a tree, in milliseconds, once warm.</summary>
+        private static double LeastTime(Xslt sheet, CodeDeeds.Xslt.Model.XdmTree tree)
+        {
+            System.Diagnostics.Stopwatch warming = System.Diagnostics.Stopwatch.StartNew();
+
+            for (int runs = 0; runs < 2 || (warming.ElapsedMilliseconds < 300 && runs < 200); runs++)
+            {
+                sheet.Transform(tree, System.IO.TextWriter.Null);
+            }
+
+            double least = double.MaxValue;
+
+            for (int i = 0; i < 9; i++)
+            {
+                long start = System.Diagnostics.Stopwatch.GetTimestamp();
+                sheet.Transform(tree, System.IO.TextWriter.Null);
+                least = Math.Min(least, System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+            }
+
+            return least;
+        }
+
+        [TestMethod]
+        [DataRow("item[@type='a'][2]", "item[2]", 600)]
+        [DataRow("item[@type='a'][last()]", "item[last()]", 600)]
+        [DataRow("list/descendant::item[2]", "list//item[2]", 170)]
+        [DataRow("list/descendant::item[last()]", "list//item[last()]", 170)]
+        public void APositionalStepCostsWhatItsListDoesAndNotTheSquare(string pattern, string beside, int timesAsItWas)
+        {
+            // Four thousand items under one parent, three elements down. Each pattern is set beside one
+            // that does the same work and was never the square of the list: asked of every item, the
+            // first two evaluated their first predicate against every sibling for every candidate, and
+            // the second two selected every descendant of every ancestor for every candidate, which made
+            // them the given number of times the pattern beside them, and more as the list grew. They
+            // are within a few times of it now, and the test asks for ten, so that neither a busy
+            // machine nor a slow one decides it.
+            System.Text.StringBuilder items = new System.Text.StringBuilder("<w><w><list>");
+
+            for (int i = 0; i < 4000; i++)
+            {
+                items.Append(i % 2 == 0 ? "<item type='a'/>" : "<item type='b'/>");
+            }
+
+            CodeDeeds.Xslt.Model.XdmTree tree =
+                CodeDeeds.Xslt.Model.XdmTreeBuilder.FromXmlText(items.Append("</list></w></w>").ToString());
+
+            static Xslt Sheet(string match) => new Xslt(
+                Head + "<xsl:template match=\"/\"><out><xsl:apply-templates select=\"//item\"/></out></xsl:template>"
+                + $"<xsl:template match=\"{match}\"><a/></xsl:template>"
+                + "<xsl:template match=\"item\" priority=\"-1\"><b/></xsl:template></xsl:stylesheet>");
+
+            Xslt asked = Sheet(pattern);
+            Xslt control = Sheet(beside);
+
+            // Both find one item of the four thousand, or the test is of two different things.
+            Assert.AreEqual(1, asked.Transform(tree).Split("<a/>").Length - 1, pattern);
+            Assert.AreEqual(1, control.Transform(tree).Split("<a/>").Length - 1, beside);
+
+            double ratio = LeastTime(asked, tree) / LeastTime(control, tree);
+
+            if (ratio >= 10)
+            {
+                // Once more before saying so: one measurement can be anything on a machine doing other work.
+                ratio = Math.Min(ratio, LeastTime(asked, tree) / LeastTime(control, tree));
+            }
+
+            Assert.IsTrue(
+                ratio < 10,
+                $"match=\"{pattern}\" took {ratio:F1} times what match=\"{beside}\" took over 4,000 items; it was about {timesAsItWas} when it was the square.");
+        }
     }
 }

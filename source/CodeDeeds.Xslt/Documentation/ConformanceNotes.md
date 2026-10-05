@@ -8022,7 +8022,8 @@ depend on `current()`, and in an `xsl:number` or an `xsl:for-each-group` on loca
 from one call to the next; that list is worked out for each candidate as it always was, and such a step
 (`PatternStep.RecountsBetweenPredicates`) is still the square. So is a step on `descendant::`, whose
 anchor climbs for every candidate and refills the selection each time: both cost what they did, neither
-is common, and neither is measured here. The position and size are read before any predicate is
+is common, and neither is measured here. (Both were measured later and are linear now: see *The two
+positional patterns that were still the square*.) The position and size are read before any predicate is
 evaluated and the selection is not touched again, because a predicate may call a function that applies
 templates, which asks the same step about another parent's children in the middle of it.
 
@@ -10279,6 +10280,113 @@ All eight conformance runs are identical test for test: 8,061 of 8,071 at 3.0, 5
 8,668 of 8,683 schema-aware, each on both backends, and 18,268 of 18,285 and 14,553 of 14,577 on the
 XPath runs. One more unit test in `StylesheetShapeTests`, which asks the method whether its locals are
 initialised, time not being something a test can hold it to; 3,127 in all.
+
+### The two positional patterns that were still the square
+
+*A predicate in a pattern, and whether it needs to know where the candidate stands* left two shapes as
+they were, each the square of the list and neither measured. Measured, over a flat list with a template
+for `item` beside the one in the table, `item[@type='a'][2]` took 158 milliseconds for two thousand items
+and 2.6 seconds for eight thousand, and `list/descendant::item[2]` 22 milliseconds and 338. Each for a
+reason of its own.
+
+**`item[@type='a'][2]`: what an earlier predicate left, counted again for every candidate.** The second
+predicate counts among the items the first one kept, so matching one item means knowing which of its
+siblings have the type. The matcher selected the siblings, asked the candidate the first predicate, and
+then asked every sibling the same, for each candidate that had passed it: eight thousand evaluations for
+each of four thousand candidates, at some 80 nanoseconds each. The time followed that product: twice as
+long with every item of the type, a fourteenth with one in a hundred, and nothing to do with the position
+asked for. `item[2][@type='b']`, the predicates the other way about, was never the square, there being
+nothing to count between them.
+
+The list was not kept because what a predicate keeps may depend on more than the node: on `current()`, and
+in `xsl:number` and `xsl:for-each-group` on local variables. `@type='a'` reads none of that, and nobody
+asked. `Pattern.ReadsOnlyTheTree` asks now, from a list of what is known to be so and anything else a no:
+literals and constants, the context item, the root, paths and their own predicates, unions, arithmetic,
+comparisons, `and`, `or`, and the functions XPath 1.0 has, none of which reads anything but its arguments,
+the context node and its position. Where every predicate that is filtered by is of that kind
+(`PatternStep.RemembersSurvivors`), what each one left is worked out once for the anchor and kept in a
+`StepSurvivors` the transformation holds for the step, and the next candidate under the same parent is
+looked up in it. The questions are the ones that were asked and in the order they were asked: the
+candidate is asked each predicate itself, at its place among what the one before left, and what a
+predicate left is only worked out once a candidate has passed it, so a predicate that raises an error
+against some sibling raises it where it did, nothing being kept of a list not finished. A predicate after
+the last one that counts may be anything, a function that applies templates and matches this same step
+under another parent included; nothing is read from what is kept after such a predicate is asked, and
+where a step has one what is kept is replaced by a new one rather than written over.
+
+**`list/descendant::item[2]`: one selection kept, and every candidate asking at every ancestor.** On
+`descendant::` the position is counted among everything the anchor selects, and a node matches where
+*some* ancestor is an anchor it holds under, so each candidate is asked at the `list`, then at each
+element above it, then at the document. The step keeps one selection, the last one made, and each of
+those is a different one: every candidate refilled it once for every ancestor it has, each time
+replacing the selection the next candidate wanted first. Twice the time with two elements above the
+list and four times with six, which is two selections a candidate, four, and eight.
+
+A node's descendants are the ids after it up to the end of its subtree, so what a descendant step
+selects from an anchor is a run of what it selects from any anchor above that one. The selection kept
+is asked whether it spans the run (`StepSelection.Spans`) before it is replaced, and where it does the
+position and the size are two searches for where the run begins and ends and a third for the node. After
+the first candidate what is kept is from the highest anchor there is, and it answers for every anchor
+under it.
+
+Milliseconds for two thousand items and for eight thousand, a template for the pattern and one for
+`item` beside it, the least of what ran in a second and a half after two of warming, two fresh processes
+of each build taken turn about and the lesser taken:
+
+| | was | is |
+|---|---:|---:|
+| `item[@type='a'][2]`, every second item of the type | 158 and 2,580 | 0.89 and 3.61 |
+| the same, every item of the type | 325 and 5,048 | 0.92 and 3.72 |
+| the same, one item in a hundred | 11.7 and 183 | 0.83 and 3.35 |
+| `item[@type='a'][last()]` | 163 and 2,578 | 0.91 and 3.67 |
+| `item[@type='a'][position() mod 2 = 0][2]` | 226 and 3,615 | 1.19 and 4.78 |
+| `item[@type='a'][2]`, the items ten to a parent | 1.55 and 6.26 | 0.83 and 3.33 |
+| `list/descendant::item[2]` | 21.7 and 338 | 0.88 and 3.62 |
+| the same, two elements above the list | 43.4 and 682 | 1.23 and 5.15 |
+| the same, six above | 85.1 and 1,350 | 1.88 and 7.88 |
+| `list/descendant::item[last()]` | 21.8 and 338 | 0.98 and 4.03 |
+| `descendant-or-self::item[2]`, two above | 42.9 and 679 | 1.43 and 6.02 |
+| `g/descendant::item[2]`, the items ten to a `g` | 20.5 and 325 | 1.02 and 4.21 |
+| `item[2]`, which nothing here touches | 0.53 and 2.11 | 0.52 and 2.08 |
+| `item[@type='a']`, likewise | 0.54 and 2.21 | 0.54 and 2.18 |
+| `list//item[2]`, likewise | 0.52 and 2.10 | 0.52 and 2.08 |
+
+Every row is four times for four times the items now, and each pattern matched the same items before
+and after. The row with ten items to a `g` was the square as well, though no `g` has more than ten: the
+search went on up to the list and the document, and counted there.
+
+**Left as they were**, and still the square. A step whose filtering predicate reads something of the
+transformation, as it must be: `item[@type=current()/@type][2]`, 1.2 seconds and 19.6 before and after.
+And a step on `descendant::` that counts among what an earlier predicate left,
+`list/descendant::item[@type='a'][2]`, 315 milliseconds and 5.0 seconds: it wants both of the above at
+once, what the predicate left being a different list under every anchor unless the predicate reads no
+position either, and is not a shape that has been met.
+
+**Found beside it and not changed.** A pattern that begins with a step on `descendant::` and has nothing
+to its left is asked, after the document node, at an anchor of nothing at all, which is there for a node
+with no parent and counts the node as the one node there is. So `match="descendant::x[1]"` matches every
+`x` in a document, each being the first of itself, where the expression the pattern stands for selects
+only the first `x` under each node; `descendant::x[3]` is right, nothing being the third of one. It did
+that before this change and does it after.
+
+All eight conformance runs are identical test for test: 8,061 of 8,071 at 3.0, 5,678 of 5,701 at 2.0 and
+8,668 of 8,683 schema-aware, each on both backends, and 18,268 of 18,285 and 14,553 of 14,577 on the
+XPath runs. What nothing here should have moved is level, each the mean of three fresh processes of each
+build taken turn about: compiling the JSON stylesheet 109.0 microseconds and 109.2, and the products one
+180 and 183 with 32 bytes more, a flag for each predicate of a step; running the products stylesheet over
+the thousand products 3,503 and 3,503, an identity template 5,297 and 5,298, and `xsl:number` 3,677 and
+3,800, which is 3,679 and 3,708 by the median, one of the three having read 4,026.
+
+Eight more unit tests in `PatternTests`, counting each row of one asked four times. Four ask for answers
+and pass against the engine as it was: what an earlier predicate left under each of several parents, at
+one, two and three predicates deep and with steps either side; candidates turn about between two parents
+and between two trees whose nodes have the same numbers, and one stylesheet over two documents; the
+predicates that read `current()`, a global variable, a local one in `xsl:number`, and a function that
+matches the same step under another parent while it is asked; and a position on `descendant::` and
+`descendant-or-self::` under every anchor of a document three levels deep, in document order and against
+it. The other four set each shape beside a pattern that does the same work and was never the square,
+over four thousand items, and ask that it take less than ten times as long: against the engine as it was
+they read 640 and 650 times for the one shape and 170 and 190 for the other. 3,135 unit tests in all.
 
 ### Which results the suite asks for and does not get
 
