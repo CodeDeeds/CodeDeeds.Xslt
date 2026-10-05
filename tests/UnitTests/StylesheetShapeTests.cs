@@ -353,6 +353,23 @@ namespace CodeDeeds.Xslt.UnitTests
             Assert.AreEqual("XPST0008", outOfScope.Code);
         }
 
+        [TestMethod]
+        public void AskingAboutTheStackFillsNothing()
+        {
+            // The compiler asks how much stack is left twice for every element, from the far side of a
+            // margin of thirty-two kilobytes. Filled with zeros each time, as stack space is unless a
+            // method says otherwise, the margin was a quarter of what compiling a small stylesheet
+            // took. Time is not something a test can hold a method to, so this holds it to saying
+            // otherwise; that the margin still does what it is for is the test of deep nesting above,
+            // which fails without one.
+            Type compiler = typeof(Xslt).Assembly.GetType("CodeDeeds.Xslt.Compiler.StylesheetCompiler", throwOnError: true)!;
+            System.Reflection.MethodInfo? asks = compiler.GetMethod(
+                "HasRoomForALevel", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+            Assert.IsNotNull(asks, "The method that asks is found by name: if it was renamed, rename it here.");
+            Assert.IsFalse(asks.GetMethodBody()!.InitLocals, "The margin is zeroed before the question is asked.");
+        }
+
         // ---- Patterns --------------------------------------------------------------------------------------
 
         [TestMethod]

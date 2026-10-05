@@ -9117,6 +9117,8 @@ is the price, three microseconds on the smallest stylesheet the harness has: the
 declarers, filled, and the margin of stack the compiler takes up in front of each of its questions. A
 first form remembered the values themselves in a table keyed by node, and cost that stylesheet a tenth of
 its compiling and four kilobytes; the integers cost a fifteenth of the one and a fortieth of the other.
+The margin turned out to cost far more than this stylesheet showed, and no longer does: see *A margin of
+stack that was filled before it was stood on*.
 
 **Found and not fixed.** A climbing pattern that fails only at the top of a deep chain — `a//a//…//b`
 over sixty nested `a`s — is a search of every way up the chain, and there are more of those than there
@@ -10224,6 +10226,59 @@ calls of one that does not, nodes of one text and two identities and texts of th
 characters among the arguments; and casts that collapse, replace, find nothing to do, and refuse. Two
 measure and do not pass against it, reading 268 bytes and 248 where 88 and 104 are asked. 3,126 unit
 tests in all.
+
+### A margin of stack that was filled before it was stood on
+
+A full run of the benchmarks at `3df7b27` set beside the one at `3f0ee07` had compiling the products
+stylesheet a fifth faster and compiling the JSON one a seventh slower, 121 microseconds to 139. Compiled
+turn about in fresh processes at eight of the commits between them, the JSON stylesheet is 127 at
+`720f83a` and 141 at `cd51836`, the next, and 141 to 145 at the six measured after it: the commit that
+carries a deep stylesheet on to another stack, written up under *The shape of a stylesheet*, which
+counted three microseconds on the smallest stylesheet its harness had as the price.
+
+The price was the margin. `HasRoomForALevel` takes up thirty-two kilobytes of stack with `stackalloc`
+and asks the runtime its question from the far side of them, twice for every element of a stylesheet,
+and C# fills what `stackalloc` hands out with zeros unless a method says not to: the method as the JIT
+wrote it called `CORINFO_HELP_MEMZERO` for 0x8000 bytes each time. That is as much as the processor's
+nearest cache holds, so each asking also turned out whatever the compiler had in it. The same commit made
+the version, the default collation and the default namespace cheap to ask for, which is why a stylesheet
+with expressions in it came out ahead and one that is nearly all literal result elements did not.
+
+Nothing is kept in the margin, so the method carries `[SkipLocalsInit]` and is not filled. The runtime
+still moves the stack pointer down through every page of it, touching each, which is all the question
+needs: the listing is the same but for the call. The attribute compiles only with `AllowUnsafeBlocks`
+set, so the project sets it, and has no unsafe block in it; what that adds to the assembly is two
+markers from .NET Framework's partial trust that nothing in .NET reads.
+
+Microseconds to compile, the median of three fresh processes of each build taken turn about, eight
+seconds of warm-up each:
+
+| | before there was a margin | filled | not filled |
+|---|---:|---:|---:|
+| The JSON stylesheet | 127 | 143 | 112 |
+| The same, to IL | 136 | 152 | 118 |
+| The products stylesheet | 314 | 249 | 194 |
+| The same, to IL | 451 | 372 | 310 |
+
+A sixth to a fifth off compiling a small stylesheet, and bytes the same. With no margin at all the two
+stylesheets read 109 and 182 in rounds where the margin not filled read 110 and 182, so the question as
+it is now asked costs nothing that shows; and two of the tests of deep nesting fail without a margin,
+which is what says the one not filled is still a margin.
+
+**Whether the buffers the strings are built in want the same.** They do not need filling either:
+`CharStringBuilder` reads nothing it has not written, and of the buffers written to directly each is
+written and then read as far as it was written. With the attribute on the whole module, which is every
+`stackalloc` there is, all the unit tests pass. But a builder's 128 characters are filled by eight
+stores of thirty-two bytes where the method begins, and sixteen cases that build on the stack — numbers
+in words, dates, `xsl:number`, `format-number()`, escaped URIs, composite keys, a memoized call, the
+products stylesheet — read within three percent either way with the fill and without, three rounds turn
+about, the loop with nothing in it moving as much as any. So only the margin is left unfilled: zeros
+that cost nothing measurable are worth having under a buffer someone may one day read too far into.
+
+All eight conformance runs are identical test for test: 8,061 of 8,071 at 3.0, 5,678 of 5,701 at 2.0 and
+8,668 of 8,683 schema-aware, each on both backends, and 18,268 of 18,285 and 14,553 of 14,577 on the
+XPath runs. One more unit test in `StylesheetShapeTests`, which asks the method whether its locals are
+initialised, time not being something a test can hold it to; 3,127 in all.
 
 ### Which results the suite asks for and does not get
 

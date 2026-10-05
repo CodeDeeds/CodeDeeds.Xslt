@@ -2539,8 +2539,17 @@ namespace CodeDeeds.Xslt.Compiler
         /// asks from further down, with a margin's worth of stack taken up in front of the question, and
         /// is the one that moves: nothing it reaches within a level goes deeper than the margin.
         /// </para>
+        /// <para>
+        /// The margin is stack to stand on and nothing is kept in it, so it is not filled: the method
+        /// skips the zeroing C# asks for by default, which is why the project allows unsafe blocks
+        /// though it has none. Filled, it was thirty-two kilobytes of zeros twice for every element of a
+        /// stylesheet, a quarter of what compiling a small one took, and the processor's nearest cache
+        /// turned out each time. The runtime still touches every page on the way down, which is all the
+        /// question needs.
+        /// </para>
         /// </remarks>
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        [System.Runtime.CompilerServices.SkipLocalsInit]
         private static bool HasRoomForALevel()
         {
             Span<byte> margin = stackalloc byte[LevelMargin];
