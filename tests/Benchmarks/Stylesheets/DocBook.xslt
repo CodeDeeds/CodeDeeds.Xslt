@@ -4,6 +4,6 @@
                 exclude-result-prefixes="xs"
                 version="3.0">
 
-  <xsl:import href="https://cdn.docbook.org/release/xsltng/current/xslt/docbook.xsl"/>
+  <xsl:import href="DocBook/xslt/docbook.xsl"/>
 
 </xsl:stylesheet>

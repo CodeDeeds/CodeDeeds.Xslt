@@ -27,6 +27,8 @@ Items 5 to 10 came out of the performance review of 19 September 2026
 - **XsltCompilationBenchmarks.cs** - Tests stylesheet compilation performance
   - `CompileXmlToHtmlStylesheet()` - Compiles XML to HTML stylesheet
   - `CompileJsonToHtmlStylesheet()` - Compiles JSON to HTML stylesheet
+  - `CompileDocbookStylesheet()` - Compiles the DocBook xslTNG stylesheets, fifty modules read from `Stylesheets/DocBook`
+  - Each of the three again with `Backend = Compiled`
 
 - **XmlTransformationBenchmarks.cs** - Tests XML transformation performance
   - Small dataset (100 products, 30 KB) transformations to string, TextWriter, and Stream
@@ -88,6 +90,11 @@ Items 5 to 10 came out of the performance review of 19 September 2026
   - Features: Product table, multiple stat cards, enhanced styling
   - Uses: XPath 3.0 JSON functions, array operations, distinct-values()
 
+- **Stylesheets/DocBook.xslt** - One `xsl:import` of `DocBook/xslt/docbook.xsl`
+- **Stylesheets/DocBook/** - The XSLT modules of DocBook xslTNG 2.8.5, unmodified, with their MIT licence
+  - A large stylesheet somebody else wrote: fifty modules and about 800,000 characters
+  - Only what compiling reads; see the README in the folder for where they came from and what is left out
+
 ## Running the Benchmarks
 
 ### Prerequisites
@@ -101,9 +108,9 @@ cd tests/Benchmarks
 dotnet run -c Release
 ```
 
-With no arguments, every benchmark class runs in turn. The first four classes take about nine minutes between
+With no arguments, every benchmark class runs in turn. The first four classes take about five minutes between
 them, and the rest about twenty-two more: they use BenchmarkDotNet's default job, which warms up until the
-measurements settle. `CompileDocbookOnlineStylesheet` fetches its stylesheet over the network on every iteration and needs a connection.
+measurements settle. Nothing needs a network connection.
 
 BenchmarkDotNet finds this project by its name under the solution's folder and refuses to run if it finds
 two. A git worktree inside the repository — one under `.claude/worktrees`, for instance — is a second copy:
@@ -154,11 +161,15 @@ repository stops BenchmarkDotNet finding the project.
 | Compile XML to HTML stylesheet | Compiled | 295.1 μs | 168.9 KB |
 | Compile JSON to HTML stylesheet | Interpreted | 103.5 μs | 72.2 KB |
 | Compile JSON to HTML stylesheet | Compiled | 112.8 μs | 74.2 KB |
-| Compile Docbook online stylesheet | Interpreted | 1,805 ms | 27.0 MB |
-| Compile Docbook online stylesheet | Compiled | 2,025 ms | 37.5 MB |
+| Compile DocBook stylesheet | Interpreted | 80.1 ms | 27.1 MB |
+| Compile DocBook stylesheet | Compiled | 144.4 ms | 37.7 MB |
 
-The DocBook stylesheet imports the xslTNG library and fetches it over the network on every iteration, so its
-time is the connection's as well as the compiler's.
+The two DocBook rows were measured after the others, with the library at commit `d3b2b87`, when the fifty
+modules of xslTNG 2.8.5 were put under `Stylesheets/DocBook`. Until then the stylesheet imported them from
+`cdn.docbook.org` and every iteration fetched all fifty: the rows read 1,805 and 2,025 ms, of which the
+compiler's share was the 80 and 144 here and the rest was fifty requests, and what was compiled changed
+whenever DocBook published a release. Read from the folder the same compile is 80 to 89 ms, and from memory
+81 to 84, so the files are within a twentieth of it.
 
 ### XML transformation (compiled backend)
 

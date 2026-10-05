@@ -1,2 +1,5 @@
 # A patch file is applied byte for byte; leave its line endings alone.
 *.patch -text
+
+# Somebody else's stylesheets, kept as they were published.
+tests/Benchmarks/Stylesheets/DocBook/** -text

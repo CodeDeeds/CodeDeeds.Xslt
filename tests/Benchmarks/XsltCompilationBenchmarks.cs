@@ -15,9 +15,10 @@ namespace CodeDeeds.Xslt.Benchmarks
         private string m_jsonToHtmlStylesheet = null!;
         private string m_docbookStylesheet = null!;
 
-        // The DocBook stylesheet imports the xslTNG library from cdn.docbook.org, so compiling it needs a
-        // resolver that reaches the network. One instance for every iteration, so they share a connection pool.
-        private readonly UriResolver m_docbookResolver = new UriResolver();
+        // The DocBook stylesheet imports the xslTNG library, fifty modules of it, from the copy under
+        // Stylesheets/DocBook. They were fetched from cdn.docbook.org at every iteration once, and what
+        // was measured then was fifty requests: 2,000 milliseconds, of which the compiler's were 80.
+        private FileResolver m_docbookResolver = null!;
 
         [GlobalSetup]
         public void Setup()
@@ -25,6 +26,7 @@ namespace CodeDeeds.Xslt.Benchmarks
             m_xmlToHtmlStylesheet = File.ReadAllText("Stylesheets/ProductsXmlToHtml.xslt");
             m_jsonToHtmlStylesheet = File.ReadAllText("Stylesheets/ProductsJsonToHtml.xslt");
             m_docbookStylesheet = File.ReadAllText("Stylesheets/DocBook.xslt");
+            m_docbookResolver = new FileResolver(Path.GetFullPath("Stylesheets"));
         }
 
         [Benchmark(Description = "Compile XML to HTML stylesheet")]
@@ -39,8 +41,8 @@ namespace CodeDeeds.Xslt.Benchmarks
             return new Xslt(m_jsonToHtmlStylesheet);
         }
 
-        [Benchmark(Description = "Compile Docbook online stylesheet")]
-        public Xslt CompileDocbookOnlineStylesheet()
+        [Benchmark(Description = "Compile DocBook stylesheet")]
+        public Xslt CompileDocbookStylesheet()
         {
             XsltOptions options = new XsltOptions
             {
@@ -69,8 +71,8 @@ namespace CodeDeeds.Xslt.Benchmarks
             return new Xslt(m_jsonToHtmlStylesheet, options);
         }
 
-        [Benchmark(Description = "Compile Docbook online stylesheet as IL code")]
-        public Xslt CompileDocbookOnlineStylesheetIL()
+        [Benchmark(Description = "Compile DocBook stylesheet as IL code")]
+        public Xslt CompileDocbookStylesheetIL()
         {
             XsltOptions options = new XsltOptions
             {
