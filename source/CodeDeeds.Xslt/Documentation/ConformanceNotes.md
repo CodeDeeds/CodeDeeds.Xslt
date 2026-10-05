@@ -10367,7 +10367,8 @@ to its left is asked, after the document node, at an anchor of nothing at all, w
 with no parent and counts the node as the one node there is. So `match="descendant::x[1]"` matches every
 `x` in a document, each being the first of itself, where the expression the pattern stands for selects
 only the first `x` under each node; `descendant::x[3]` is right, nothing being the third of one. It did
-that before this change and does it after.
+that before this change and does it after. (It does not now: see *A descendant step with nothing above
+it*.)
 
 All eight conformance runs are identical test for test: 8,061 of 8,071 at 3.0, 5,678 of 5,701 at 2.0 and
 8,668 of 8,683 schema-aware, each on both backends, and 18,268 of 18,285 and 14,553 of 14,577 on the
@@ -10387,6 +10388,47 @@ matches the same step under another parent while it is asked; and a position on 
 it. The other four set each shape beside a pattern that does the same work and was never the square,
 over four thousand items, and ask that it take less than ten times as long: against the engine as it was
 they read 640 and 650 times for the one shape and 170 and 190 for the other. 3,135 unit tests in all.
+
+### A descendant step with nothing above it
+
+Found while the section above was tested, and a wrong answer rather than a slow one. A node matches a
+pattern where `root(.)//(E)` selects it, `E` being the pattern as written but for its first step: on the
+child axis that step is read as `child-or-top`, which selects a node with no parent as though it were a
+child, and the attribute and namespace axes likewise (XSLT 3.0, 5.5.3). That is what the matcher's anchor
+of nothing stands for, the anchor a node with no parent is asked at: the one sequence it is in is itself,
+and it is the first and the last of it. Nothing of the kind is said of `descendant::` or
+`descendant-or-self::`, which select what is beneath a node, or at it.
+
+The search a step on a descendant axis makes for its anchor climbs from the node's parent to the top of
+the tree, and it went one further, to the anchor of nothing, where an outermost step with nothing written
+to its left is always satisfied. So every node was asked there as the one node there is:
+
+| over `<r><g><x id='a'/><h><x id='b'/><x id='c'/></h></g><g><x id='d'/><h><x id='e'/></h></g><x id='f'/></r>` | was | is |
+|---|---|---|
+| `match="descendant::x[1]"` | `a b c d e f` | `a b d e` |
+| `match="descendant::x[last()]"` | `a b c d e f` | `c e f` |
+| `match="descendant::x[last() = 1]"` | `a b c d e f` | `e` |
+| `match="descendant::x[3]"` | `c` | `c` |
+| `match="descendant::x"`, of an `x` with no parent | matches | does not |
+| `match="descendant-or-self::x[1]"` | `a b c d e f` | `a b c d e f` |
+
+A position nothing can have among one node was right already, which is how it went unseen, and
+`descendant-or-self::` is right as it was, the node itself being an anchor it selects one node from. The
+anchor of nothing is no anchor for a step on either descendant axis now (`Pattern.MatchClimbing`), and
+is what it was for the child and attribute axes: `x`, `x[1]` and `x[last()]` match an `x` with no parent
+still. A pattern with something to the left of the step never reached it, the step to the left having
+nothing to hold at.
+
+Neither suite has the shape: all eight conformance runs are identical test for test, 8,061 of 8,071 at
+3.0, 5,678 of 5,701 at 2.0 and 8,668 of 8,683 schema-aware, each on both backends, and 18,268 of 18,285
+and 14,553 of 14,577 on the XPath runs. A step on a descendant axis asks at one anchor fewer, which shows:
+over two thousand items and eight thousand, three fresh processes of each build taken turn about,
+`list/descendant::item[@type='a']` is 0.78 and 3.09 milliseconds before and 0.67 and 2.70 after, and
+`list/descendant::item[2]` two elements down 1.10 and 4.57 before and 1.03 and 4.29 after, with
+`list//item[2]` and `item[@type='a']` what they were.
+
+One more unit test in `PatternTests`, of twenty-one patterns over the document above and over an element
+with no parent, which fails at its first against the engine as it was; 3,136 in all.
 
 ### Which results the suite asks for and does not get
 

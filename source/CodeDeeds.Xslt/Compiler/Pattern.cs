@@ -820,6 +820,19 @@ namespace CodeDeeds.Xslt.Compiler
 
             for (int anchor = start; ; anchor = context.Tree.ParentOf(anchor))
             {
+                // A step on a descendant axis hangs from a node, and above the topmost node there is
+                // none. A pattern is adjusted so that its first step can match a node with no parent
+                // only where that step is on the child, attribute or namespace axis (XSLT 3.0, 5.5.3),
+                // which is what the anchor of nothing stands for elsewhere: the one sequence a
+                // parentless node is in, itself. Taken for an anchor here it made every x the first
+                // and the last of the one x there is, once the search had climbed past the document,
+                // so that descendant::x[1] matched every x in it; and it let an x with no parent
+                // match descendant::x, which selects only what is beneath something.
+                if (varies && anchor < 0)
+                {
+                    return false;
+                }
+
                 if ((!varies || PredicatesHold(node, step, anchor, ref context))
                     && (last
                         ? Anchored(anchor, wide: true, ref context)

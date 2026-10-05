@@ -634,6 +634,62 @@ namespace CodeDeeds.Xslt.UnitTests
                     "<g><x id='a'/><x id='b'/><x id='c'/></g>"));
         }
 
+        [TestMethod]
+        public void AStepOnADescendantAxisHangsFromANodeAndNotFromNothing()
+        {
+            // A pattern matches a node where root(.)//(the pattern) selects it, so a first step on
+            // descendant:: selects what is beneath some node of the tree. Once the search for that node
+            // had climbed past the document it went on to an anchor of nothing, which is there for a
+            // parentless node on the child axis and counts the node as the one node there is: every x
+            // was the first x and the last, under nothing.
+            const string Input =
+                "<r id='r'><g id='g1'><x id='a'/><h id='h1'><x id='b'/><x id='c'/></h></g>"
+                + "<g id='g2'><x id='d'/><h id='h2'><x id='e'/></h></g><x id='f'/></r>";
+
+            // The first x under something: a under g1, r and the document, b under h1, d under g2, e under h2.
+            Assert.AreEqual("<out>a b d e </out>", Matched("descendant::x[1]", Input));
+            Assert.AreEqual("<out>a b d e </out>", Matched("descendant::x[position() = 1]", Input));
+
+            // The last under something: c under h1 and g1, e under h2 and g2, f under r and the document.
+            Assert.AreEqual("<out>c e f </out>", Matched("descendant::x[last()]", Input));
+            Assert.AreEqual("<out>c e f </out>", Matched("descendant::x[position() = last()]", Input));
+
+            // The only one under something, which e is under h2 and nothing else is under anything; and
+            // the last of what the first predicate left, which is the first again.
+            Assert.AreEqual("<out>e </out>", Matched("descendant::x[last() = 1]", Input));
+            Assert.AreEqual("<out>a b d e </out>", Matched("descendant::x[1][last()]", Input));
+
+            // What was right already stays so: no predicate, a position nothing has under nothing, a
+            // step to the left, and descendant-or-self::, where the node itself is an anchor and every
+            // x is the first and the last of what it selects from itself.
+            Assert.AreEqual("<out>a b c d e f </out>", Matched("descendant::x", Input));
+            Assert.AreEqual("<out>c </out>", Matched("descendant::x[3]", Input));
+            Assert.AreEqual("<out>a d </out>", Matched("g/descendant::x[1]", Input));
+            Assert.AreEqual("<out>a b c d e f </out>", Matched("descendant-or-self::x[1]", Input));
+            Assert.AreEqual("<out>a b c d e f </out>", Matched("descendant-or-self::x[last()]", Input));
+
+            // An element with no parent is beneath nothing, so descendant:: does not reach it, where the
+            // child axis is adjusted to (child-or-top, XSLT 3.0 section 5.5.3) and self and
+            // descendant-or-self begin at it. p is parentless and q is its child.
+            static string Parentless(string pattern) => OnBoth(
+                "<xsl:mode on-no-match=\"deep-skip\"/>"
+                + "<xsl:variable name=\"v\" as=\"element()*\"><x id='p'><x id='q'/></x><y id='s'/></xsl:variable>"
+                + "<xsl:template match=\"/\"><out><xsl:apply-templates select=\"$v, $v/x\"/></out></xsl:template>"
+                + $"<xsl:template match=\"{pattern}\"><xsl:value-of select=\"@id\"/></xsl:template>",
+                "<r/>");
+
+            Assert.AreEqual("<out>q</out>", Parentless("descendant::x"));
+            Assert.AreEqual("<out>q</out>", Parentless("descendant::x[1]"));
+            Assert.AreEqual("<out>q</out>", Parentless("descendant::x[last()]"));
+            Assert.AreEqual("<out>pq</out>", Parentless("descendant-or-self::x"));
+            Assert.AreEqual("<out>pq</out>", Parentless("descendant-or-self::x[1]"));
+            Assert.AreEqual("<out>pq</out>", Parentless("self::x"));
+            Assert.AreEqual("<out>pq</out>", Parentless("x"));
+            Assert.AreEqual("<out>pq</out>", Parentless("x[1]"));
+            Assert.AreEqual("<out>pq</out>", Parentless("x[last()]"));
+            Assert.AreEqual("<out>s</out>", Parentless("y[1]"));
+        }
+
         /// <summary>The least time of several a stylesheet takes over a tree, in milliseconds, once warm.</summary>
         private static double LeastTime(Xslt sheet, CodeDeeds.Xslt.Model.XdmTree tree)
         {
