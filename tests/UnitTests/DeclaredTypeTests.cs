@@ -796,5 +796,69 @@ namespace CodeDeeds.Xslt.UnitTests
             StringAssert.Contains(complaint, "A sequence of 2 items");
             StringAssert.Contains(complaint, "xs:integer was declared");
         }
+
+        // ---- A processing instruction named in a type --------------------------------------------------------
+
+        private const string Instructions = "<r><?db one?><?other two?><x/><?db three?></r>";
+
+        [TestMethod]
+        public void AProcessingInstructionMayBeNamedInAType()
+        {
+            // processing-instruction(N) is a type as it is a step, the target written as a name or as a
+            // string. It was read as far as the parenthesis: 'as="processing-instruction('db')*"' is what
+            // the DocBook stylesheets declare a parameter with, and they did not compile.
+            static string Counted(string type) => Run(
+                "<xsl:template match=\"/\"><out><xsl:value-of select=\"count(/r/node()[. instance of " + type + "])\"/></out></xsl:template>",
+                Instructions);
+
+            Assert.AreEqual("<out>2</out>", Counted("processing-instruction('db')"));
+            Assert.AreEqual("<out>2</out>", Counted("processing-instruction(db)"));
+            Assert.AreEqual("<out>2</out>", Counted("processing-instruction(&quot;db&quot;)"));
+            Assert.AreEqual("<out>1</out>", Counted("processing-instruction('other')"));
+            Assert.AreEqual("<out>0</out>", Counted("processing-instruction('x')"));
+            Assert.AreEqual("<out>3</out>", Counted("processing-instruction()"));
+
+            // With an occurrence indicator after it, and against more than one item.
+            Assert.AreEqual(
+                "<out>true false true false true</out>",
+                Run(
+                    "<xsl:template match=\"/\"><out><xsl:value-of select=\""
+                    + "/r/processing-instruction('db') instance of processing-instruction('db')+,"
+                    + " /r/processing-instruction() instance of processing-instruction('db')*,"
+                    + " () instance of processing-instruction(db)?,"
+                    + " /r/x instance of processing-instruction('x'),"
+                    + " (/r/processing-instruction('other') treat as processing-instruction(other)) instance of processing-instruction()"
+                    + "\"/></out></xsl:template>",
+                    Instructions));
+        }
+
+        [TestMethod]
+        public void ADeclarationNamingAProcessingInstructionIsHeldToIt()
+        {
+            // The shape DocBook has: a function taking the instructions of one target.
+            Assert.AreEqual(
+                "<out xmlns:f=\"urn:f\">one|three 2 0</out>",
+                Run(
+                    "<xsl:function name=\"f:said\" as=\"xs:string\" xmlns:f=\"urn:f\">"
+                    + "<xsl:param name=\"all\" as=\"processing-instruction('db')*\"/>"
+                    + "<xsl:sequence select=\"string-join($all, '|')\"/></xsl:function>"
+                    + "<xsl:template match=\"/\" xmlns:f=\"urn:f\">"
+                    + "<xsl:variable name=\"mine\" as=\"processing-instruction(db)+\" select=\"/r/processing-instruction('db')\"/>"
+                    + "<xsl:variable name=\"none\" as=\"processing-instruction('db')*\" select=\"/r/processing-instruction('none')\"/>"
+                    + "<out><xsl:value-of select=\"f:said($mine), count($mine), count($none)\"/></out></xsl:template>",
+                    Instructions));
+
+            // One of another target is not what was declared, and neither is an element.
+            foreach (string select in new[] { "/r/processing-instruction('other')", "/r/processing-instruction()", "/r/x" })
+            {
+                XsltException refused = Assert.ThrowsExactly<XsltException>(() => Run(
+                    "<xsl:template match=\"/\">"
+                    + $"<xsl:variable name=\"v\" as=\"processing-instruction('db')*\" select=\"{select}\"/>"
+                    + "<out><xsl:value-of select=\"count($v)\"/></out></xsl:template>",
+                    Instructions));
+
+                Assert.AreEqual("XTTE0570", refused.Code, select);
+            }
+        }
     }
 }

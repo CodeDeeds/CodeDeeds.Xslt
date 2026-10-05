@@ -10430,6 +10430,38 @@ over two thousand items and eight thousand, three fresh processes of each build 
 One more unit test in `PatternTests`, of twenty-one patterns over the document above and over an element
 with no parent, which fails at its first against the engine as it was; 3,136 in all.
 
+### What the DocBook stylesheets asked for
+
+The benchmarks compiled the DocBook xslTNG stylesheets and had never transformed a document with them.
+Asked to, the engine did not: one fault of its own, and two things the stylesheets need of whoever calls
+them.
+
+**A processing instruction named in a type.** `processing-instruction(N)`, the target written as a name
+or as a string, is a kind test wherever a kind test may be written, and was read in a step and not in a
+sequence type: `as="processing-instruction('db')*"` on a function's parameter, in the third of the four
+stylesheets a document is put through before it is formatted, was `XPST0003` at the parenthesis. The
+type is parsed now as the named element test is, a processing instruction's name being its target and
+in no namespace, so `instance of`, `treat as` and every `as` take it. Two unit tests in
+`DeclaredTypeTests`, neither passing against the engine as it was. All eight conformance runs are identical test for test, 8,061 of 8,071 at 3.0,
+5,678 of 5,701 at 2.0 and 8,668 of 8,683 schema-aware, each on both backends, and 18,268 of 18,285 and
+14,553 of 14,577 on the XPath runs, so nothing in either suite turned on it.
+
+**What a caller has to give them.** The first variable the stylesheets declare is
+`resolve-uri(base-uri(.), static-base-uri())` as an `xs:string`, so a document with no base URI is an
+empty sequence where a string was declared: the transformation needs `XsltOptions.InputUri`. And they
+find the stylesheets they run with `fn:transform()`, their localization and their title page templates
+by `resolve-uri()` against `static-base-uri()`, so a module has to be known by a URI. `UriResolver`
+names a file by its `file:` URI and `FileResolver` by its path, and a path on Windows is read by
+`resolve-uri()` as a URI whose scheme is the drive letter: `transforms/00-logstruct.xsl` against
+`C:\...\docbook.xsl` came out as `C:transforms/00-logstruct.xsl`, which `FileResolver` then refused as
+outside its root. The benchmark uses `UriResolver`; that `FileResolver` hands a stylesheet a base URI
+that is not one is left as it is and written down here.
+
+With those, every document tried transforms, and the results read as DocBook's. What it costs is in the
+benchmarks' README, under *DocBook*, with the two things found in it: every transformation compiles
+again the four stylesheets `fn:transform()` is handed, and a row of a CALS table is 1.7 milliseconds and
+a megabyte.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error

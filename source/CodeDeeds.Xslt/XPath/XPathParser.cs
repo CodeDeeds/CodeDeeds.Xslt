@@ -1413,6 +1413,27 @@ namespace CodeDeeds.Xslt.XPath
                 return XdmSequenceType.Kind(kindTest, ParseOccurrence(itemOnly), kindTest.ToString());
             }
 
+            // processing-instruction(N), with the target written as a name or as a string, which the
+            // grammar allows in a type wherever it allows it in a step: 'as="processing-instruction('db')*"'
+            // is how the DocBook stylesheets declare what one of their functions takes, and it was read
+            // as far as the parenthesis and refused there. A processing instruction's name is its target
+            // and has no namespace, so the test is the one a named element's is.
+            if (token.Prefix.Length == 0 && token.Text == "processing-instruction"
+                && Current.Kind == XPathTokenKind.LeftParen
+                && Peek(1).Kind is XPathTokenKind.StringLiteral or XPathTokenKind.Name
+                && Peek(1).Prefix.Length == 0)
+            {
+                m_index++;
+                string target = Current.Text;
+                m_index++;
+                Expect(XPathTokenKind.RightParen);
+
+                KindNodeTest named = new KindNodeTest(
+                    NodeKind.ProcessingInstruction, string.Empty, target, null, $"processing-instruction({target})");
+
+                return XdmSequenceType.Kind(named, ParseOccurrence(itemOnly), named.ToString());
+            }
+
             // A kind test is a name followed by parentheses; an atomic type is a name alone.
             bool isKindTest = Current.Kind == XPathTokenKind.LeftParen;
             if (isKindTest)
