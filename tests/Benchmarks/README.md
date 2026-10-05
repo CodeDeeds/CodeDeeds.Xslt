@@ -16,6 +16,7 @@ This project provides comprehensive performance benchmarks for the XSLT transfor
 8. **The framework's processor** - The same work on `System.Xml.Xsl.XslCompiledTransform`, for scale
 9. **Cold start and the JIT** - The first call in a fresh process, and how much of the settled speed is the runtime's dynamic PGO
 10. **Predicates in match patterns** - What `match="item[@type='a']"` costs as the siblings multiply
+11. **DocBook** - Documents written for the DocBook xslTNG stylesheets, transformed with them
 
 Items 5 to 10 came out of the performance review of 19 September 2026
 (`source/CodeDeeds.Xslt/Documentation/PerformanceReview-2026-09-19.md`), which says what each was built to find out.
@@ -73,6 +74,10 @@ Items 5 to 10 came out of the performance review of 19 September 2026
   - Five ways of writing one transformation, the first with the test in the template instead of the pattern; the setup refuses to run if they disagree
   - The same pattern over the same items ten to a parent, which shows whether the cost follows the siblings or the document
 
+- **DocBookTransformationBenchmarks.cs** - DocBook documents through the DocBook xslTNG stylesheets, fifty modules somebody else wrote
+  - A book of 77 paragraphs, and one table at a hundred rows and at a thousand
+  - The stylesheet is compiled in the setup; what is measured is the parse and everything the stylesheets do, the four stylesheets they run the document through with `fn:transform()` first included
+
 - **BenchmarkData.cs** - The documents and stylesheets the classes above share, and the counting sinks
 
 ### Sample Data & Stylesheets
@@ -80,6 +85,7 @@ Items 5 to 10 came out of the performance review of 19 September 2026
 #### Data Files
 - **Data/products.xml** - Sample e-commerce product catalog in XML format (100 products)
 - **Data/products.json** - Sample e-commerce product catalog in JSON format (100 products)
+- **Data/DocBook/** - Two documents from the DocBook xslTNG tests, under its MIT licence: a book, and a CALS table of a thousand rows; see the README in the folder
 
 #### Stylesheets
 - **Stylesheets/ProductsXmlToHtml.xslt** - Transforms XML product data to HTML
@@ -109,7 +115,7 @@ dotnet run -c Release
 ```
 
 With no arguments, every benchmark class runs in turn. The first four classes take about five minutes between
-them, and the rest about twenty-two more: they use BenchmarkDotNet's default job, which warms up until the
+them, and the rest about twenty-four more: they use BenchmarkDotNet's default job, which warms up until the
 measurements settle. Nothing needs a network connection.
 
 BenchmarkDotNet finds this project by its name under the solution's folder and refuses to run if it finds
@@ -390,6 +396,23 @@ nothing here separates that from the engine's own share.
 | Tiered with dynamic PGO (the default) | 4.990 ms | 1.00 | 599.1 KB |
 | Tiered, `DOTNET_TieredPGO=0` | 6.824 ms | 1.37 | 599.2 KB |
 | `DOTNET_TieredCompilation=0` | 9.415 ms | 1.89 | 599.1 KB |
+
+#### DocBook
+
+Measured after the rest, when the class was added: the stylesheets under `Stylesheets/DocBook`, compiled once,
+over the documents under `Data/DocBook`, written to a writer that keeps nothing.
+
+| Document | Mean | Allocated |
+|---|---:|---:|
+| A book of 77 paragraphs, 44 KB | 114.3 ms | 61.6 MB |
+| A table of 100 rows, 26 KB | 228.8 ms | 121.4 MB |
+| A table of 1,000 rows, 257 KB | 1,720.3 ms | 1,110.1 MB |
+
+Two things in those figures are not the documents'. A document of three hundred characters takes 73 ms and
+41 MB: the stylesheets put every document through four stylesheets of their own with `fn:transform()` before
+formatting it, and each of the four is read and compiled again at every transformation, thirty-one modules
+in all. And a row of the table costs 1.7 ms and 1.1 MB, which is the stylesheets' way with a CALS table and
+this engine's way with what they write; where it goes has not been looked into.
 
 ## Benchmark Methodology
 

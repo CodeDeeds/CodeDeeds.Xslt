@@ -27,6 +27,7 @@ using BenchmarkDotNet.Running;
 /// 12. ColdStartBenchmarks - The first compile and the first transform in a fresh process
 /// 13. JitSensitivityBenchmarks - The same transform with and without the runtime's dynamic PGO
 /// 14. PatternPredicateBenchmarks - A predicate in a match pattern, as the siblings multiply
+/// 15. DocBookTransformationBenchmarks - DocBook documents through the DocBook xslTNG stylesheets
 ///
 /// BenchmarkDotNet finds this project by name under the solution's folder, so it refuses to run while a
 /// second copy of the repository sits inside it - a git worktree under .claude/worktrees, for one.

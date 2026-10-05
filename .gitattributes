@@ -3,3 +3,4 @@
 
 # Somebody else's stylesheets, kept as they were published.
 tests/Benchmarks/Stylesheets/DocBook/** -text
+tests/Benchmarks/Data/DocBook/** -text
