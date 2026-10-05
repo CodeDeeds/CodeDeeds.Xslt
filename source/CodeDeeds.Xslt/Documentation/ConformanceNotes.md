@@ -10527,6 +10527,73 @@ transformations at once. Two hold answers and pass against it: the initial templ
 and the delivery format read for each call of a stylesheet already compiled, and a stylesheet given as
 text beside one given as a node.
 
+### What every DocBook document paid
+
+With the stylesheets `fn:transform()` runs kept compiled, a DocBook document of three hundred characters
+still took 28 milliseconds and 24 megabytes, by the mean of some two hundred transformations. Where it
+went was looked for by taking the stacks of the process two hundred times while it transformed that
+document over and over (`dotnet-stack report`, there being no profiler on the machine), counting what the
+main thread was in, and then trying each thing found in a copy of the library.
+
+**`xsl:map`, a third of the samples.** The stylesheets declare 224 parameters and hand them all on in one
+`xsl:map`, a global variable, and the stylesheets they run with `fn:transform()` are given the 224 and
+build the map again. `MapInstruction` gathered the entries and then added them one at a time with
+`XdmMap.Put`. A map is not changed once made, so `Put` makes another, a copy of the dictionary with one
+more in it: 224 maps for the one wanted, some 25,000 entries copied, at every building of it. A thousand
+entries were 51.7 megabytes. `XdmMap.TryBuildDistinct` builds the dictionary in one pass and says which
+key came twice, which is all the adding one at a time was for; the thousand entries are 1.2 megabytes,
+and the error and its message are what they were.
+
+**Two searches of the list of globals.** `XsltRuntime.EnsureGlobal` found the declaration of a global by
+its slot by looking along `CompiledStylesheet.Globals`, each time a global was first read, and
+`BindSuppliedParameters` set every supplied name beside every global there is: for a stylesheet of some
+hundreds of both, run five times over for one document, the square of some hundreds, five times, twice.
+The compiled stylesheet answers both from tables it makes the first time it is asked
+(`GlobalAt`, `ParametersNamed`), the list not changing once the stylesheet is compiled. Two
+transformations at once may each make the tables; they make the same ones, and one is kept.
+
+**A lock that was not there to find.** `XsltRuntime.GetFingerprintMap` asks the name table how many names
+it has, which takes the table's lock, and `Monitor.Enter_Slowpath` under it was six percent of the
+samples and thirteen once the map was out of the way. Read without the lock, nothing moved: 22.0
+milliseconds and 22.8. A sample is taken where a thread can be stopped, a lock is such a place and most
+of the code around it is not, so the lock was where the thread was found and not where the time went.
+What stack samples say of a frame that locks, allocates or polls is to be tried before it is believed.
+
+Milliseconds and megabytes for a transformation, the mean of what ran in five seconds after six of
+warming, three fresh processes of each build taken turn about:
+
+| | was | is |
+|---|---:|---:|
+| A document of 300 characters | 27.7 ms, 24.6 MB | 20.4 ms, 12.4 MB |
+| A book of 77 paragraphs, 44 KB | 64.0 ms, 45.6 MB | 55.6 ms, 33.3 MB |
+| A CALS table of 100 rows, 26 KB | 175.1 ms, 104.5 MB | 175.7 ms, 94.3 MB |
+
+And by BenchmarkDotNet, the same book 60.2 ms and 44.8 MB before and 53.4 and 32.6 after, the table at a
+hundred rows 165.7 and 104.8 before and 161.5 and 92.5 after, and at a thousand 1,628 and 1,095 before
+and 1,645 and 1,082 after, which is the same time and the twelve megabytes. Of the seven milliseconds the
+map is six: tried one at a time on the short document, the map alone was 28.6 to 22.1, and the two tables
+together 22.1 to 20.7.
+
+**What is left** of the twenty milliseconds has no one cause that was found. By the samples taken with
+the map out of the way: a third in the four transformations before the one that formats, each binding
+224 parameters and evaluating the globals it reads; a third formatting; a sixth in the main
+stylesheet's own globals, where the localization and the title page templates are read and parsed
+again for every transformation, a document read with `doc()` being one for a transformation and not
+something to keep between two; and, everywhere in small amounts, a context copied to be changed.
+
+All eight conformance runs are identical test for test: 8,061 of 8,071 at 3.0, 5,678 of 5,701 at 2.0
+and 8,668 of 8,683 schema-aware, each on both backends, and 18,268 of 18,285 and 14,553 of 14,577 on the
+XPath runs.
+
+Six unit tests in a class of their own, `ManyParametersTests`, 3,150 in all. Five hold answers and pass
+against the engine as it was: the entries of an `xsl:map` and their order, from `xsl:map-entry` and from
+maps turn about, none, and a thousand; a key written twice refused five ways and named; three hundred
+parameters supplied in the opposite order to the one they are declared in, some by expanded name, with
+three hundred names nothing declares among them; two parameters of one local name in two namespaces,
+and one supplied what does not fit its type; and four hundred globals each defined by the one before,
+read from the far end, by one transformation and by sixteen at once. One measures the thousand-entry
+map and does not pass against it, 51.7 megabytes where four are asked.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error

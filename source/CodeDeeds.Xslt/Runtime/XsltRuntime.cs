@@ -691,15 +691,7 @@ namespace CodeDeeds.Xslt.Runtime
                 return;
             }
 
-            GlobalVariable? global = null;
-            foreach (GlobalVariable candidate in m_stylesheet.Globals)
-            {
-                if (candidate.Slot == slot)
-                {
-                    global = candidate;
-                    break;
-                }
-            }
+            GlobalVariable? global = m_stylesheet.GlobalAt(slot);
 
             if (global is null)
             {
@@ -784,15 +776,14 @@ namespace CodeDeeds.Xslt.Runtime
                 ExpandedName name = StylesheetParameters.ParseName(entry.Key);
                 XPathValue value = StylesheetParameters.Convert(entry.Key, entry.Value);
 
-                foreach (GlobalVariable global in m_stylesheet.Globals)
+                // Found by name, and not by setting the name beside every global there is: what is
+                // supplied and what is declared are each some hundreds for a stylesheet of any size.
+                foreach (GlobalVariable global in m_stylesheet.ParametersNamed(name))
                 {
-                    if (global.IsParameter && global.Name.Equals(name))
-                    {
-                        // A declared type applies to what the caller supplied as much as to a default the
-                        // stylesheet wrote: a parameter declared xs:integer is an integer however it arrived.
-                        m_globals[global.Slot] = XdmTypeConversion.Apply(value, global.Type, XsltErrorCode.XTTE0590);
-                        m_globalState[global.Slot] = GlobalReady;
-                    }
+                    // A declared type applies to what the caller supplied as much as to a default the
+                    // stylesheet wrote: a parameter declared xs:integer is an integer however it arrived.
+                    m_globals[global.Slot] = XdmTypeConversion.Apply(value, global.Type, XsltErrorCode.XTTE0590);
+                    m_globalState[global.Slot] = GlobalReady;
                 }
             }
         }

@@ -123,6 +123,41 @@ namespace CodeDeeds.Xslt.XPath
             return built.Count == 0 ? Empty : new XdmMap(built);
         }
 
+        /// <summary>
+        /// Builds a map of entries that must each have a key of their own, in one pass.
+        /// </summary>
+        /// <remarks>
+        /// What <c>xsl:map</c> builds. A map is not changed once made, so adding to one is making
+        /// another: an <c>xsl:map</c> of two hundred entries put together one <see cref="Put"/> at a time
+        /// made two hundred maps, each a copy of the last with one more in it, which was a third of what
+        /// the DocBook stylesheets took over a short document.
+        /// </remarks>
+        /// <param name="entries">The entries, in the order the map is to hold them.</param>
+        /// <param name="map">The map, where every key is different.</param>
+        /// <param name="repeated">The first key met a second time, where one is.</param>
+        /// <returns>Whether every key is different.</returns>
+        internal static bool TryBuildDistinct(
+            List<KeyValuePair<XPathValue, XPathValue>> entries,
+            [NotNullWhen(true)] out XdmMap? map,
+            out XPathValue repeated)
+        {
+            Dictionary<XdmKey, XPathValue> built = new Dictionary<XdmKey, XPathValue>(entries.Count);
+
+            foreach (KeyValuePair<XPathValue, XPathValue> entry in entries)
+            {
+                if (!built.TryAdd(XdmKey.Of(entry.Key), entry.Value))
+                {
+                    map = null;
+                    repeated = entry.Key;
+                    return false;
+                }
+            }
+
+            map = built.Count == 0 ? Empty : new XdmMap(built);
+            repeated = default;
+            return true;
+        }
+
         /// <summary>Returns the value a key maps to, or the empty sequence where the key is absent.</summary>
         /// <param name="key">The key to look up.</param>
         public XPathValue Get(XPathValue key)

@@ -326,6 +326,86 @@ namespace CodeDeeds.Xslt.Compiler
         /// <summary>The number of slots global storage must provide.</summary>
         public int GlobalSlotCount { get; }
 
+        // Two readings of Globals a transformation asks for all the time, made the first time one is
+        // asked for and kept: the list does not change once the stylesheet is compiled. A stylesheet is
+        // shared between transformations running at once, so two may each make one; they make the same,
+        // and whichever is put here first is the one both go on to read.
+        private GlobalVariable?[]? m_globalsBySlot;
+        private Dictionary<ExpandedName, GlobalVariable[]>? m_parametersByName;
+
+        /// <summary>The global declared for a slot, or null where the slot has none.</summary>
+        /// <remarks>
+        /// Asked every time a global is first read in a transformation. Looked for along
+        /// <see cref="Globals"/> it was a search of the whole list for each of them, which for a
+        /// stylesheet of several hundred parameters, run five times over for one document as the DocBook
+        /// stylesheets run theirs, is the square of several hundred, five times.
+        /// </remarks>
+        /// <param name="slot">The slot.</param>
+        internal GlobalVariable? GlobalAt(int slot)
+        {
+            GlobalVariable?[] bySlot = m_globalsBySlot ?? GlobalsBySlot();
+            return (uint)slot < (uint)bySlot.Length ? bySlot[slot] : null;
+        }
+
+        private GlobalVariable?[] GlobalsBySlot()
+        {
+            GlobalVariable?[] bySlot = new GlobalVariable?[GlobalSlotCount];
+
+            foreach (GlobalVariable global in Globals)
+            {
+                // The first declared for a slot, which is the one a search from the front found.
+                if ((uint)global.Slot < (uint)bySlot.Length)
+                {
+                    bySlot[global.Slot] ??= global;
+                }
+            }
+
+            return Interlocked.CompareExchange(ref m_globalsBySlot, bySlot, null) ?? bySlot;
+        }
+
+        /// <summary>The parameters declared under a name, in declaration order; none where there is none.</summary>
+        /// <remarks>
+        /// More than one where packages each declare a parameter of the name. What a caller supplies is
+        /// bound to each, and finding them by comparing every supplied name with every global was two
+        /// hundred names against several hundred globals for each transformation DocBook runs.
+        /// </remarks>
+        /// <param name="name">The parameter's name.</param>
+        internal GlobalVariable[] ParametersNamed(ExpandedName name)
+        {
+            Dictionary<ExpandedName, GlobalVariable[]> byName = m_parametersByName ?? ParametersByName();
+            return byName.TryGetValue(name, out GlobalVariable[]? named) ? named : Array.Empty<GlobalVariable>();
+        }
+
+        private Dictionary<ExpandedName, GlobalVariable[]> ParametersByName()
+        {
+            Dictionary<ExpandedName, List<GlobalVariable>> gathered = new Dictionary<ExpandedName, List<GlobalVariable>>();
+
+            foreach (GlobalVariable global in Globals)
+            {
+                if (!global.IsParameter)
+                {
+                    continue;
+                }
+
+                if (!gathered.TryGetValue(global.Name, out List<GlobalVariable>? named))
+                {
+                    gathered[global.Name] = named = new List<GlobalVariable>(1);
+                }
+
+                named.Add(global);
+            }
+
+            Dictionary<ExpandedName, GlobalVariable[]> byName =
+                new Dictionary<ExpandedName, GlobalVariable[]>(gathered.Count);
+
+            foreach (KeyValuePair<ExpandedName, List<GlobalVariable>> entry in gathered)
+            {
+                byName[entry.Key] = entry.Value.ToArray();
+            }
+
+            return Interlocked.CompareExchange(ref m_parametersByName, byName, null) ?? byName;
+        }
+
         /// <summary>The serialization method requested by <c>xsl:output</c>.</summary>
         public OutputMethod OutputMethod { get; }
 

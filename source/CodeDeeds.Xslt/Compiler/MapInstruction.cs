@@ -53,18 +53,13 @@ namespace CodeDeeds.Xslt.Compiler
         private static XdmMap BuildRejectingDuplicates(
             List<KeyValuePair<XPathValue, XPathValue>> entries)
         {
-            XdmMap built = XdmMap.Empty;
-
-            foreach (KeyValuePair<XPathValue, XPathValue> entry in entries)
+            // In one pass, and not by adding each entry to the map so far: a map is not changed once made,
+            // so that was a new map for every entry, each a copy of the one before.
+            if (!XdmMap.TryBuildDistinct(entries, out XdmMap? built, out XPathValue repeated))
             {
-                if (built.Contains(entry.Key))
-                {
-                    throw XsltErrors.Error(
-                        XsltErrorCode.XTDE3365,
-                        $"Two entries of this xsl:map have the key '{entry.Key.ToStringValue()}'.");
-                }
-
-                built = built.Put(entry.Key, entry.Value);
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTDE3365,
+                    $"Two entries of this xsl:map have the key '{repeated.ToStringValue()}'.");
             }
 
             return built;

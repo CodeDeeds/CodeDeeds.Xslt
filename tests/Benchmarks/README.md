@@ -404,21 +404,29 @@ over the documents under `Data/DocBook`, written to a writer that keeps nothing.
 
 | Document | Mean | Allocated |
 |---|---:|---:|
-| A book of 77 paragraphs, 44 KB | 60.2 ms | 44.8 MB |
-| A table of 100 rows, 26 KB | 165.7 ms | 104.8 MB |
-| A table of 1,000 rows, 257 KB | 1,627.8 ms | 1,094.6 MB |
+| A book of 77 paragraphs, 44 KB | 53.4 ms | 32.6 MB |
+| A table of 100 rows, 26 KB | 161.5 ms | 92.5 MB |
+| A table of 1,000 rows, 257 KB | 1,645.0 ms | 1,082.4 MB |
+
+The class has been run three times, and the first two found something that was not the documents'.
 
 The stylesheets put every document through four stylesheets of their own with `fn:transform()` before
 formatting it. When the class was first run each of the four was read and compiled again at every
 transformation, thirty-one modules in all, and the three rows were 114.3 ms and 61.6 MB, 228.8 ms and
-121.4 MB, and 1,720.3 ms and 1,110.1 MB: some sixty milliseconds and sixteen megabytes of each was that.
-A stylesheet `fn:transform()` has compiled is kept now by the call that named it.
+121.4 MB, and 1,720.3 ms and 1,110.1 MB. A stylesheet `fn:transform()` has compiled is kept now by the
+call that named it, which made them 60.2 ms and 44.8 MB, 165.7 ms and 104.8 MB, and 1,627.8 ms and
+1,094.6 MB.
 
-Two things in the figures are still not the documents'. A document of three hundred characters takes 23 ms
-and 24 MB, which is what the stylesheets do for any document at all: four transformations before the one
-that formats, and the localization and the title page templates read each time. And a row of the table
-costs 1.6 ms and 1.1 MB, which is the stylesheets' way with a CALS table and this engine's way with what
-they write. Where either goes has not been looked into.
+The stylesheets also declare 224 parameters and hand them on in one `xsl:map`, which the stylesheets they
+run build again, and `xsl:map` made a new map for every entry, each a copy of the last: twelve megabytes of every
+transformation and a quarter of what a short document took. It builds a map in one pass now, and two
+searches of a list that were made for every parameter are lookups, which is the table above.
+
+What is left that is not the document's is what the stylesheets do for any document at all. One of
+three hundred characters takes 20 ms and 12 MB: four transformations before the one that formats, each
+setting up its own parameters, and the localization and the title page templates read each time. And a
+row of the table costs 1.6 ms and 1.1 MB, which is the stylesheets' way with a CALS table and this
+engine's way with what they write, and has not been looked into.
 
 ## Benchmark Methodology
 
