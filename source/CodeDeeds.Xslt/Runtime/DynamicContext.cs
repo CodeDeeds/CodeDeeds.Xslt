@@ -8,9 +8,18 @@ namespace CodeDeeds.Xslt.Runtime
     /// variable storage and name resolution in force.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A <see langword="ref"/> <see langword="struct"/>, so that passing the context down an expression tree
     /// costs nothing and never allocates. Copy it and adjust the copy to establish a nested context; the
     /// original is unaffected.
+    /// </para>
+    /// <para>
+    /// It is copied at every change of focus, so it is kept small: what an evaluation reads and never
+    /// changes — the transformation, its globals, what answers <c>doc()</c> outside one, the collations, the
+    /// names and the clock — is behind the one reference <see cref="Surroundings"/>, and the properties
+    /// here that read from it are for convenience. See <see cref="CodeDeeds.Xslt.Runtime.Surroundings"/> for what the
+    /// size costs.
+    /// </para>
     /// </remarks>
     public ref struct DynamicContext
     {
@@ -177,9 +186,6 @@ namespace CodeDeeds.Xslt.Runtime
         /// <summary>The offset in <see cref="Locals"/> at which the current template's frame begins.</summary>
         public int FrameBase;
 
-        /// <summary>Backing store for global variables and parameters.</summary>
-        public XPathValue[] Globals;
-
         /// <summary>
         /// Backing store for the variables bound by <c>for</c>, <c>some</c> and <c>every</c>.
         /// </summary>
@@ -192,47 +198,88 @@ namespace CodeDeeds.Xslt.Runtime
         public XPathValue[]? RangeVariables;
 
         /// <summary>
+        /// What this evaluation reads and does not change while it runs: the transformation and its
+        /// globals, what answers <c>doc()</c> and <c>unparsed-text()</c> where no transformation does, the
+        /// collations, the name slots and the clock. Never <see langword="null"/> in a context that was
+        /// constructed; <see cref="CodeDeeds.Xslt.Runtime.Surroundings.None"/> where nothing was given.
+        /// </summary>
+        /// <remarks>
+        /// One reference where there were seven fields, so that copying the context moves one word rather
+        /// than seven and marks one reference for the garbage collector rather than seven: every change of
+        /// focus copies the context, and the copy's cost goes by its size. The properties below read
+        /// through to it, and setting one of them gives this context surroundings of its own with the one
+        /// thing changed, as <c>context.Globals = values</c> does when a context is set up; a transformation
+        /// hands its surroundings over whole instead.
+        /// </remarks>
+        public Surroundings Surroundings;
+
+        /// <summary>
         /// The transformation in progress, or <see langword="null"/> when an expression is evaluated outside
         /// one. Expressions need it to resolve names against a tree other than <see cref="Tree"/>, which
-        /// happens when a path navigates into a result tree fragment.
+        /// happens when a path navigates into a result tree fragment. Reads <see cref="Surroundings"/>.
         /// </summary>
-        public XsltRuntime? Runtime;
+        public XsltRuntime? Runtime
+        {
+            readonly get => Surroundings.Runtime;
+            set => Surroundings = Surroundings.WithRuntime(value);
+        }
+
+        /// <summary>Backing store for global variables and parameters. Reads <see cref="Surroundings"/>.</summary>
+        public XPathValue[] Globals
+        {
+            readonly get => Surroundings.Globals;
+            set => Surroundings = Surroundings.WithGlobals(value);
+        }
 
         /// <summary>
         /// What answers <c>doc()</c> where no transformation is running — a static expression at compile
         /// time — or <see langword="null"/> where nothing does. Given the reference as written and the base
-        /// URI to resolve it against, or null for the module's own.
+        /// URI to resolve it against, or null for the module's own. Reads <see cref="Surroundings"/>.
         /// </summary>
-        public Func<string, string?, Model.XdmTree>? DocumentLoader;
+        public Func<string, string?, Model.XdmTree>? DocumentLoader
+        {
+            readonly get => Surroundings.DocumentLoader;
+            set => Surroundings = Surroundings.WithDocumentLoader(value);
+        }
 
         /// <summary>
         /// What answers <c>unparsed-text()</c> where no transformation is running, or
         /// <see langword="null"/> where nothing does. Given the reference as written and the encoding
-        /// the call named, or null for none.
+        /// the call named, or null for none. Reads <see cref="Surroundings"/>.
         /// </summary>
-        /// <remarks>
-        /// The companion of <see cref="DocumentLoader"/>, and there for the same reason: an
-        /// expression evaluated on its own has no transformation behind it and so no resolver of its
-        /// own, and a caller that means it to read something lends it one.
-        /// </remarks>
-        public Func<string, string?, string>? TextLoader;
+        public Func<string, string?, string>? TextLoader
+        {
+            readonly get => Surroundings.TextLoader;
+            set => Surroundings = Surroundings.WithTextLoader(value);
+        }
 
         /// <summary>
         /// The caller's collations where no transformation is running to carry them — a static expression
         /// at compile time, or an expression evaluated on its own — or <see langword="null"/> where there
-        /// are none. A running transformation answers from its own options instead.
+        /// are none. A running transformation answers from its own options instead. Reads
+        /// <see cref="Surroundings"/>.
         /// </summary>
-        public IXsltCollationResolver? Collations;
+        public IXsltCollationResolver? Collations
+        {
+            readonly get => Surroundings.Collations;
+            set => Surroundings = Surroundings.WithCollations(value);
+        }
 
         /// <summary>
         /// The slots the expression's name tests were assigned, or <see langword="null"/> where they were not
         /// supplied. Outside a transformation this is what lets a path into a document built while the
         /// expression ran — by <c>fn:parse-xml</c> or <c>fn:json-to-xml</c> — resolve its names at all.
+        /// Reads <see cref="Surroundings"/>.
         /// </summary>
-        public XPath.NameSlotTable? Names;
+        public XPath.NameSlotTable? Names
+        {
+            readonly get => Surroundings.Names;
+            set => Surroundings = Surroundings.WithNames(value);
+        }
 
         /// <summary>
         /// The one reading of the clock this evaluation makes, shared by every <c>current-*</c> call in it.
+        /// Reads <see cref="Surroundings"/>.
         /// </summary>
         /// <remarks>
         /// A reference rather than the moment itself, so that a context copied by <see cref="SwitchTree"/>
@@ -240,7 +287,11 @@ namespace CodeDeeds.Xslt.Runtime
         /// nothing supplied one, which is what makes an expression evaluated outside a transformation stable
         /// within itself.
         /// </remarks>
-        public Clock? Clock;
+        public Clock? Clock
+        {
+            readonly get => Surroundings.Clock;
+            set => Surroundings = Surroundings.WithClock(value);
+        }
 
         /// <summary>
         /// Returns the clock this evaluation reads, making one where nothing has supplied it.
@@ -249,7 +300,20 @@ namespace CodeDeeds.Xslt.Runtime
         /// A transformation's clock is the runtime's, so that every template in it agrees; an expression
         /// evaluated outside one makes its own the first time it asks, which keeps it stable within itself.
         /// </remarks>
-        public Clock ReadClock() => Runtime?.Clock ?? (Clock ??= new Clock());
+        public Clock ReadClock()
+        {
+            if (Surroundings.Runtime is XsltRuntime runtime)
+            {
+                return runtime.Clock;
+            }
+
+            if (Surroundings.Clock is null)
+            {
+                Surroundings = Surroundings.WithClock(new Clock());
+            }
+
+            return Surroundings.Clock!;
+        }
 
         /// <summary>
         /// Initializes a context positioned on a single node, with no variables in scope.
@@ -263,10 +327,26 @@ namespace CodeDeeds.Xslt.Runtime
         /// </param>
         public DynamicContext(
             XdmTree tree, int node, int[] fingerprintMap, XPath.NameSlotTable? names = null)
+            : this(tree, node, fingerprintMap, names is null ? Surroundings.None : new Surroundings { Names = names })
+        {
+        }
+
+        /// <summary>
+        /// Initializes a context positioned on a single node, with no variables in scope, in given
+        /// surroundings.
+        /// </summary>
+        /// <param name="tree">The tree being queried.</param>
+        /// <param name="node">The context node.</param>
+        /// <param name="fingerprintMap">Slot-to-fingerprint mapping for <paramref name="tree"/>.</param>
+        /// <param name="surroundings">
+        /// What the evaluation reads and does not change: a transformation hands over its own, so that every
+        /// context in it shares the one object.
+        /// </param>
+        public DynamicContext(XdmTree tree, int node, int[] fingerprintMap, Surroundings surroundings)
         {
             Tree = tree;
             FingerprintMap = fingerprintMap;
-            Names = names;
+            Surroundings = surroundings;
             Node = node;
             AtomicItem = default;
             CurrentNode = node;
@@ -275,10 +355,7 @@ namespace CodeDeeds.Xslt.Runtime
             Size = 1;
             Locals = Array.Empty<XPathValue>();
             FrameBase = 0;
-            Globals = Array.Empty<XPathValue>();
             RangeVariables = null;
-            Runtime = null;
-            Clock = null;
         }
 
         /// <summary>
@@ -322,14 +399,8 @@ namespace CodeDeeds.Xslt.Runtime
                 Size = Size,
                 Locals = Locals,
                 FrameBase = FrameBase,
-                Globals = Globals,
                 RangeVariables = RangeVariables,
-                Runtime = Runtime,
-                DocumentLoader = DocumentLoader,
-                TextLoader = TextLoader,
-                Collations = Collations,
-                Names = Names,
-                Clock = Clock,
+                Surroundings = Surroundings,
             };
         }
 
@@ -354,19 +425,13 @@ namespace CodeDeeds.Xslt.Runtime
             public int Size;
             public XPathValue[] Locals = null!;
             public int FrameBase;
-            public XPathValue[] Globals = null!;
             public XPathValue[]? RangeVariables;
-            public XsltRuntime? Runtime;
-            public Func<string, string?, Model.XdmTree>? DocumentLoader;
-            public Func<string, string?, string>? TextLoader;
-            public IXsltCollationResolver? Collations;
-            public XPath.NameSlotTable? Names;
-            public Clock? Clock;
+            public Surroundings Surroundings = null!;
 
             /// <summary>Rebuilds the context this was copied from.</summary>
             public DynamicContext Restore()
             {
-                return new DynamicContext(Tree, Node, FingerprintMap, Names)
+                return new DynamicContext(Tree, Node, FingerprintMap, Surroundings)
                 {
                     AtomicItem = AtomicItem,
                     CurrentNode = CurrentNode,
@@ -375,13 +440,7 @@ namespace CodeDeeds.Xslt.Runtime
                     Size = Size,
                     Locals = Locals,
                     FrameBase = FrameBase,
-                    Globals = Globals,
                     RangeVariables = RangeVariables,
-                    Runtime = Runtime,
-                    DocumentLoader = DocumentLoader,
-                    TextLoader = TextLoader,
-                    Collations = Collations,
-                    Clock = Clock,
                 };
             }
         }

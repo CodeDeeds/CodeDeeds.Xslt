@@ -62,12 +62,18 @@ namespace CodeDeeds.Xslt.Compiler
     {
         private readonly Dictionary<string, XPathValue> m_documents = new(StringComparer.Ordinal);
         private readonly TransformDelivery m_delivery;
+        private readonly NameTable? m_names;
 
         /// <summary>Initializes a collection.</summary>
         /// <param name="delivery">What each document is handed back as.</param>
-        public TransformResults(TransformDelivery delivery)
+        /// <param name="names">
+        /// The name table the results are built in, which is the calling transformation's own, so that what
+        /// it reads back costs it no mapping of its own; null where there is no calling transformation.
+        /// </param>
+        public TransformResults(TransformDelivery delivery, NameTable? names)
         {
             m_delivery = delivery;
+            m_names = names;
         }
 
         /// <summary>What the transformation has produced so far, keyed by absolute URI.</summary>
@@ -120,13 +126,13 @@ namespace CodeDeeds.Xslt.Compiler
                 case TransformDelivery.Raw:
                     return new TransformDestination(
                         uri,
-                        new SequenceCaptureTarget(baseUri: uri) { StandsForFinalOutput = true },
+                        new SequenceCaptureTarget(baseUri: uri, names: m_names) { StandsForFinalOutput = true },
                         null);
 
                 case TransformDelivery.Document:
                     return new TransformDestination(
                         uri,
-                        new ResultTreeBuilder { BaseUri = uri, StandsForFinalOutput = true },
+                        new ResultTreeBuilder(m_names) { BaseUri = uri, StandsForFinalOutput = true },
                         null);
 
                 default:
@@ -140,7 +146,7 @@ namespace CodeDeeds.Xslt.Compiler
                     {
                         return new TransformDestination(
                             uri,
-                            new SequenceCaptureTarget { StandsForFinalOutput = true },
+                            new SequenceCaptureTarget(names: m_names) { StandsForFinalOutput = true },
                             text);
                     }
 
@@ -395,7 +401,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// <inheritdoc/>
         public override XPathValue Evaluate(ref DynamicContext context)
         {
-            List<XPathValue> given = XdmSequence.Items(m_options.Evaluate(ref context));
+            IReadOnlyList<XPathValue> given = XdmSequence.Items(m_options.Evaluate(ref context));
 
             if (given.Count != 1 || given[0].Kind != XPathValueKind.Map)
             {
@@ -405,7 +411,7 @@ namespace CodeDeeds.Xslt.Compiler
                     + (given.Count == 1 ? "the value given is not a map." : $"{given.Count} items were given."));
             }
 
-            return new TransformRequest(given[0].AsMap(), m_host, m_baseUri, m_compiled).Run();
+            return new TransformRequest(given[0].AsMap(), m_host, m_baseUri, m_compiled, context.Runtime?.TemporaryNames).Run();
         }
     }
 
@@ -431,14 +437,17 @@ namespace CodeDeeds.Xslt.Compiler
         private readonly XsltOptions m_host;
         private readonly string? m_baseUri;
         private readonly TransformCache m_compiled;
+        private readonly NameTable? m_names;
 
         /// <summary>Reads the option map, refusing what is not an option.</summary>
         /// <param name="options">The map the call was given.</param>
         /// <param name="host">The options the calling stylesheet was compiled with.</param>
         /// <param name="baseUri">The base URI where the call is written.</param>
         /// <param name="compiled">What the call has compiled before, and where to keep what it compiles now.</param>
-        public TransformRequest(XdmMap options, XsltOptions host, string? baseUri, TransformCache compiled)
+        /// <param name="names">The calling transformation's name table, which the results are built in.</param>
+        public TransformRequest(XdmMap options, XsltOptions host, string? baseUri, TransformCache compiled, NameTable? names = null)
         {
+            m_names = names;
             m_host = host;
             m_baseUri = baseUri;
             m_compiled = compiled;
@@ -476,7 +485,7 @@ namespace CodeDeeds.Xslt.Compiler
             (CompiledStylesheet compiled, XsltOptions inner) = Load();
 
             XdmTree? source = SourceTree(out XPathValue? selection);
-            TransformResults results = new TransformResults(delivery);
+            TransformResults results = new TransformResults(delivery, m_names);
             OutputSettings settings = Serialization(compiled);
 
             string principalUri = inner.BaseOutputUri ?? inner.BaseUri ?? PrincipalKey;
@@ -1101,7 +1110,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// <summary>Reads an option that is one atomic value.</summary>
         private static XPathValue RequireAtomic(string option, XPathValue value)
         {
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
             // A node is atomized, as the function conversion rules would do to it: an option written as the
             // content of an xsl:map-entry rather than in its select is a text node, and what it says is its
@@ -1126,7 +1135,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// <summary>Reads an option that is one node.</summary>
         private static XPathValue RequireNode(string option, XPathValue value)
         {
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
             if (items.Count != 1 || items[0].Kind != XPathValueKind.Node)
             {
@@ -1141,7 +1150,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// <summary>Reads an option that is one map.</summary>
         private static XdmMap RequireMap(string option, XPathValue value)
         {
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
             if (items.Count != 1 || items[0].Kind != XPathValueKind.Map)
             {

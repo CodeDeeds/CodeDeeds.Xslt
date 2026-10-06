@@ -88,7 +88,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// <param name="value">What the sequence constructor produced.</param>
         public static bool Test(XPathValue value)
         {
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
             if (items.Count != 1)
             {

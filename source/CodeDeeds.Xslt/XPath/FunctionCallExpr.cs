@@ -647,7 +647,7 @@ namespace CodeDeeds.Xslt.XPath
                 }
                 else
                 {
-                    List<XPathValue> items = XdmSequence.Items(value);
+                    IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
                     if (items.Count == 0 || items[0].Kind != XPathValueKind.Node)
                     {
                         return XPathValue.FromString(string.Empty);
@@ -757,7 +757,7 @@ namespace CodeDeeds.Xslt.XPath
             if (m_arguments.Length > 1)
             {
                 // XPath 2.0 lets the node be named, where 1.0 could only ask about the context node.
-                List<XPathValue> items = XdmSequence.Items(m_arguments[1].Evaluate(ref context));
+                IReadOnlyList<XPathValue> items = XdmSequence.Items(m_arguments[1].Evaluate(ref context));
 
                 if (items.Count == 0 || items[0].Kind != XPathValueKind.Node)
                 {

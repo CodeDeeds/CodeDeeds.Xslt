@@ -223,7 +223,7 @@ namespace CodeDeeds.Xslt.XPath
                 return anyChanged ? XPathValue.FromSequence(new XdmSequence(converted)) : value;
             }
 
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
             if (items.Count == 0)
             {
@@ -238,22 +238,21 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             bool changed = false;
+            XPathValue[] fitted = new XPathValue[items.Count];
 
             for (int i = 0; i < items.Count; i++)
             {
-                XPathValue converted = ConvertItem(items[i], function, position);
+                fitted[i] = ConvertItem(items[i], function, position);
 
-                if (!changed && !Same(converted, items[i]))
+                if (!changed && !Same(fitted[i], items[i]))
                 {
                     changed = true;
                 }
-
-                items[i] = converted;
             }
 
             // A value nothing happened to is passed on as it arrived, so that a node-set stays the node-set
             // the callee may be counting on rather than becoming a sequence that holds the same nodes.
-            return changed ? XdmSequence.Concatenate(items) : value;
+            return changed ? XdmSequence.Concatenate(fitted) : value;
         }
 
         /// <summary>
@@ -282,7 +281,7 @@ namespace CodeDeeds.Xslt.XPath
 
             if (value.Kind is XPathValueKind.Sequence or XPathValueKind.NodeSet)
             {
-                List<XPathValue> items = XdmSequence.Items(value);
+                IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
                 if (items.Count > 1)
                 {

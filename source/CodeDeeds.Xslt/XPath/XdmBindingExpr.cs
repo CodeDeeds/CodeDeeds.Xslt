@@ -117,15 +117,16 @@ namespace CodeDeeds.Xslt.XPath
         /// <inheritdoc/>
         public override XPathValue Evaluate(ref DynamicContext context)
         {
-            List<XPathValue> items = XdmSequence.Items(Sequence.Evaluate(ref context));
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(Sequence.Evaluate(ref context));
             XPathValue saved = Reserve(ref context);
 
             try
             {
                 List<XPathValue> results = new List<XPathValue>(items.Count);
 
-                foreach (XPathValue item in items)
+                for (int i = 0; i < items.Count; i++)
                 {
+                    XPathValue item = items[i];
                     context.RangeVariables![Slot] = item;
                     results.Add(Body.Evaluate(ref context));
                 }
@@ -248,7 +249,7 @@ namespace CodeDeeds.Xslt.XPath
         /// <inheritdoc/>
         public override XPathValue Evaluate(ref DynamicContext context)
         {
-            List<XPathValue> items = XdmSequence.Items(m_source.Evaluate(ref context));
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(m_source.Evaluate(ref context));
             List<XPathValue> results = new List<XPathValue>(items.Count);
 
             for (int i = 0; i < items.Count; i++)
@@ -302,13 +303,14 @@ namespace CodeDeeds.Xslt.XPath
         /// <inheritdoc/>
         public override bool EvaluateAsBoolean(ref DynamicContext context)
         {
-            List<XPathValue> items = XdmSequence.Items(Sequence.Evaluate(ref context));
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(Sequence.Evaluate(ref context));
             XPathValue saved = Reserve(ref context);
 
             try
             {
-                foreach (XPathValue item in items)
+                for (int i = 0; i < items.Count; i++)
                 {
+                    XPathValue item = items[i];
                     context.RangeVariables![Slot] = item;
 
                     if (Body.EvaluateAsBoolean(ref context) != m_requireAll)

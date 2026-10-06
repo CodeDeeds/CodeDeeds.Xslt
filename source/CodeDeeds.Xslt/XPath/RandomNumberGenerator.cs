@@ -130,7 +130,8 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         private static XPathValue Permute(XPathValue sequence, ulong state)
         {
-            List<XPathValue> items = XdmSequence.Items(sequence);
+            // Shuffled in place, so a list of its own.
+            List<XPathValue> items = XdmSequence.ItemList(sequence);
 
             for (int last = items.Count - 1; last > 0; last--)
             {

@@ -673,7 +673,7 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="value">The value given.</param>
         internal static long AsPosition(XPathValue value)
         {
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
             if (items.Count != 1)
             {
@@ -701,7 +701,7 @@ namespace CodeDeeds.Xslt.XPath
 
         private XPathValue Key(int index, ref DynamicContext context)
         {
-            List<XPathValue> items = XdmSequence.Items(m_arguments[index].Evaluate(ref context));
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(m_arguments[index].Evaluate(ref context));
 
             if (items.Count != 1)
             {

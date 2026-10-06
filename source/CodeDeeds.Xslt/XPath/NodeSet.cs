@@ -21,7 +21,7 @@ namespace CodeDeeds.Xslt.XPath
     /// set must use <see cref="TreeAt"/> rather than <see cref="Tree"/>, which names only the first tree.
     /// </para>
     /// </remarks>
-    public sealed class NodeSet
+    public sealed class NodeSet : IReadOnlyList<XPathValue>
     {
         private int[] m_nodes;
         private XdmTree[]? m_nodeTrees;
@@ -110,7 +110,7 @@ namespace CodeDeeds.Xslt.XPath
                 throw NotNodes(value, code, what, false);
             }
 
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
             if (items.Count == 0)
             {
@@ -123,8 +123,9 @@ namespace CodeDeeds.Xslt.XPath
                     : throw NotNodes(items[0], code, what, true),
                 items.Count);
 
-            foreach (XPathValue item in items)
+            for (int i = 0; i < items.Count; i++)
             {
+                XPathValue item = items[i];
                 if (item.Kind != XPathValueKind.Node)
                 {
                     throw NotNodes(item, code, what, true);
@@ -171,6 +172,25 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>Gets the tree the node at a position belongs to.</summary>
         /// <param name="index">A zero-based index below <see cref="Count"/>.</param>
         public XdmTree TreeAt(int index) => m_nodeTrees is null ? Tree : m_nodeTrees[index];
+
+        /// <summary>
+        /// The node at a position as a value, which is how the set reads as the list of its items: what
+        /// <see cref="XdmSequence.Items"/> hands back for a node-set, each node made into a value as it is
+        /// asked for and none of them laid out beforehand.
+        /// </summary>
+        XPathValue IReadOnlyList<XPathValue>.this[int index] => XPathValue.FromNode(TreeAt(index), m_nodes[index]);
+
+        /// <summary>Walks the nodes as values, in the set's current ordering.</summary>
+        IEnumerator<XPathValue> IEnumerable<XPathValue>.GetEnumerator()
+        {
+            for (int i = 0; i < m_count; i++)
+            {
+                yield return XPathValue.FromNode(TreeAt(i), m_nodes[i]);
+            }
+        }
+
+        /// <inheritdoc/>
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => ((IEnumerable<XPathValue>)this).GetEnumerator();
 
         /// <summary>
         /// Appends a node of <see cref="Tree"/> without checking for duplicates or ordering. Call

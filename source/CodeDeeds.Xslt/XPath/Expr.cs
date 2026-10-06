@@ -2147,7 +2147,7 @@ namespace CodeDeeds.Xslt.XPath
             // as the number itself would. Any other sequence is read for its effective boolean value.
             if (value.Kind == XPathValueKind.Sequence)
             {
-                List<XPathValue> items = XdmSequence.Items(value);
+                IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
                 if (items.Count == 1 && items[0].Kind == XPathValueKind.Number)
                 {

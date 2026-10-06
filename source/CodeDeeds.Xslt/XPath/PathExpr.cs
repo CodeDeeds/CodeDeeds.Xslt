@@ -169,7 +169,7 @@ namespace CodeDeeds.Xslt.XPath
         /// <inheritdoc/>
         public override XPathValue Evaluate(ref DynamicContext context)
         {
-            List<XPathValue> sources = XdmSequence.Items(m_source.Evaluate(ref context));
+            IReadOnlyList<XPathValue> sources = XdmSequence.Items(m_source.Evaluate(ref context));
             List<XPathValue> results = new List<XPathValue>();
 
             bool nodes = false;
@@ -189,8 +189,11 @@ namespace CodeDeeds.Xslt.XPath
                 inner.Position = i + 1;
                 inner.Size = sources.Count;
 
-                foreach (XPathValue item in XdmSequence.Items(m_step.Evaluate(ref inner)))
+                IReadOnlyList<XPathValue> found = XdmSequence.Items(m_step.Evaluate(ref inner));
+
+                for (int j = 0; j < found.Count; j++)
                 {
+                    XPathValue item = found[j];
                     nodes |= item.Kind == XPathValueKind.Node;
                     others |= item.Kind != XPathValueKind.Node;
 
@@ -210,13 +213,14 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>Puts the nodes a step produced into document order, without repeats.</summary>
-        private static XPathValue Gather(List<XPathValue> items, XdmTree fallback)
+        private static XPathValue Gather(IReadOnlyList<XPathValue> items, XdmTree fallback)
         {
             NodeSet result = new NodeSet(
                 items.Count == 0 ? fallback : items[0].NodeTree, items.Count);
 
-            foreach (XPathValue item in items)
+            for (int i = 0; i < items.Count; i++)
             {
+                XPathValue item = items[i];
                 result.Add(item.NodeTree, item.NodeId);
             }
 

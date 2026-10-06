@@ -1504,12 +1504,12 @@ namespace CodeDeeds.Xslt.Compiler
         /// </remarks>
         private void ExecuteOverItems(XPathValue value, ref DynamicContext context, XsltRuntime runtime)
         {
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> read = XdmSequence.Items(value);
 
             bool allNodes = true;
-            foreach (XPathValue item in items)
+            for (int i = 0; i < read.Count; i++)
             {
-                if (item.Kind != XPathValueKind.Node)
+                if (read[i].Kind != XPathValueKind.Node)
                 {
                     allNodes = false;
                     break;
@@ -1526,6 +1526,8 @@ namespace CodeDeeds.Xslt.Compiler
                 return;
             }
 
+            // Sorted in place, so a list of its own.
+            List<XPathValue> items = XdmSequence.ItemList(value);
             SortKey.Sort(items, m_sortKeys, ref context);
 
             // An atomic item is current while its body runs, for current() to answer with; a node is
@@ -1817,9 +1819,11 @@ namespace CodeDeeds.Xslt.Compiler
                 return true;
             }
 
-            foreach (XPathValue item in XdmSequence.Items(value))
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
+
+            for (int i = 0; i < items.Count; i++)
             {
-                if (item.Kind is not (XPathValueKind.Node or XPathValueKind.NodeSet))
+                if (items[i].Kind is not (XPathValueKind.Node or XPathValueKind.NodeSet))
                 {
                     return false;
                 }
@@ -1946,14 +1950,16 @@ namespace CodeDeeds.Xslt.Compiler
                 // NodeSet cannot hold the parts of it that are not nodes.
                 if (m_allowsItems && !IsAllNodes(value))
                 {
-                    List<XPathValue> items = XdmSequence.Items(value);
+                    IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
                     // An xsl:sort orders what is processed whatever the items are. The node path below
                     // has always sorted; this one had not, and the suite's current-output-uri-009 sorts
-                    // five integers.
+                    // five integers. Sorted in place, so in a list of its own.
                     if (m_sortKeys.Length != 0)
                     {
-                        SortKey.Sort(items, m_sortKeys, ref context);
+                        List<XPathValue> sorted = XdmSequence.ItemList(value);
+                        SortKey.Sort(sorted, m_sortKeys, ref context);
+                        items = sorted;
                     }
 
                     runtime.ApplyTemplatesToSequence(items, mode, parameters, ref context);
@@ -2294,7 +2300,7 @@ namespace CodeDeeds.Xslt.Compiler
                 return XPathValue.FromString(string.Empty);
             }
 
-            ResultTreeBuilder builder = new ResultTreeBuilder { BaseUri = baseUri };
+            ResultTreeBuilder builder = new ResultTreeBuilder(runtime.TemporaryNames) { BaseUri = baseUri };
             OutputTarget previous = runtime.Output;
             runtime.Output = builder;
 
@@ -2337,7 +2343,7 @@ namespace CodeDeeds.Xslt.Compiler
                 return XPathValue.FromSequence(XdmSequence.Empty);
             }
 
-            SequenceCaptureTarget capture = new SequenceCaptureTarget(becomesAString, baseUri)
+            SequenceCaptureTarget capture = new SequenceCaptureTarget(becomesAString, baseUri, runtime.TemporaryNames)
             {
                 StandsForFinalOutput = finalOutput,
             };
@@ -2419,7 +2425,7 @@ namespace CodeDeeds.Xslt.Compiler
             // A sequence may hold nodes and atomic values together — which is what an as declaration lets a
             // variable be — so each item is copied as its own kind requires. An array contributes its
             // members: a result tree has no way to hold one, and its members are what it was built out of.
-            List<XPathValue> items = XdmSequence.ContentItems(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.ContentItems(value);
             for (int i = 0; i < items.Count; i++)
             {
                 if (items[i].Kind == XPathValueKind.Node)
@@ -2603,7 +2609,7 @@ namespace CodeDeeds.Xslt.Compiler
 
             if (m_select is not null)
             {
-                List<XPathValue> chosen = XdmSequence.Items(m_select.Evaluate(ref context));
+                IReadOnlyList<XPathValue> chosen = XdmSequence.Items(m_select.Evaluate(ref context));
 
                 // Nothing selected copies nothing, and more than one item is a type error of its own.
                 if (chosen.Count == 0)

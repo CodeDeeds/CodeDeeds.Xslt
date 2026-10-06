@@ -41,7 +41,7 @@ namespace CodeDeeds.Xslt.XPath
             public bool AllowDuplicateNames { get; set; }
         }
 
-        public static string Serialize(List<XPathValue> items, XPathValue options)
+        public static string Serialize(IReadOnlyList<XPathValue> items, XPathValue options)
         {
             return Write(items, ReadParameters(options));
         }
@@ -50,7 +50,7 @@ namespace CodeDeeds.Xslt.XPath
         /// Serializes a result sequence under the settings an <c>xsl:output</c> or an
         /// <c>xsl:result-document</c> settled, for the two methods that write values rather than a tree.
         /// </summary>
-        internal static string Text(List<XPathValue> items, OutputSettings settings)
+        internal static string Text(IReadOnlyList<XPathValue> items, OutputSettings settings)
         {
             return Write(
                 items,
@@ -62,7 +62,7 @@ namespace CodeDeeds.Xslt.XPath
                 });
         }
 
-        private static string Write(List<XPathValue> items, Parameters parameters)
+        private static string Write(IReadOnlyList<XPathValue> items, Parameters parameters)
         {
             return parameters.Settings.Method switch
             {
@@ -562,7 +562,7 @@ namespace CodeDeeds.Xslt.XPath
 
         // ---- The markup methods --------------------------------------------------------------------------
 
-        private static string Markup(List<XPathValue> items, Parameters parameters)
+        private static string Markup(IReadOnlyList<XPathValue> items, Parameters parameters)
         {
             StringWriter text = new StringWriter();
             OutputWriter writer = new OutputWriter(text, parameters.Settings);
@@ -626,7 +626,7 @@ namespace CodeDeeds.Xslt.XPath
         /// JSON holds one value, so this takes one item: a sequence of two is <c>SERE0023</c> and so is a
         /// map entry or an array member holding one, which is the same rule reaching inwards.
         /// </remarks>
-        private static string Json(List<XPathValue> items, Parameters parameters)
+        private static string Json(IReadOnlyList<XPathValue> items, Parameters parameters)
         {
             if (items.Count > 1)
             {
@@ -766,7 +766,7 @@ namespace CodeDeeds.Xslt.XPath
                 return value;
             }
 
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
             if (items.Count == 1)
             {
@@ -853,7 +853,7 @@ namespace CodeDeeds.Xslt.XPath
         /// attribute node. The specification says outright that the exact text is the processor's to choose,
         /// so what is here is the shape the suite's examples take.
         /// </remarks>
-        private static string Adaptive(List<XPathValue> items, Parameters parameters)
+        private static string Adaptive(IReadOnlyList<XPathValue> items, Parameters parameters)
         {
             StringBuilder text = new StringBuilder();
             string separator = parameters.ItemSeparator ?? "\n";
@@ -1023,7 +1023,7 @@ namespace CodeDeeds.Xslt.XPath
         /// <summary>Writes what stands in one place of a map or an array, which may be a sequence.</summary>
         private static void AppendAdaptiveSequence(StringBuilder text, XPathValue value, Parameters parameters)
         {
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
             if (items.Count == 1)
             {

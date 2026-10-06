@@ -513,7 +513,7 @@ namespace CodeDeeds.Xslt.XPath
             // it as a number, which it is not, and said no.
             if (value.Kind is XPathValueKind.Node or XPathValueKind.NodeSet)
             {
-                List<XPathValue> items = XdmSequence.Items(value);
+                IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
                 if (items.Count == 1)
                 {

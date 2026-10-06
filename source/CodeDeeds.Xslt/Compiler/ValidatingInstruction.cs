@@ -85,7 +85,7 @@ namespace CodeDeeds.Xslt.Compiler
             }
 
             // Build the result into a tree of its own, then validate that tree and write it out annotated.
-            ResultTreeBuilder builder = new ResultTreeBuilder { BaseUri = m_baseUri };
+            ResultTreeBuilder builder = new ResultTreeBuilder(runtime.TemporaryNames) { BaseUri = m_baseUri };
             OutputTarget previous = runtime.Output;
             runtime.Output = builder;
 
@@ -140,7 +140,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// </summary>
         private void ValidateCopy(SchemaComponents schemas, ref DynamicContext context, XsltRuntime runtime)
         {
-            SequenceCaptureTarget capture = new SequenceCaptureTarget();
+            SequenceCaptureTarget capture = new SequenceCaptureTarget(names: runtime.TemporaryNames);
             OutputTarget previous = runtime.Output;
             runtime.Output = capture;
 
@@ -267,7 +267,7 @@ namespace CodeDeeds.Xslt.Compiler
 
         private void ValidateAttribute(SchemaComponents schemas, ref DynamicContext context, XsltRuntime runtime)
         {
-            SequenceCaptureTarget capture = new SequenceCaptureTarget();
+            SequenceCaptureTarget capture = new SequenceCaptureTarget(names: runtime.TemporaryNames);
             OutputTarget previous = runtime.Output;
             runtime.Output = capture;
 
@@ -280,10 +280,11 @@ namespace CodeDeeds.Xslt.Compiler
                 runtime.Output = previous;
             }
 
-            List<XPathValue> items = XdmSequence.Items(capture.Finish());
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(capture.Finish());
 
-            foreach (XPathValue item in items)
+            for (int i = 0; i < items.Count; i++)
             {
+                XPathValue item = items[i];
                 if (item.Kind != XPathValueKind.Node
                     || item.NodeTree.KindOf(item.NodeId) != NodeKind.Attribute)
                 {

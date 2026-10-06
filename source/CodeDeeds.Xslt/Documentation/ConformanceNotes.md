@@ -10594,6 +10594,109 @@ and one supplied what does not fit its type; and four hundred globals each defin
 read from the far end, by one transformation and by sixteen at once. One measures the thousand-entry
 map and does not pass against it, 51.7 megabytes where four are asked.
 
+### What every DocBook document paid, continued
+
+With the map built in one pass and the two searches lookups, a DocBook document of three hundred
+characters took 20 milliseconds and 12.4 megabytes. Stack samples had said where a third of the first 28
+went and had been wrong about a lock; this time they were wrong about more, and the way that answered was
+a stopwatch at the places a transformation can be divided — each global, each template, each
+`fn:transform()`, each `doc()` — counted inclusive and exclusive of what they called, and the runtime's
+allocation events counted by type. Four things came out of it, each general, none of them DocBook's.
+
+**The context, 144 bytes to 96.** `Buffer.BulkMoveWithWriteBarrier` was the top frame of thirty percent of
+the samples: the copy of a `DynamicContext`, a struct of eighteen fields and twelve references, made at every
+change of focus, and when it returns from a method a call that moves the bytes and marks every reference.
+Seven of the fields never change in an evaluation — the runtime, its globals, what answers `doc()` and
+`unparsed-text()` outside one, the collations, the names and the clock — and are one reference now, to a
+`Surroundings` a transformation makes once; the properties on the context read through, and setting one
+gives the context surroundings of its own. The copy is 96 bytes and inlined, six nanoseconds where it was
+twenty. On the short document that changed nothing — 20.0 to 19.5 milliseconds, within the noise, with
+the copying frames fallen from thirty percent of the samples to ten — and on the book it was 4.5 percent
+and on the table 5. A frame that is a runtime helper is a place a thread can be stopped, and the samples
+count the stopping, not the time; the lock was that, and so was this. Where the time went was found with
+the stopwatch. The 2026-09-19 review had recommended the move on reading the code; it is right, and it is
+worth what it is worth.
+
+**One name table for the trees a transformation builds.** 130 fingerprint mappings and 8 template indexes a
+run, 3.6 milliseconds and 0.6, a fifth of the transformation: every temporary tree had a name table of its
+own, so stepping into one needed the stylesheet's name slots mapped to its fingerprints, two kilobytes and
+twenty-seven microseconds for the 560 slots, and applying templates to one needed the 800 rules indexed by
+them. The trees a transformation builds for itself — the value of a variable, a document `doc()` reads, what
+`parse-xml()` and `json-to-xml()` make, the results of an `fn:transform()` it calls — are interned in one
+table now, `XsltRuntime.TemporaryNames`, and share one mapping and one index. The mapping is made by
+interning every name the stylesheet has a slot for, so that it is complete before any tree is: made by
+looking names up, as the one for the input tree is, it would say of a name not yet seen that it does not
+exist, and be wrong about it the moment a later tree brought the name in. The input tree keeps the table it
+came with, since a caller may hand one tree to several transformations at once, and the table is the
+transformation's alone, so nothing locks it. 20 milliseconds became 14, the book 46 became 31, the table
+of a hundred rows 152 became 86: the table builds a tree a cell.
+
+**Whitespace stripping decided once a name.** `WhitespaceControl.ShouldStrip` walked every declaration for
+every whitespace-only text node of every document parsed, and the DocBook stylesheets declare two hundred
+names: 3,300 walks a run, 1.95 milliseconds, half of what parsing the 84-kilobyte localization file cost.
+The answer for a name is kept, in a collection several threads may read and write, and a declaration
+added afterwards starts the answers over. 14 milliseconds became 11.7.
+
+**A sequence read as itself.** `XdmSequence.Items` laid every value out into a `List` of its items, 24 bytes
+an item, and is what every function reading an argument and every `as` being checked started with: 2 of
+the 11.6 megabytes, the largest allocation left, most of it the forty-element sequences the stylesheets
+hand from template to template with a type on every parameter. Every sequence is flat — `Concatenate`
+flattens as it builds, and the constructor now flattens whatever else is given it — so a sequence is
+already the list of its items and is returned as itself; a node-set reads as the list of its nodes, each
+made as it is asked for, `NodeSet` now being an `IReadOnlyList<XPathValue>`; a single item is a list of one.
+The 130 callers take the read-only list; the eleven that sort, shuffle, remove or insert take
+`ItemList`, a copy of their own, which the aliasing made necessary and a test now holds them to. One of
+them had been `reverse()`, whose `items.Reverse()` on the read-only list resolved to the LINQ method and
+reversed nothing, which five tests caught. The helpers that only read widened to the interface, and the
+loops over it are indexed, since a `foreach` over an interface boxes its enumerator: an allocation test
+holding `codepoints-to-string` to 104 bytes found the one that was not. `empty()` and `exists()` count
+without reading. 11.7 milliseconds became 10.6 and 11.6 megabytes 9.8; the table of a hundred rows 86
+became 77, and 82 megabytes 62.
+
+The figures above are the pairs taken as each change landed, turn about but with the machine busier than
+it was for these, which are milliseconds and megabytes for a transformation, the mean of what ran in five
+seconds after six of warming, three fresh processes of each build taken turn about:
+
+| | was | is |
+|---|---:|---:|
+| A document of 300 characters | 18.0 ms, 12.2 MB | 10.8 ms, 9.8 MB |
+| A book of 77 paragraphs, 44 KB | 48.3 ms, 33.0 MB | 28.0 ms, 27.4 MB |
+| A CALS table of 100 rows, 26 KB | 152.7 ms, 92.3 MB | 78.0 ms, 62.3 MB |
+
+And by BenchmarkDotNet, the book 53.4 ms and 32.6 MB before and 28.9 and 27.0 after, the table at a hundred
+rows 161.5 and 92.5 before and 75.6 and 62.4 after, and at a thousand 1,645.0 and 1,082.4 before and 719.5
+and 581.1 after: a row of the table is 0.7 ms and 0.6 MB where it was 1.6 and 1.1, the tree a cell having
+cost a mapping and an index each. The XML and JSON transformation classes, run for a regression and
+finding none, moved 4 and 2 percent the right way with their allocation unchanged, which is the context
+and the lists.
+
+**What is left** of the ten milliseconds the stopwatch names: the title-page templates, 4.7, a document of
+thirty-nine templates built by a recursive function that copies each through a mode and inserts the
+others into it, 1,200 template and function calls at some four microseconds each; the localization file,
+1.3, parsed once a transformation; the four maps of 224 parameters the stylesheets they run build, 1.5;
+and the formatting itself. The first two are the same every run of the same stylesheet and would be
+nothing if a global that depends on nothing but the stylesheet and the documents it reads were kept
+between runs, which is a promise about the documents that only the caller can make; a `DocumentResolver`
+that handed back a parsed tree would be the way to let it. Neither is done.
+
+All eight conformance runs are identical test for test: 8,061 of 8,071 at 3.0, 5,678 of 5,701 at 2.0
+and 8,668 of 8,683 schema-aware, each on both backends, and 18,268 of 18,285 and 14,553 of 14,577 on the
+XPath runs. A first sweep had 24 more failures, every one a null in the conformance driver, which the
+next paragraph is about.
+
+Twenty-six unit tests in a class of their own, `FixedCostTests`, 3,176 in all: a copy of a context shares
+its surroundings, setting one thing gives it its own, none given are the empty ones and a clock asked of
+them does not write to them, and the context is 96 bytes; an element first seen in a later temporary tree
+is matched by name, a document read and a tree built by one rule, a name `xsl:evaluate` gives a slot found
+in a tree built before, one input tree serving sixteen transformations at once, and two hundred temporary
+trees costing 590 kilobytes where they cost 1,205; a declaration made after a decision honoured, the
+decision the same on thirty-two threads, and the most specific declaration winning still; a sequence read
+as itself and a node-set as its nodes, nested values flattened, eight functions that rearrange a sequence
+leaving the variable as it was, a node-set reversed and counted, and two hundred typed calls over two
+thousand items under a megabyte. The conformance driver had chosen a null tree for a message of no nodes,
+which the old mapping tolerated by never touching it; it chooses the empty tree now, and prints a stack
+trace for a fault when `CDX_TRACE` is set.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error

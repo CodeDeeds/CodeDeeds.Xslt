@@ -834,7 +834,7 @@ namespace CodeDeeds.Xslt.XPath
             // A node casts by way of its typed value: its string value, untyped, unless it was validated.
             if (value.Kind is XPathValueKind.Node or XPathValueKind.NodeSet)
             {
-                List<XPathValue> items = XdmSequence.Items(value);
+                IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
                 if (items.Count == 1)
                 {

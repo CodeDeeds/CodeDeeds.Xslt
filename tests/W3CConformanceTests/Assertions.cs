@@ -182,7 +182,7 @@ namespace CodeDeeds.Xslt.Conformance
                             $"'{name}' expects '{Trim(expectedText)}', which this driver cannot build");
                     }
 
-                    List<XPathValue> actual = XdmSequence.Items(value);
+                    IReadOnlyList<XPathValue> actual = XdmSequence.Items(value);
 
                     if (actual.Count != expected.Count)
                     {
@@ -277,7 +277,7 @@ namespace CodeDeeds.Xslt.Conformance
         /// are atomic values, and <c>fn:deep-equal</c> says a node is not one — letting the text decide would
         /// pass a test whose whole point is that the result is a value rather than the element it came from.
         /// </remarks>
-        private static bool SameItems(List<XPathValue> expected, List<XPathValue> actual, bool anyOrder)
+        private static bool SameItems(IReadOnlyList<XPathValue> expected, IReadOnlyList<XPathValue> actual, bool anyOrder)
         {
             if (!anyOrder)
             {
@@ -327,7 +327,7 @@ namespace CodeDeeds.Xslt.Conformance
         }
 
         /// <summary>Renders a sequence for a failure message, without asking a node for a typed value.</summary>
-        private static string Describe(List<XPathValue> items, XdmTree tree)
+        private static string Describe(IReadOnlyList<XPathValue> items, XdmTree tree)
         {
             string[] parts = new string[items.Count];
 

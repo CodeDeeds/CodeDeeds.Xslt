@@ -20,7 +20,7 @@ namespace CodeDeeds.Xslt.XPath
     /// than one thread, defeating the purpose of compiling it once.
     /// </para>
     /// <para>
-    /// Instead each name test holds a slot index. At the start of a transform, <see cref="BuildFingerprintMap"/>
+    /// Instead each name test holds a slot index. At the start of a transform, <see cref="BuildFingerprintMap(NameTable)"/>
     /// resolves every slot against the input tree's table in one pass, and name tests then read a fingerprint
     /// out of that array. The comparison stays an integer compare, at the cost of one array indirection.
     /// </para>
@@ -54,7 +54,7 @@ namespace CodeDeeds.Xslt.XPath
         /// </summary>
         /// <param name="namespaceUri">The namespace URI, or an empty string for no namespace.</param>
         /// <param name="localName">The local part of the name.</param>
-        /// <returns>A slot index for use with <see cref="BuildFingerprintMap"/>.</returns>
+        /// <returns>A slot index for use with <see cref="BuildFingerprintMap(NameTable)"/>.</returns>
         public int GetSlot(string namespaceUri, string localName)
         {
             ExpandedName name = new ExpandedName(namespaceUri, localName);
@@ -92,7 +92,19 @@ namespace CodeDeeds.Xslt.XPath
         /// <see cref="NameTable.NoFingerprint"/>, which cannot equal any node's fingerprint and so correctly
         /// matches nothing.
         /// </returns>
-        public int[] BuildFingerprintMap(XdmTree tree)
+        public int[] BuildFingerprintMap(XdmTree tree) => BuildFingerprintMap(tree.NameTable);
+
+        /// <summary>
+        /// Resolves every slot against a name table, which is what the mapping is a function of: two trees
+        /// interned in one table have one mapping between them.
+        /// </summary>
+        /// <param name="names">The table the trees to be transformed were interned in.</param>
+        /// <returns>
+        /// An array indexed by slot. A name that is not in the table maps to
+        /// <see cref="NameTable.NoFingerprint"/>, which cannot equal any node's fingerprint and so correctly
+        /// matches nothing.
+        /// </returns>
+        public int[] BuildFingerprintMap(NameTable names)
         {
             lock (m_slots)
             {
@@ -100,7 +112,35 @@ namespace CodeDeeds.Xslt.XPath
                 for (int i = 0; i < map.Length; i++)
                 {
                     ExpandedName name = m_names[i];
-                    map[i] = tree.NameTable.LookupFingerprint(name.NamespaceUri, name.LocalName);
+                    map[i] = names.LookupFingerprint(name.NamespaceUri, name.LocalName);
+                }
+
+                return map;
+            }
+        }
+
+        /// <summary>
+        /// Interns every name that has a slot into a table, and returns the mapping, which is then complete.
+        /// </summary>
+        /// <remarks>
+        /// For a table that trees are still being built in. A mapping made by looking names up says
+        /// <see cref="NameTable.NoFingerprint"/> of a name the table has not met yet, and is wrong about it
+        /// once a tree built later brings the name in; a mapping made by interning has a fingerprint for every
+        /// slot before any tree does, and a tree built afterwards can carry no name with a slot that the
+        /// mapping does not know. A name no stylesheet tests for has no slot and is not interned, so the table
+        /// grows by what the stylesheet mentions, once.
+        /// </remarks>
+        /// <param name="names">The table the transformation builds its own trees in.</param>
+        /// <returns>An array indexed by slot, with a fingerprint at every index.</returns>
+        internal int[] InternInto(NameTable names)
+        {
+            lock (m_slots)
+            {
+                int[] map = new int[m_names.Count];
+                for (int i = 0; i < map.Length; i++)
+                {
+                    ExpandedName name = m_names[i];
+                    map[i] = names.GetFingerprint(name.NamespaceUri, name.LocalName);
                 }
 
                 return map;

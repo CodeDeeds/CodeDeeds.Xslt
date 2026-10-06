@@ -1605,8 +1605,11 @@ namespace CodeDeeds.Xslt.Compiler
             // the nodes are what is being asked about, and the rest select nothing.
             XPathValue selected = m_selection!.Evaluate(ref lookup);
 
-            foreach (XPathValue item in XdmSequence.Items(selected))
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(selected);
+
+            for (int i = 0; i < items.Count; i++)
             {
+                XPathValue item = items[i];
                 // The tree as well as the node. A pattern may name another document — doc('other.xml')//foo
                 // is one of the shapes that brought this method into being — and node ids are per tree, so
                 // comparing the number alone would let a node of one document match a pattern about another.

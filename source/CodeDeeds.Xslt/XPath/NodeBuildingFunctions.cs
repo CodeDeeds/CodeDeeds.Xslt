@@ -197,7 +197,7 @@ namespace CodeDeeds.Xslt.XPath
                 }
 
                 XdmTree tree = XdmTreeBuilder.FromXml(
-                    xml, fragment, context.Runtime is null ? null : context.Tree.NameTable);
+                    xml, fragment, context.Runtime?.TemporaryNames);
 
                 // The specification says outright what base URI the result has: the static base URI of the
                 // call. Without it a document built here is the one kind of document that answers nothing

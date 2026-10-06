@@ -410,6 +410,7 @@ namespace CodeDeeds.Xslt.Runtime
         private readonly System.Text.StringBuilder m_text = new();
         private readonly bool m_becomesAString;
         private readonly string? m_baseUri;
+        private readonly NameTable? m_names;
         private XdmTreeBuilder? m_builder;
         private int m_depth;
 
@@ -430,10 +431,16 @@ namespace CodeDeeds.Xslt.Runtime
         /// The base URI a node built at the top takes, which is that of the instruction whose content this
         /// is; a node copied to the top keeps its own instead.
         /// </param>
-        public SequenceCaptureTarget(bool becomesAString = false, string? baseUri = null)
+        /// <param name="names">
+        /// The name table the trees built here are interned in, or <see langword="null"/> for a table of
+        /// each tree's own. A transformation gives its <see cref="XsltRuntime.TemporaryNames"/>, so that
+        /// what it builds shares one mapping of the stylesheet's names and one index of its templates.
+        /// </param>
+        public SequenceCaptureTarget(bool becomesAString = false, string? baseUri = null, NameTable? names = null)
         {
             m_becomesAString = becomesAString;
             m_baseUri = baseUri;
+            m_names = names;
         }
 
         /// <inheritdoc/>
@@ -464,9 +471,10 @@ namespace CodeDeeds.Xslt.Runtime
 
             FlushText();
 
-            foreach (XPath.XPathValue item in XPath.XdmSequence.Items(value))
+            IReadOnlyList<XPath.XPathValue> items = XPath.XdmSequence.Items(value);
+            for (int i = 0; i < items.Count; i++)
             {
-                m_items.Add(item);
+                m_items.Add(items[i]);
             }
 
             return true;
@@ -493,7 +501,7 @@ namespace CodeDeeds.Xslt.Runtime
 
                 // Each top-level node gets a tree of its own, so that it can be referred to as soon as it is
                 // complete rather than waiting for the whole constructor to finish.
-                m_builder = new XdmTreeBuilder { FixesUpNamespaces = true };
+                m_builder = new XdmTreeBuilder(m_names) { FixesUpNamespaces = true };
                 m_nodeBaseUri = TakeBaseUri();
             }
 
@@ -516,7 +524,7 @@ namespace CodeDeeds.Xslt.Runtime
             // stylesheet had plainly produced something.
             FlushText();
 
-            XdmTreeBuilder builder = new XdmTreeBuilder();
+            XdmTreeBuilder builder = new XdmTreeBuilder(m_names);
             int node = builder.AddParentlessAttribute(prefix, namespaceUri, localName, value);
             m_items.Add(XPath.XPathValue.FromNode(builder.Finish(), node));
         }
@@ -533,7 +541,7 @@ namespace CodeDeeds.Xslt.Runtime
             // A parentless attribute is a tree of its own, annotated before the tree is finished.
             FlushText();
 
-            XdmTreeBuilder builder = new XdmTreeBuilder();
+            XdmTreeBuilder builder = new XdmTreeBuilder(m_names);
             int node = builder.AddParentlessAttribute(prefix, namespaceUri, localName, value);
             builder.AnnotateLastAttribute(typeId);
             m_items.Add(XPath.XPathValue.FromNode(builder.Finish(), node));
@@ -616,7 +624,7 @@ namespace CodeDeeds.Xslt.Runtime
             // of the sequence, which is what makes an xsl:namespace beside an xsl:on-empty count as content.
             FlushText();
 
-            XdmTreeBuilder builder = new XdmTreeBuilder();
+            XdmTreeBuilder builder = new XdmTreeBuilder(m_names);
             int node = builder.AddParentlessNamespaceNode(prefix, namespaceUri);
             m_items.Add(XPath.XPathValue.FromNode(builder.Finish(), node));
         }
@@ -678,7 +686,7 @@ namespace CodeDeeds.Xslt.Runtime
             }
 
             FlushText();
-            m_builder = new XdmTreeBuilder { FixesUpNamespaces = true };
+            m_builder = new XdmTreeBuilder(m_names) { FixesUpNamespaces = true };
             m_nodeBaseUri = TakeBaseUri();
             m_depth++;
         }
@@ -832,7 +840,7 @@ namespace CodeDeeds.Xslt.Runtime
             }
 
             FlushText();
-            m_builder = new XdmTreeBuilder();
+            m_builder = new XdmTreeBuilder(m_names);
             m_nodeBaseUri = TakeBaseUri();
             add(m_builder);
             FinishNode();
@@ -848,7 +856,7 @@ namespace CodeDeeds.Xslt.Runtime
             string text = m_text.ToString();
             m_text.Clear();
 
-            m_builder = new XdmTreeBuilder();
+            m_builder = new XdmTreeBuilder(m_names);
             m_nodeBaseUri = TakeBaseUri();
             m_builder.AddText(text);
             FinishNode();
@@ -883,7 +891,24 @@ namespace CodeDeeds.Xslt.Runtime
     /// </summary>
     public sealed class ResultTreeBuilder : OutputTarget
     {
-        private readonly XdmTreeBuilder m_builder = new() { FixesUpNamespaces = true };
+        private readonly XdmTreeBuilder m_builder;
+
+        /// <summary>Initializes a builder whose tree has a name table of its own.</summary>
+        public ResultTreeBuilder()
+            : this(null)
+        {
+        }
+
+        /// <summary>Initializes a builder whose tree is interned in a given name table.</summary>
+        /// <param name="names">
+        /// The table, or <see langword="null"/> for one of the tree's own. A transformation gives its
+        /// <see cref="XsltRuntime.TemporaryNames"/>, so that what it builds shares one mapping of the
+        /// stylesheet's names and one index of its templates.
+        /// </param>
+        public ResultTreeBuilder(NameTable? names)
+        {
+            m_builder = new XdmTreeBuilder(names) { FixesUpNamespaces = true };
+        }
 
         /// <summary>
         /// Gets the base URI of the document node built, which is that of the instruction whose content

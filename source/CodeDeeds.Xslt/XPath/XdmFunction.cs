@@ -158,9 +158,8 @@ namespace CodeDeeds.Xslt.XPath
         private readonly XdmTree m_currentTree;
         private readonly XPathValue[] m_locals;
         private readonly int m_frameBase;
-        private readonly XPathValue[] m_globals;
         private readonly XPathValue[] m_rangeVariables;
-        private readonly XsltRuntime? m_runtime;
+        private readonly Surroundings m_surroundings;
 
         private CapturedContext(
             ref DynamicContext context,
@@ -173,9 +172,8 @@ namespace CodeDeeds.Xslt.XPath
             m_currentTree = context.CurrentTree;
             m_locals = locals;
             m_frameBase = context.FrameBase;
-            m_globals = context.Globals;
             m_rangeVariables = rangeVariables;
-            m_runtime = context.Runtime;
+            m_surroundings = context.Surroundings;
         }
 
         /// <summary>Takes a copy of the context a closure is being created in.</summary>
@@ -203,10 +201,17 @@ namespace CodeDeeds.Xslt.XPath
         /// inside one raises <c>XPDY0002</c> rather than quietly meaning whatever the caller was positioned
         /// on. A function that wants a node is given it as an argument.
         /// </remarks>
-        /// <param name="caller">The context of the call, which supplies the runtime and nothing else.</param>
+        /// <param name="caller">
+        /// The context of the call, which supplies the surroundings where the closure was made outside any
+        /// transformation, and nothing else.
+        /// </param>
         public DynamicContext Restore(ref DynamicContext caller)
         {
-            DynamicContext inner = new DynamicContext(m_tree, DynamicContext.NotANode, m_fingerprintMap)
+            DynamicContext inner = new DynamicContext(
+                m_tree,
+                DynamicContext.NotANode,
+                m_fingerprintMap,
+                m_surroundings.Runtime is null ? caller.Surroundings : m_surroundings)
             {
                 CurrentNode = m_currentNode,
                 CurrentTree = m_currentTree,
@@ -214,9 +219,7 @@ namespace CodeDeeds.Xslt.XPath
                 Size = 0,
                 Locals = m_locals,
                 FrameBase = m_frameBase,
-                Globals = m_globals,
                 RangeVariables = m_rangeVariables,
-                Runtime = m_runtime ?? caller.Runtime,
             };
 
             return inner;
@@ -539,8 +542,7 @@ namespace CodeDeeds.Xslt.XPath
         private readonly XdmTree m_currentTree;
         private readonly int m_position;
         private readonly int m_size;
-        private readonly XsltRuntime? m_runtime;
-        private readonly XPathValue[] m_globals;
+        private readonly Surroundings m_surroundings;
 
         /// <summary>Takes the focus of a context.</summary>
         /// <param name="context">The context.</param>
@@ -554,8 +556,7 @@ namespace CodeDeeds.Xslt.XPath
             m_currentTree = context.CurrentTree;
             m_position = context.Position;
             m_size = context.Size;
-            m_runtime = context.Runtime;
-            m_globals = context.Globals;
+            m_surroundings = context.Surroundings;
         }
 
         /// <summary>Gives a context this focus.</summary>
@@ -574,10 +575,9 @@ namespace CodeDeeds.Xslt.XPath
             // And the transformation the reference was made in, with the global variables belonging to it.
             // A function item can be carried out of its transformation — fn:transform() hands one back —
             // and a body that calls a function the stylesheet declares still belongs to that stylesheet.
-            if (m_runtime is not null)
+            if (m_surroundings.Runtime is not null)
             {
-                context.Runtime = m_runtime;
-                context.Globals = m_globals;
+                context.Surroundings = m_surroundings;
             }
         }
     }

@@ -77,7 +77,7 @@ namespace CodeDeeds.Xslt.XPath
                 return XPathValue.FromArray(XdmArray.Empty);
             }
 
-            List<XPathValue> items = XdmSequence.Items(m_content.Evaluate(ref context));
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(m_content.Evaluate(ref context));
             return XPathValue.FromArray(items.Count == 0 ? XdmArray.Empty : new XdmArray(items.ToArray()));
         }
     }
@@ -131,7 +131,7 @@ namespace CodeDeeds.Xslt.XPath
 
             for (int i = 0; i < m_keys.Length; i++)
             {
-                List<XPathValue> key = XdmSequence.Items(m_keys[i].Evaluate(ref context));
+                IReadOnlyList<XPathValue> key = XdmSequence.Items(m_keys[i].Evaluate(ref context));
 
                 if (key.Count != 1)
                 {

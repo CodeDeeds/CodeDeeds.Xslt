@@ -117,12 +117,13 @@ namespace CodeDeeds.Xslt.Compiler
                 }
             }
 
-            List<XPathValue> population = XdmSequence.Items(m_select.Evaluate(ref context));
+            IReadOnlyList<XPathValue> population = XdmSequence.Items(m_select.Evaluate(ref context));
 
             if (!m_implements30 && m_kind is GroupingKind.StartingWith or GroupingKind.EndingWith)
             {
-                foreach (XPathValue item in population)
+                for (int i = 0; i < population.Count; i++)
                 {
+                    XPathValue item = population[i];
                     if (item.Kind != XPathValueKind.Node)
                     {
                         throw XsltErrors.Error(
@@ -211,7 +212,7 @@ namespace CodeDeeds.Xslt.Compiler
         }
 
         private List<Group> BuildGroups(
-            List<XPathValue> population, ref DynamicContext context, XsltRuntime runtime, Collation? collation)
+            IReadOnlyList<XPathValue> population, ref DynamicContext context, XsltRuntime runtime, Collation? collation)
         {
             List<Group> groups = m_kind switch
             {
@@ -228,7 +229,7 @@ namespace CodeDeeds.Xslt.Compiler
             return groups;
         }
 
-        private List<Group> GroupByKey(List<XPathValue> population, ref DynamicContext context, Collation? collation)
+        private List<Group> GroupByKey(IReadOnlyList<XPathValue> population, ref DynamicContext context, Collation? collation)
         {
             List<Group> groups = new();
             Dictionary<string, Group> byKey = new(StringComparer.Ordinal);
@@ -296,7 +297,7 @@ namespace CodeDeeds.Xslt.Compiler
         }
 
         private List<Group> GroupByAdjacentKey(
-            List<XPathValue> population, ref DynamicContext context, Collation? collation)
+            IReadOnlyList<XPathValue> population, ref DynamicContext context, Collation? collation)
         {
             List<Group> groups = new();
             string? previous = null;
@@ -333,7 +334,7 @@ namespace CodeDeeds.Xslt.Compiler
             return groups;
         }
 
-        private List<Group> GroupByPattern(List<XPathValue> population, ref DynamicContext context)
+        private List<Group> GroupByPattern(IReadOnlyList<XPathValue> population, ref DynamicContext context)
         {
             List<Group> groups = new();
             bool startNext = true;
@@ -395,7 +396,7 @@ namespace CodeDeeds.Xslt.Compiler
             return collation is null ? text : collation.Key(text);
         }
 
-        private List<XPathValue> KeysOf(List<XPathValue> population, int index, ref DynamicContext context)
+        private List<XPathValue> KeysOf(IReadOnlyList<XPathValue> population, int index, ref DynamicContext context)
         {
             DynamicContext inner = Focus(ref context, population[index], index + 1, population.Count);
 
@@ -1105,7 +1106,7 @@ namespace CodeDeeds.Xslt.Compiler
                     if (settings.Method is OutputMethod.Json or OutputMethod.Adaptive
                         && principal is OutputWriter claimed)
                     {
-                        SequenceCaptureTarget capture = new SequenceCaptureTarget();
+                        SequenceCaptureTarget capture = new SequenceCaptureTarget(names: runtime.TemporaryNames);
                         WriteBody(capture, settings, ref context, runtime);
                         claimed.WriteSerialized(Serializer.Text(XdmSequence.Items(capture.Finish()), settings));
                     }
@@ -1170,7 +1171,7 @@ namespace CodeDeeds.Xslt.Compiler
             // gathered as the sequence it is, and written once it is all there.
             if (settings.Method is OutputMethod.Json or OutputMethod.Adaptive)
             {
-                SequenceCaptureTarget capture = new SequenceCaptureTarget();
+                SequenceCaptureTarget capture = new SequenceCaptureTarget(names: runtime.TemporaryNames);
                 WriteBody(capture, settings, ref context, runtime);
                 writer.Write(Serializer.Text(XdmSequence.Items(capture.Finish()), settings));
                 return;
@@ -1227,7 +1228,7 @@ namespace CodeDeeds.Xslt.Compiler
             // parameter, item-separator, and puts its value between every pair of items. So the tree
             // validated here is built with the separators in it, the specification saying outright that
             // "an inappropriate choice of item-separator may cause the result to become invalid".
-            ResultTreeBuilder builder = new ResultTreeBuilder { NormalizedItemSeparator = settings.ItemSeparator };
+            ResultTreeBuilder builder = new ResultTreeBuilder(runtime.TemporaryNames) { NormalizedItemSeparator = settings.ItemSeparator };
             runtime.Output = builder;
 
             try
@@ -1354,7 +1355,7 @@ namespace CodeDeeds.Xslt.Compiler
             }
 
             // An array contributes its members here too, a result tree having no way to hold one.
-            List<XPathValue> items = XdmSequence.ContentItems(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.ContentItems(value);
             for (int i = 0; i < items.Count; i++)
             {
                 if (items[i].Kind == XPathValueKind.Node)

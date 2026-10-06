@@ -101,9 +101,7 @@ namespace CodeDeeds.Xslt.XPath
 
                     case "combine":
                     {
-                        List<XPathValue> items = XdmSequence.Items(existing);
-                        items.AddRange(XdmSequence.Items(entry.Value));
-                        built[key] = XdmSequence.Concatenate(items);
+                        built[key] = XdmSequence.Concatenate(new[] { existing, entry.Value });
                         break;
                     }
 

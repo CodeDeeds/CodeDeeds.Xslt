@@ -256,7 +256,7 @@ namespace CodeDeeds.Xslt.Compiler
 
             if (m_contextItem is not null)
             {
-                List<XPathValue> items = XdmSequence.Items(m_contextItem.Evaluate(ref context));
+                IReadOnlyList<XPathValue> items = XdmSequence.Items(m_contextItem.Evaluate(ref context));
 
                 if (items.Count > 1)
                 {
@@ -294,7 +294,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// </summary>
         private static void BindFromMap(XPathValue supplied, List<ExpandedName> names, List<XPathValue> values)
         {
-            List<XPathValue> items = XdmSequence.Items(supplied);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(supplied);
 
             if (items.Count != 1 || items[0].Kind != XPathValueKind.Map)
             {
@@ -352,7 +352,7 @@ namespace CodeDeeds.Xslt.Compiler
 
         private static XPathValue RequireOneNode(XPathValue value)
         {
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
             if (items.Count != 1 || items[0].Kind != XPathValueKind.Node)
             {

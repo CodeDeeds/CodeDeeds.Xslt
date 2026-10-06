@@ -605,20 +605,26 @@ namespace CodeDeeds.Xslt.XPath
         {
             switch (m_function)
             {
+                // Counted without being laid out: a range of ten million is two numbers, and stays so.
                 case Xpath2Function.Empty:
-                    return XPathValue.FromBoolean(Items(0, ref context).Count == 0);
+                    return XPathValue.FromBoolean(XdmSequence.ItemCount(m_arguments[0].Evaluate(ref context)) == 0);
 
                 case Xpath2Function.Exists:
-                    return XPathValue.FromBoolean(Items(0, ref context).Count != 0);
+                    return XPathValue.FromBoolean(XdmSequence.ItemCount(m_arguments[0].Evaluate(ref context)) != 0);
 
                 case Xpath2Function.Unordered:
                     return m_arguments[0].Evaluate(ref context);
 
                 case Xpath2Function.Reverse:
                 {
-                    List<XPathValue> items = Items(0, ref context);
-                    items.Reverse();
-                    return XdmSequence.Concatenate(items);
+                    IReadOnlyList<XPathValue> items = Items(0, ref context);
+                    XPathValue[] reversed = new XPathValue[items.Count];
+                    for (int i = 0; i < reversed.Length; i++)
+                    {
+                        reversed[i] = items[items.Count - 1 - i];
+                    }
+
+                    return XdmSequence.Concatenate(reversed);
                 }
 
                 case Xpath2Function.DistinctValues:
@@ -635,7 +641,7 @@ namespace CodeDeeds.Xslt.XPath
 
                 case Xpath2Function.Remove:
                 {
-                    List<XPathValue> items = Items(0, ref context);
+                    List<XPathValue> items = XdmSequence.ItemList(m_arguments[0].Evaluate(ref context));
                     int at = (int)Math.Round(m_arguments[1].Evaluate(ref context).ToNumber());
 
                     if (at >= 1 && at <= items.Count)
@@ -811,7 +817,7 @@ namespace CodeDeeds.Xslt.XPath
                 {
                     // Only an element is ever nilled, and only one that validation found so: anything else
                     // yields the empty sequence, and an element of a tree nothing validated answers false.
-                    List<XPathValue> items = NodesOrContext(ref context);
+                    IReadOnlyList<XPathValue> items = NodesOrContext(ref context);
                     return items.Count == 1 && TryNode(items[0], out Model.XdmTree? nilledTree, out int nilledNode)
                         && nilledTree!.KindOf(nilledNode) == Model.NodeKind.Element
                         ? XPathValue.FromBoolean(nilledTree.IsNilled(nilledNode))
@@ -1204,7 +1210,7 @@ namespace CodeDeeds.Xslt.XPath
                     NodeSet.Singleton(context.Tree, context.Tree.RootOf(self)));
             }
 
-            List<XPathValue> items = Items(0, ref context);
+            IReadOnlyList<XPathValue> items = Items(0, ref context);
 
             if (items.Count == 0)
             {
@@ -1234,7 +1240,7 @@ namespace CodeDeeds.Xslt.XPath
             }
             else
             {
-                List<XPathValue> items = Items(0, ref context);
+                IReadOnlyList<XPathValue> items = Items(0, ref context);
                 if (items.Count == 0 || !TryNode(items[0], out Model.XdmTree? found, out node))
                 {
                     return XPathValue.FromSequence(XdmSequence.Empty);
@@ -1370,7 +1376,7 @@ namespace CodeDeeds.Xslt.XPath
 
         private XPathValue ResolveUri(ref DynamicContext context)
         {
-            List<XPathValue> given = Items(0, ref context);
+            IReadOnlyList<XPathValue> given = Items(0, ref context);
 
             // Nothing to resolve resolves to nothing, and asks nothing of the base either: a base that could
             // not be used is only an error once something needs to be resolved against it.
@@ -1475,7 +1481,7 @@ namespace CodeDeeds.Xslt.XPath
             return false;
         }
 
-        private static List<XPathValue> Atomize(List<XPathValue> items)
+        private static List<XPathValue> Atomize(IReadOnlyList<XPathValue> items)
         {
             return XdmSequence.Atomize(items);
         }
@@ -1594,7 +1600,7 @@ namespace CodeDeeds.Xslt.XPath
             tree = null;
             element = -1;
 
-            List<XPathValue> items = Items(index, ref context);
+            IReadOnlyList<XPathValue> items = Items(index, ref context);
 
             if (items.Count == 0)
             {
@@ -1829,7 +1835,7 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         private XPathValue NodeName(ref DynamicContext context)
         {
-            List<XPathValue> items = NodesOrContext(ref context);
+            IReadOnlyList<XPathValue> items = NodesOrContext(ref context);
 
             if (items.Count == 0 || !TryNode(items[0], out Model.XdmTree? tree, out int node))
             {
@@ -2035,7 +2041,7 @@ namespace CodeDeeds.Xslt.XPath
 
         // ---- Argument helpers ----------------------------------------------------------------------------
 
-        private List<XPathValue> Items(int index, ref DynamicContext context)
+        private IReadOnlyList<XPathValue> Items(int index, ref DynamicContext context)
         {
             return XdmSequence.Items(m_arguments[index].Evaluate(ref context));
         }
@@ -2047,7 +2053,7 @@ namespace CodeDeeds.Xslt.XPath
         /// The 3.0 context forms of the accessors. Reading the context item where there is none is an error
         /// rather than an empty answer, which <see cref="DynamicContext.RequireContextItem"/> sees to.
         /// </remarks>
-        private List<XPathValue> ItemsOrContext(int index, ref DynamicContext context)
+        private IReadOnlyList<XPathValue> ItemsOrContext(int index, ref DynamicContext context)
         {
             return m_arguments.Length > index
                 ? Items(index, ref context)
@@ -2065,7 +2071,7 @@ namespace CodeDeeds.Xslt.XPath
         /// asks about an integer, and answering with the empty sequence would take the question for
         /// one about an element that happens not to be nilled.
         /// </remarks>
-        private List<XPathValue> NodesOrContext(ref DynamicContext context)
+        private IReadOnlyList<XPathValue> NodesOrContext(ref DynamicContext context)
         {
             if (m_arguments.Length > 0)
             {
@@ -2156,13 +2162,14 @@ namespace CodeDeeds.Xslt.XPath
         /// Numbers and strings that look alike are not the same value — <c>1</c> and <c>'1'</c> are distinct —
         /// so the key carries whether the item is numeric as well as how it reads.
         /// </remarks>
-        private static XPathValue DistinctValues(List<XPathValue> items, Collation collation)
+        private static XPathValue DistinctValues(IReadOnlyList<XPathValue> items, Collation collation)
         {
             HashSet<string> seen = new(StringComparer.Ordinal);
             List<XPathValue> distinct = new List<XPathValue>(items.Count);
 
-            foreach (XPathValue item in items)
+            for (int i = 0; i < items.Count; i++)
             {
+                XPathValue item = items[i];
                 XPathValue atomic = Atomize(item);
 
                 if (seen.Add(DistinctKey(atomic, collation)))
@@ -2288,7 +2295,7 @@ namespace CodeDeeds.Xslt.XPath
 
         private XPathValue Subsequence(ref DynamicContext context)
         {
-            List<XPathValue> items = Items(0, ref context);
+            IReadOnlyList<XPathValue> items = Items(0, ref context);
 
             // Rounded the way fn:round rounds — halves towards positive infinity — and not the way
             // Math.Round does, which sends them to even. The specification defines this function in the
@@ -2316,9 +2323,9 @@ namespace CodeDeeds.Xslt.XPath
 
         private XPathValue InsertBefore(ref DynamicContext context)
         {
-            List<XPathValue> items = Items(0, ref context);
+            List<XPathValue> items = XdmSequence.ItemList(m_arguments[0].Evaluate(ref context));
             int at = (int)Math.Round(m_arguments[1].Evaluate(ref context).ToNumber());
-            List<XPathValue> inserts = Items(2, ref context);
+            IReadOnlyList<XPathValue> inserts = Items(2, ref context);
 
             at = Math.Clamp(at, 1, items.Count + 1);
             items.InsertRange(at - 1, inserts);
@@ -2376,7 +2383,7 @@ namespace CodeDeeds.Xslt.XPath
         /// quantify: <c>deep-equal</c> asks whether the sequences <em>are</em> the same, not whether they
         /// overlap.
         /// </summary>
-        internal static bool DeepEqual(List<XPathValue> left, List<XPathValue> right, Collation collation)
+        internal static bool DeepEqual(IReadOnlyList<XPathValue> left, IReadOnlyList<XPathValue> right, Collation collation)
         {
             if (left.Count != right.Count)
             {
@@ -2748,7 +2755,7 @@ namespace CodeDeeds.Xslt.XPath
         /// <c>max</c>, which will also order strings, booleans and dates.
         /// </param>
         internal static List<XPathValue> AggregateItems(
-            List<XPathValue> items,
+            IReadOnlyList<XPathValue> items,
             string function,
             bool numbersAndDurationsOnly)
         {
@@ -2756,10 +2763,23 @@ namespace CodeDeeds.Xslt.XPath
 
             // Atomized as a whole rather than item by item, because an array contributes its members and so
             // changes the count: sum([[1, 2], [3, 4]]) adds four numbers. Items that are atomic already —
-            // which the function's signature has usually seen to — are taken as they are, and the list
-            // they came in, which every caller built for the purpose, is written back into rather than
-            // copied: over a thousand prices that is two arrays of a thousand values not made.
-            List<XPathValue> source = NeedsAtomizing(items) ? Atomize(items) : items;
+            // which the function's signature has usually seen to — are taken as they are, into one list of
+            // their own that the conversions below are written into: the list given may be the sequence's
+            // own storage, and is not written to.
+            List<XPathValue> source;
+
+            if (NeedsAtomizing(items))
+            {
+                source = Atomize(items);
+            }
+            else
+            {
+                source = new List<XPathValue>(items.Count);
+                for (int i = 0; i < items.Count; i++)
+                {
+                    source.Add(items[i]);
+                }
+            }
 
             for (int i = 0; i < source.Count; i++)
             {
@@ -2800,10 +2820,11 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>Whether any item is something atomization would open up, or refuse.</summary>
-        private static bool NeedsAtomizing(List<XPathValue> items)
+        private static bool NeedsAtomizing(IReadOnlyList<XPathValue> items)
         {
-            foreach (XPathValue item in items)
+            for (int i = 0; i < items.Count; i++)
             {
+                XPathValue item = items[i];
                 if (item.Kind is not (XPathValueKind.Boolean or XPathValueKind.Number or XPathValueKind.String))
                 {
                     return true;
@@ -2854,7 +2875,7 @@ namespace CodeDeeds.Xslt.XPath
             return value.TypeCode is XdmTypeCode.String or XdmTypeCode.UntypedAtomic or XdmTypeCode.AnyUri;
         }
 
-        private static XPathValue Extreme(List<XPathValue> items, bool wantSmallest, Collation collation)
+        private static XPathValue Extreme(IReadOnlyList<XPathValue> items, bool wantSmallest, Collation collation)
         {
             if (items.Count == 0)
             {
@@ -2939,7 +2960,7 @@ namespace CodeDeeds.Xslt.XPath
             return anyFloat ? XPathValue.FromFloat((float)best.ToNumber()) : best;
         }
 
-        private static XPathValue Average(List<XPathValue> items)
+        private static XPathValue Average(IReadOnlyList<XPathValue> items)
         {
             if (items.Count == 0)
             {
@@ -2964,7 +2985,7 @@ namespace CodeDeeds.Xslt.XPath
 
         private XPathValue StringJoin(ref DynamicContext context)
         {
-            List<XPathValue> items = Items(0, ref context);
+            IReadOnlyList<XPathValue> items = Items(0, ref context);
             string separator = m_arguments.Length > 1 ? Text(1, ref context) : string.Empty;
 
             string[] parts = new string[items.Count];
@@ -2993,14 +3014,15 @@ namespace CodeDeeds.Xslt.XPath
                 || (codepoint >= 0x10000 && codepoint <= 0x10FFFF);
         }
 
-        private static XPathValue CodepointsToString(List<XPathValue> items)
+        private static XPathValue CodepointsToString(IReadOnlyList<XPathValue> items)
         {
             // Written on the stack, a character at a time: a builder, its buffer and a string for every
             // code point were what this made on the way to the one string.
             CharStringBuilder builder = new CharStringBuilder(stackalloc char[128]);
 
-            foreach (XPathValue item in items)
+            for (int i = 0; i < items.Count; i++)
             {
+                XPathValue item = items[i];
                 double number = Atomize(item).ToNumber();
 
                 if (number is < 0 or > 0x10FFFF || !IsXmlCharacter((int)number))

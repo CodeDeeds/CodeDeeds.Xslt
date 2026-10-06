@@ -69,7 +69,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// <inheritdoc/>
         public override void Execute(ref DynamicContext context, XsltRuntime runtime)
         {
-            List<XPathValue> items = XdmSequence.Items(m_select.Evaluate(ref context));
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(m_select.Evaluate(ref context));
 
             foreach (IterationParameter parameter in m_parameters)
             {

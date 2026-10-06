@@ -26,11 +26,44 @@ namespace CodeDeeds.Xslt.XPath
         private readonly int m_length;
 
         /// <summary>Initializes a sequence over items the caller no longer owns.</summary>
+        /// <remarks>
+        /// Every item of a sequence is one item: nested sequences do not exist in the data model, and a
+        /// node-set among the items would be several. What is given is checked for either, and flattened
+        /// where one is found, so that the sequence can be read as the list of its items without being
+        /// laid out again; see <see cref="Items"/>.
+        /// </remarks>
         /// <param name="items">The items, in order.</param>
         public XdmSequence(XPathValue[] items)
         {
+            foreach (XPathValue item in items)
+            {
+                if (item.Kind is XPathValueKind.Sequence or XPathValueKind.NodeSet)
+                {
+                    items = Flattened(items);
+                    break;
+                }
+            }
+
             m_items = items;
             m_length = items.Length;
+        }
+
+        private static XPathValue[] Flattened(XPathValue[] items)
+        {
+            int count = 0;
+            foreach (XPathValue item in items)
+            {
+                count += ItemCount(item);
+            }
+
+            XPathValue[] flat = new XPathValue[count];
+            int at = 0;
+            foreach (XPathValue item in items)
+            {
+                at = FlattenInto(item, flat, at);
+            }
+
+            return flat;
         }
 
         private XdmSequence(System.Numerics.BigInteger first, int length)
@@ -116,9 +149,9 @@ namespace CodeDeeds.Xslt.XPath
             // arrays' worth of garbage for every sequence a function returns, and a thousand atomized
             // prices go through here for every avg() over them.
             int count = 0;
-            foreach (XPathValue item in items)
+            for (int i = 0; i < items.Count; i++)
             {
-                count += ItemCount(item);
+                count += ItemCount(items[i]);
             }
 
             if (count == 0)
@@ -128,12 +161,39 @@ namespace CodeDeeds.Xslt.XPath
 
             XPathValue[] flat = new XPathValue[count];
             int at = 0;
-            foreach (XPathValue item in items)
+            for (int i = 0; i < items.Count; i++)
             {
-                at = FlattenInto(item, flat, at);
+                at = FlattenInto(items[i], flat, at);
             }
 
             return count == 1 ? flat[0] : XPathValue.FromSequence(new XdmSequence(flat));
+        }
+
+        /// <summary>
+        /// Builds the value of a run of a list's items.
+        /// </summary>
+        /// <param name="items">The list, every entry one item.</param>
+        /// <param name="start">The index of the first item taken.</param>
+        /// <param name="count">How many are taken.</param>
+        public static XPathValue Slice(IReadOnlyList<XPathValue> items, int start, int count)
+        {
+            if (count <= 0)
+            {
+                return XPathValue.FromSequence(Empty);
+            }
+
+            if (count == 1)
+            {
+                return items[start];
+            }
+
+            XPathValue[] taken = new XPathValue[count];
+            for (int i = 0; i < count; i++)
+            {
+                taken[i] = items[start + i];
+            }
+
+            return XPathValue.FromSequence(new XdmSequence(taken));
         }
 
         /// <summary>How many items a value flattens to.</summary>
@@ -260,15 +320,15 @@ namespace CodeDeeds.Xslt.XPath
         /// elements, where atomizing would have written their text.
         /// </remarks>
         /// <param name="value">The value being written.</param>
-        public static List<XPathValue> ContentItems(XPathValue value)
+        public static IReadOnlyList<XPathValue> ContentItems(XPathValue value)
         {
-            List<XPathValue> items = Items(value);
+            IReadOnlyList<XPathValue> items = Items(value);
 
             // The common case is no array at all, and the list is already the right answer.
             bool nested = false;
-            foreach (XPathValue item in items)
+            for (int i = 0; i < items.Count; i++)
             {
-                if (item.Kind == XPathValueKind.Array)
+                if (items[i].Kind == XPathValueKind.Array)
                 {
                     nested = true;
                     break;
@@ -281,9 +341,9 @@ namespace CodeDeeds.Xslt.XPath
             }
 
             List<XPathValue> opened = new List<XPathValue>(items.Count);
-            foreach (XPathValue item in items)
+            for (int i = 0; i < items.Count; i++)
             {
-                OpenInto(item, opened);
+                OpenInto(items[i], opened);
             }
 
             return opened;
@@ -320,13 +380,13 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         /// <param name="items">The items to atomize.</param>
         /// <returns>The atomic values, which may be more or fewer than the items given.</returns>
-        public static List<XPathValue> Atomize(List<XPathValue> items)
+        public static List<XPathValue> Atomize(IReadOnlyList<XPathValue> items)
         {
             List<XPathValue> atomized = new List<XPathValue>(items.Count);
 
-            foreach (XPathValue item in items)
+            for (int i = 0; i < items.Count; i++)
             {
-                AtomizeInto(item, atomized);
+                AtomizeInto(items[i], atomized);
             }
 
             return atomized;
@@ -534,14 +594,64 @@ namespace CodeDeeds.Xslt.XPath
         }
 
         /// <summary>
-        /// Expands a value into the items it holds, leaving nodes as nodes.
+        /// Reads a value as the list of its items, laying nothing out that is already laid out.
         /// </summary>
         /// <remarks>
-        /// The counterpart of <see cref="Concatenate"/>, and what every function taking a sequence starts by
-        /// doing. A node-set contributes its nodes in document order; a single value is one item.
+        /// <para>
+        /// A sequence is already the list of its items and is returned as itself; a node-set reads as the
+        /// list of its nodes, each a node value made as it is asked for; a single item is a list of one. So
+        /// the common cases allocate nothing, or one small array for the single item, where laying the
+        /// items out into a list of their own cost twenty-four bytes an item every time a function read its
+        /// argument or an <c>as</c> was checked — the largest allocation of the DocBook stylesheets, which
+        /// pass sequences of some forty elements from template to template with a type on every parameter.
+        /// </para>
+        /// <para>
+        /// The list is read-only and may be the value's own storage. A caller that will add to, sort or
+        /// otherwise change the list takes <see cref="ItemList"/>, which is a copy of its own. A range
+        /// reads as itself too, each integer made as it is asked for, up to the size a range may be laid
+        /// out at, since a caller walking the whole of it costs what laying it out would.
+        /// </para>
+        /// </remarks>
+        /// <param name="value">The value to read.</param>
+        public static IReadOnlyList<XPathValue> Items(XPathValue value)
+        {
+            switch (value.Kind)
+            {
+                case XPathValueKind.Sequence:
+                {
+                    XdmSequence sequence = value.AsSequence();
+
+                    if (sequence.IsRange && sequence.Count > ExpandableRange)
+                    {
+                        throw XsltErrors.Error(
+                            XsltErrorCode.XPDY0130,
+                            $"A range of {sequence.Count} items is more than this engine will lay out "
+                            + "one at a time.");
+                    }
+
+                    return sequence;
+                }
+
+                case XPathValueKind.NodeSet:
+                {
+                    NodeSet nodes = value.AsNodeSet();
+                    return nodes.Count == 0 ? Array.Empty<XPathValue>() : nodes;
+                }
+
+                default:
+                    return new[] { value };
+            }
+        }
+
+        /// <summary>
+        /// Expands a value into a list of its items that is the caller's own to change.
+        /// </summary>
+        /// <remarks>
+        /// The counterpart of <see cref="Concatenate"/>. A node-set contributes its nodes in document order; a
+        /// single value is one item. Most callers want <see cref="Items"/>, which copies nothing.
         /// </remarks>
         /// <param name="value">The value to expand.</param>
-        public static List<XPathValue> Items(XPathValue value)
+        public static List<XPathValue> ItemList(XPathValue value)
         {
             // Sized to fit, so that a thousand nodes go into one array rather than a doubling series.
             List<XPathValue> items = new List<XPathValue>(ItemCount(value));
@@ -566,7 +676,7 @@ namespace CodeDeeds.Xslt.XPath
                 return value;
             }
 
-            List<XPathValue> items = Items(value);
+            IReadOnlyList<XPathValue> items = Items(value);
 
             return items.Count == 1
                 ? items[0]
@@ -608,7 +718,7 @@ namespace CodeDeeds.Xslt.XPath
                 return value;
             }
 
-            List<XPathValue> items = Items(value);
+            IReadOnlyList<XPathValue> items = Items(value);
             return items.Count == 0 ? XPathValue.FromSequence(Empty) : items[0];
         }
 
@@ -709,7 +819,7 @@ namespace CodeDeeds.Xslt.XPath
         /// node in and nothing after this step that could tell the difference.
         /// </remarks>
         /// <param name="items">The items.</param>
-        public static List<XPathValue> MergeAdjacentText(List<XPathValue> items)
+        public static IReadOnlyList<XPathValue> MergeAdjacentText(IReadOnlyList<XPathValue> items)
         {
             List<XPathValue>? merged = null;
             System.Text.StringBuilder? run = null;
@@ -741,7 +851,14 @@ namespace CodeDeeds.Xslt.XPath
 
                 // The first text node met copies what came before it, so a sequence with no text node in it
                 // costs nothing here — which is most of them.
-                merged ??= new List<XPathValue>(items.GetRange(0, i));
+                if (merged is null)
+                {
+                    merged = new List<XPathValue>(items.Count);
+                    for (int before = 0; before < i; before++)
+                    {
+                        merged.Add(items[before]);
+                    }
+                }
 
                 if (text.Length == 0)
                 {

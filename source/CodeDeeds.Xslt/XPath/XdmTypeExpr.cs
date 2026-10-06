@@ -453,16 +453,16 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="value">The value to test.</param>
         public bool Matches(XPathValue value)
         {
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
             if (!Admits(items.Count))
             {
                 return false;
             }
 
-            foreach (XPathValue item in items)
+            for (int i = 0; i < items.Count; i++)
             {
-                if (!MatchesItem(item))
+                if (!MatchesItem(items[i]))
                 {
                     return false;
                 }
@@ -1046,14 +1046,27 @@ namespace CodeDeeds.Xslt.XPath
         /// <inheritdoc/>
         internal override IEnumerable<Expr> Children => new[] { m_value };
 
+        private static bool HasFunctionItem(IReadOnlyList<XPathValue> items)
+        {
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (items[i].Kind is XPathValueKind.Array or XPathValueKind.Map or XPathValueKind.Function)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         /// <inheritdoc/>
         public override XPathValue Evaluate(ref DynamicContext context)
         {
-            List<XPathValue> items = XdmSequence.Items(m_value.Evaluate(ref context));
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(m_value.Evaluate(ref context));
 
             // The operand is atomized (XPath 3.1 §3.18.3), which for an array is its members, flattened,
             // and for a map or a function is FOTY0013 — an error under castable as too, not a false.
-            if (items.Count > 0 && items.Exists(static item => item.Kind is XPathValueKind.Array or XPathValueKind.Map or XPathValueKind.Function))
+            if (items.Count > 0 && HasFunctionItem(items))
             {
                 items = XdmSequence.Atomize(items);
             }
@@ -1250,7 +1263,7 @@ namespace CodeDeeds.Xslt.XPath
             tree = null;
             node = -1;
 
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
             if (items.Count == 0)
             {
                 return false;

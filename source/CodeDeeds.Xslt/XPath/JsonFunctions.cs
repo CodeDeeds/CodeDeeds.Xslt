@@ -213,7 +213,7 @@ namespace CodeDeeds.Xslt.XPath
                 };
 
                 XdmTree tree = JsonTreeBuilder.FromJson(
-                    text, settings, context.Runtime is null ? null : context.Tree.NameTable);
+                    text, settings, context.Runtime?.TemporaryNames);
 
                 // The result is a document that came from nowhere, so its base URI is the one the
                 // call was written at — which is what the specification says of it, and what lets
@@ -288,7 +288,7 @@ namespace CodeDeeds.Xslt.XPath
             // An option that is there is checked as an argument would be: exactly one xs:boolean, an untyped
             // value cast to one — so '2' fails as a cast does — and a string is a type error however it reads.
             // Absent means the default; an empty sequence written in does not, as the suite's C102 has it.
-            List<XPathValue> items = XdmSequence.Items(options.Get(key));
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(options.Get(key));
 
             if (items.Count != 1)
             {
@@ -338,7 +338,7 @@ namespace CodeDeeds.Xslt.XPath
                 return fallback;
             }
 
-            List<XPathValue> items = XdmSequence.Items(options.Get(key));
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(options.Get(key));
 
             if (items.Count == 0)
             {
@@ -388,7 +388,7 @@ namespace CodeDeeds.Xslt.XPath
                 return null;
             }
 
-            List<XPathValue> items = XdmSequence.Items(options.Get(key));
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(options.Get(key));
 
             if (items.Count != 1 || !items[0].IsFunctionItem)
             {
@@ -401,16 +401,13 @@ namespace CodeDeeds.Xslt.XPath
             XdmFunction function = items[0].AsFunction();
             XdmTree tree = context.Tree;
             int[] fingerprints = context.FingerprintMap;
-            XsltRuntime? runtime = context.Runtime;
+            Surroundings surroundings = context.Surroundings;
 
             return escape =>
             {
                 // Built here rather than captured: a context is a ref struct and cannot be held by a
                 // closure, and there is nothing of the focus this call is entitled to anyway.
-                DynamicContext inner = new DynamicContext(tree, DynamicContext.NotANode, fingerprints)
-                {
-                    Runtime = runtime,
-                };
+                DynamicContext inner = new DynamicContext(tree, DynamicContext.NotANode, fingerprints, surroundings);
 
                 return function.Call(new[] { XPathValue.FromString(escape) }, ref inner).ToStringValue();
             };

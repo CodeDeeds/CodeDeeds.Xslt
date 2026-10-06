@@ -36,6 +36,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// </remarks>
         private XdmTree m_tree;
         private readonly NameSlotTable m_names = new();
+        private Surroundings? m_staticSurroundings;
         private readonly List<TemplateRule> m_rules = new();
         private readonly List<GlobalVariable> m_globals = new();
         private readonly Dictionary<ExpandedName, Template> m_namedTemplates = new();
@@ -3926,9 +3927,7 @@ namespace CodeDeeds.Xslt.Compiler
                 // With the name table, so that a path over a tree the expression builds for itself — a
                 // json-to-xml() and a step into it — reads names the way the runtime would.
                 DynamicContext context = new DynamicContext(
-                    m_tree, DynamicContext.NotANode, m_names.BuildFingerprintMap(m_tree), m_names);
-                context.DocumentLoader = LoadStaticDocument;
-                context.Collations = m_options.CollationResolver;
+                    m_tree, DynamicContext.NotANode, m_names.BuildFingerprintMap(m_tree), StaticSurroundings());
 
                 return expression.Evaluate(ref context);
             }
@@ -12970,9 +12969,7 @@ namespace CodeDeeds.Xslt.Compiler
                 // no source document here, and reading the context item is an error rather than a reading of
                 // the stylesheet.
                 DynamicContext context = new DynamicContext(
-                    m_tree, DynamicContext.NotANode, m_names.BuildFingerprintMap(m_tree));
-                context.DocumentLoader = LoadStaticDocument;
-                context.Collations = m_options.CollationResolver;
+                    m_tree, DynamicContext.NotANode, m_names.BuildFingerprintMap(m_tree), StaticSurroundings());
 
                 return expression.EvaluateAsBoolean(ref context);
             }
@@ -13089,6 +13086,23 @@ namespace CodeDeeds.Xslt.Compiler
         /// Answers <c>doc()</c> in a static expression: the module itself for <c>doc('')</c>, which is how a
         /// stylesheet asks about its own attributes, and the document resolver for anything else.
         /// </summary>
+        /// <summary>
+        /// What an expression evaluated while compiling reads: no transformation, the compiler's own
+        /// answer to <c>doc()</c>, the caller's collations, and the name table, so that a path over a
+        /// tree the expression builds for itself — a <c>json-to-xml()</c> and a step into it — reads names
+        /// the way the runtime would. Made once and shared by every static expression, use-when and
+        /// shadow attribute.
+        /// </summary>
+        private Surroundings StaticSurroundings()
+        {
+            return m_staticSurroundings ??= new Surroundings
+            {
+                DocumentLoader = LoadStaticDocument,
+                Collations = m_options.CollationResolver,
+                Names = m_names,
+            };
+        }
+
         private XdmTree LoadStaticDocument(string href, string? baseUri)
         {
             // XSLT 2.0 §3.13.2 answers a static expression with the set of available documents empty, so
@@ -13173,9 +13187,7 @@ namespace CodeDeeds.Xslt.Compiler
                     m_tree.StringValueOf(attribute), this, XsltBackend.Interpreted);
 
                 DynamicContext context = new DynamicContext(
-                    m_tree, DynamicContext.NotANode, m_names.BuildFingerprintMap(m_tree));
-                context.DocumentLoader = LoadStaticDocument;
-                context.Collations = m_options.CollationResolver;
+                    m_tree, DynamicContext.NotANode, m_names.BuildFingerprintMap(m_tree), StaticSurroundings());
 
                 return template.Evaluate(ref context);
             }

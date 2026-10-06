@@ -28,10 +28,16 @@ namespace CodeDeeds.Xslt.Runtime
         private const int MaximumCallDepth = 20_000;
 
         private readonly CompiledStylesheet m_stylesheet;
-        private readonly Dictionary<XdmTree, int[]> m_fingerprintMaps = new();
+        private readonly Dictionary<NameTable, int[]> m_fingerprintMaps = new();
         private readonly TemplateIndex m_templates;
-        private Dictionary<XdmTree, TemplateIndex>? m_templatesByTree;
+        private Dictionary<NameTable, TemplateIndex>? m_templatesByNames;
+
+        // The trees this transformation builds for itself share one name table, and so one mapping and one
+        // index; see TemporaryNames. Both made the first time something asks.
+        private int[]? m_temporaryMap;
+        private TemplateIndex? m_temporaryTemplates;
         private readonly XPathValue[] m_globals;
+        private readonly Surroundings m_surroundings;
 
         /// <summary>How far each global has got; see the <c>Global*</c> constants.</summary>
         private readonly byte[] m_globalState;
@@ -228,10 +234,12 @@ namespace CodeDeeds.Xslt.Runtime
             }
 
             int[] map = stylesheet.Names.BuildFingerprintMap(inputTree);
-            m_fingerprintMaps.Add(inputTree, map);
+            m_fingerprintMaps.Add(inputTree.NameTable, map);
             m_templates = new TemplateIndex(stylesheet.Rules, map);
+            TemporaryNames = new NameTable();
 
             m_globals = new XPathValue[stylesheet.GlobalSlotCount];
+            m_surroundings = new Surroundings { Runtime = this, Globals = m_globals };
             m_globalState = new byte[stylesheet.GlobalSlotCount];
             m_keysIndexing = new bool[stylesheet.Keys.Count];
         }
@@ -617,25 +625,57 @@ namespace CodeDeeds.Xslt.Runtime
         internal Compiler.ParameterValue[]? InitialParameters { get; init; }
 
         /// <summary>
+        /// The name table every tree this transformation builds for itself is interned in: the value of a
+        /// variable, a document <c>doc()</c> reads, what <c>parse-xml()</c> and <c>json-to-xml()</c> make.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A fingerprint means something only within one name table, so a tree with a table of its own needs
+        /// a mapping of the stylesheet's name slots to its fingerprints before a path can step into it, and an
+        /// index of the template rules by those fingerprints before a template can be applied to it. Each
+        /// temporary tree used to have its own table, and the DocBook stylesheets paid for a hundred and
+        /// thirty mappings and eight indexes on a document of three hundred characters, a sixth of the
+        /// transformation. Trees interned in one table share one mapping and one index, made once.
+        /// </para>
+        /// <para>
+        /// The table is this transformation's alone, so nothing locks it, and the input tree keeps the table
+        /// it came with: a caller may hand one tree to several transformations at once. The mapping for this
+        /// table is made by interning every name the stylesheet has a slot for, so that it is complete before
+        /// any tree is built in it; see <see cref="NameSlotTable.InternInto"/>.
+        /// </para>
+        /// </remarks>
+        internal NameTable TemporaryNames { get; }
+
+        /// <summary>
         /// Returns the slot-to-fingerprint mapping for a tree, computing it on first use.
         /// </summary>
         /// <remarks>
-        /// Usually there is only the input tree, but a result tree fragment carries its own name table, so a
-        /// path navigating into one needs its own mapping.
+        /// The mapping is a function of the tree's name table, not of the tree: the input tree has its own,
+        /// a document loaded with a table of its own has another, and every tree this transformation built
+        /// for itself shares the one for <see cref="TemporaryNames"/>, which is answered without a lookup.
         /// </remarks>
         /// <param name="tree">The tree to resolve names against.</param>
         public int[] GetFingerprintMap(XdmTree tree)
         {
+            NameTable names = tree.NameTable;
+
             // A mapping shorter than the table is one made before xsl:evaluate gave a name its first slot,
             // and is built again; the slots it had keep their places, so a context still holding the old
             // array is not wrong, only unable to see the new ones.
-            if (m_fingerprintMaps.TryGetValue(tree, out int[]? map) && map.Length == m_stylesheet.Names.Count)
+            if (ReferenceEquals(names, TemporaryNames))
+            {
+                return m_temporaryMap is int[] made && made.Length == m_stylesheet.Names.Count
+                    ? made
+                    : m_temporaryMap = m_stylesheet.Names.InternInto(names);
+            }
+
+            if (m_fingerprintMaps.TryGetValue(names, out int[]? map) && map.Length == m_stylesheet.Names.Count)
             {
                 return map;
             }
 
-            map = m_stylesheet.Names.BuildFingerprintMap(tree);
-            m_fingerprintMaps[tree] = map;
+            map = m_stylesheet.Names.BuildFingerprintMap(names);
+            m_fingerprintMaps[names] = map;
             return map;
         }
 
@@ -651,8 +691,10 @@ namespace CodeDeeds.Xslt.Runtime
         /// matched simply does not run. So each tree gets its own index.
         /// </para>
         /// <para>
-        /// The input tree is nearly always the one being dispatched against, so it is checked first and costs
-        /// a reference comparison; anything else goes through the dictionary.
+        /// Or rather each name table does, since trees interned in one table share their fingerprints and so
+        /// an index; the trees this transformation builds for itself all share <see cref="TemporaryNames"/>.
+        /// The input tree is nearly always the one being dispatched against, so it is checked first and
+        /// costs a reference comparison, the temporary trees next; anything else goes through the dictionary.
         /// </para>
         /// </remarks>
         private TemplateIndex IndexFor(XdmTree tree)
@@ -662,12 +704,19 @@ namespace CodeDeeds.Xslt.Runtime
                 return m_templates;
             }
 
-            m_templatesByTree ??= new Dictionary<XdmTree, TemplateIndex>();
+            NameTable names = tree.NameTable;
 
-            if (!m_templatesByTree.TryGetValue(tree, out TemplateIndex? index))
+            if (ReferenceEquals(names, TemporaryNames))
+            {
+                return m_temporaryTemplates ??= new TemplateIndex(m_stylesheet.Rules, GetFingerprintMap(tree));
+            }
+
+            m_templatesByNames ??= new Dictionary<NameTable, TemplateIndex>();
+
+            if (!m_templatesByNames.TryGetValue(names, out TemplateIndex? index))
             {
                 index = new TemplateIndex(m_stylesheet.Rules, GetFingerprintMap(tree));
-                m_templatesByTree.Add(tree, index);
+                m_templatesByNames.Add(names, index);
             }
 
             return index;
@@ -729,8 +778,7 @@ namespace CodeDeeds.Xslt.Runtime
                 DynamicContext.NotANode,
                 GetFingerprintMap(InputTree))
             {
-                Globals = m_globals,
-                Runtime = this,
+                Surroundings = m_surroundings,
                 Locals = global.FrameSize == 0
                     ? Array.Empty<XPathValue>()
                     : new XPathValue[global.FrameSize],
@@ -965,12 +1013,14 @@ namespace CodeDeeds.Xslt.Runtime
                 // fetches is not that, and is validated only where whoever supplies it says so.
                 TreeValidation? validation = m_stylesheet.ValidationFor(resolved.Validation, m_options);
 
+                // In this transformation's own name table, the document being kept for this transformation
+                // and no other, so that a path into it and a template applied to it cost no mapping of their own.
                 tree = validation is not null
                     ? XdmTreeBuilder.FromXmlValidated(
-                        resolved.Reader, m_stylesheet.WhitespaceIn(package), m_options.EntityResolver, resolved.Uri, validation)
+                        resolved.Reader, m_stylesheet.WhitespaceIn(package), m_options.EntityResolver, resolved.Uri, validation, TemporaryNames)
                     : XdmTreeBuilder.FromXml(
                         resolved.Reader,
-                        null,
+                        TemporaryNames,
                         m_stylesheet.WhitespaceIn(package),
                         false,
                         m_options.EntityResolver,
@@ -1546,8 +1596,7 @@ namespace CodeDeeds.Xslt.Runtime
 
             DynamicContext context = new DynamicContext(tree, XdmTree.RootNode, GetFingerprintMap(tree))
             {
-                Globals = m_globals,
-                Runtime = this,
+                Surroundings = m_surroundings,
                 Locals = accumulator.FrameSize == 0
                     ? Array.Empty<XPathValue>()
                     : new XPathValue[accumulator.FrameSize],
@@ -1670,8 +1719,7 @@ namespace CodeDeeds.Xslt.Runtime
 
             DynamicContext context = new DynamicContext(tree, XdmTree.RootNode, GetFingerprintMap(tree))
             {
-                Globals = m_globals,
-                Runtime = this,
+                Surroundings = m_surroundings,
             };
 
             // Namespace nodes are made on demand rather than held in the tree, so they are walked only for
@@ -2998,7 +3046,7 @@ namespace CodeDeeds.Xslt.Runtime
             System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
         private void ExecuteTypedBody(Template template, int mode, ref DynamicContext inner)
         {
-            SequenceCaptureTarget capture = new SequenceCaptureTarget
+            SequenceCaptureTarget capture = new SequenceCaptureTarget(names: TemporaryNames)
             {
                 StandsForFinalOutput = Output.IsFinalOutput,
             };
@@ -3760,7 +3808,7 @@ namespace CodeDeeds.Xslt.Runtime
         /// <param name="parameters">Parameters supplied by the call site.</param>
         /// <param name="context">The context each item in turn becomes the focus of.</param>
         internal void ApplyTemplatesToSequence(
-            List<XPathValue> items,
+            IReadOnlyList<XPathValue> items,
             int mode,
             ParameterValue[] parameters,
             ref DynamicContext context)
@@ -4028,8 +4076,7 @@ namespace CodeDeeds.Xslt.Runtime
                 HasSourceDocument ? XdmTree.RootNode : DynamicContext.NotANode,
                 GetFingerprintMap(InputTree))
             {
-                Globals = m_globals,
-                Runtime = this,
+                Surroundings = m_surroundings,
             };
 
             // A source document the transformation starts on by applying templates is made available by
@@ -4395,7 +4442,7 @@ namespace CodeDeeds.Xslt.Runtime
         /// <param name="items">The items the transformation begins on.</param>
         /// <param name="mode">The mode to apply templates in.</param>
         /// <param name="context">The context to start from.</param>
-        private void ApplyToItems(List<XPathValue> items, int mode, ref DynamicContext context)
+        private void ApplyToItems(IReadOnlyList<XPathValue> items, int mode, ref DynamicContext context)
         {
             for (int i = 0; i < items.Count; i++)
             {

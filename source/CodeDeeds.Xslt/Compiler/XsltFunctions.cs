@@ -1559,7 +1559,7 @@ namespace CodeDeeds.Xslt.Compiler
         /// <inheritdoc/>
         public override XPathValue Evaluate(ref DynamicContext context)
         {
-            List<XPathValue> items = XdmSequence.Items(m_uri.Evaluate(ref context));
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(m_uri.Evaluate(ref context));
 
             // Declared xs:string?, and nothing is available at no URI at all.
             if (items.Count != 1 || context.Runtime is not XsltRuntime runtime)
@@ -1834,7 +1834,7 @@ namespace CodeDeeds.Xslt.Compiler
 
             if (m_node is not null)
             {
-                List<XPathValue> items = XdmSequence.Items(m_node.Evaluate(ref context));
+                IReadOnlyList<XPathValue> items = XdmSequence.Items(m_node.Evaluate(ref context));
 
                 if (items.Count != 1 || items[0].Kind != XPathValueKind.Node)
                 {
@@ -2124,7 +2124,7 @@ namespace CodeDeeds.Xslt.Compiler
 
             // 3.0 declares the argument node()?, so what arrives may be one node or the empty sequence
             // rather than a node-set. Both are asked the same question and the empty one has no answer.
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
             if (items.Count == 0)
             {
@@ -2245,11 +2245,12 @@ namespace CodeDeeds.Xslt.Compiler
         {
             XPathValue value = m_select is not null ? m_select.Evaluate(ref context) : ContextItem(ref context);
 
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
             List<XPathValue> copies = new List<XPathValue>(items.Count);
 
-            foreach (XPathValue item in items)
+            for (int i = 0; i < items.Count; i++)
             {
+                XPathValue item = items[i];
                 // An atomic value has no identity to give it a new one of, so it is itself. The same goes
                 // for a map, an array or a function item: what a copy would change about them is the nodes
                 // inside, which is a depth this engine does not need to reach for the tests it can answer.
@@ -2268,7 +2269,7 @@ namespace CodeDeeds.Xslt.Compiler
 
                 // The copy answers for its accumulators as the original does, which is what tells fn:copy-of
                 // apart from a copy made by xsl:copy-of without copy-accumulators="yes".
-                SequenceCaptureTarget capture = new SequenceCaptureTarget();
+                SequenceCaptureTarget capture = new SequenceCaptureTarget(names: context.Runtime?.TemporaryNames);
                 NodeCopier.CopyDeep(item.NodeTree, item.NodeId, capture, copyAccumulators: true, runtime: context.Runtime);
                 copies.AddRange(XdmSequence.Items(capture.Finish()));
             }
@@ -2342,11 +2343,12 @@ namespace CodeDeeds.Xslt.Compiler
                 ? m_select.Evaluate(ref context)
                 : CopyOfFunctionExpr.ContextItem(ref context, "snapshot");
 
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
             List<XPathValue> taken = new List<XPathValue>(items.Count);
 
-            foreach (XPathValue item in items)
+            for (int i = 0; i < items.Count; i++)
             {
+                XPathValue item = items[i];
                 taken.Add(item.Kind == XPathValueKind.Node ? Snapshot(item) : item);
             }
 

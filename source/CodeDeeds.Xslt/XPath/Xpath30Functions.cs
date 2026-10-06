@@ -465,17 +465,17 @@ namespace CodeDeeds.Xslt.XPath
             {
                 case Xpath30Function.Head:
                 {
-                    List<XPathValue> items = Items(0, ref context);
+                    IReadOnlyList<XPathValue> items = Items(0, ref context);
                     return items.Count == 0 ? XPathValue.FromSequence(XdmSequence.Empty) : items[0];
                 }
 
                 case Xpath30Function.Tail:
                 {
-                    List<XPathValue> items = Items(0, ref context);
+                    IReadOnlyList<XPathValue> items = Items(0, ref context);
 
                     return items.Count <= 1
                         ? XPathValue.FromSequence(XdmSequence.Empty)
-                        : XdmSequence.Concatenate(items.GetRange(1, items.Count - 1));
+                        : XdmSequence.Slice(items, 1, items.Count - 1);
                 }
 
                 case Xpath30Function.ContainsToken:
@@ -682,11 +682,12 @@ namespace CodeDeeds.Xslt.XPath
         /// </remarks>
         private XPathValue Nesting(ref DynamicContext context, bool outermost)
         {
-            List<XPathValue> items = Items(0, ref context);
+            IReadOnlyList<XPathValue> items = Items(0, ref context);
             NodeSet all = new NodeSet(items.Count > 0 ? TreeOf(items[0]) : context.Tree, items.Count);
 
-            foreach (XPathValue item in items)
+            for (int i = 0; i < items.Count; i++)
             {
+                XPathValue item = items[i];
                 all.Add(TreeOf(item), IdOf(item));
             }
 
@@ -859,7 +860,7 @@ namespace CodeDeeds.Xslt.XPath
             return XdmSequence.Concatenate(lines);
         }
 
-        private List<XPathValue> Items(int index, ref DynamicContext context)
+        private IReadOnlyList<XPathValue> Items(int index, ref DynamicContext context)
         {
             return XdmSequence.Items(m_arguments[index].Evaluate(ref context));
         }

@@ -96,7 +96,7 @@ namespace CodeDeeds.Xslt.Conformance
                     catch (Exception exception)
                     {
                         result = new TestResult(
-                            Outcome.Failed, $"driver fault: {exception.GetType().Name}: {exception.Message}");
+                            Outcome.Failed, $"driver fault: {exception.GetType().Name}: {exception.Message}" + (System.Environment.GetEnvironmentVariable("CDX_TRACE") is null ? "" : " AT " + exception.StackTrace?.Replace(System.Environment.NewLine, " | ")));
                     }
 
                     switch (result.Outcome)

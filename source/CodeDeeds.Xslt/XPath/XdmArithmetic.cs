@@ -261,7 +261,7 @@ namespace CodeDeeds.Xslt.XPath
                 return true;
             }
 
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
             if (items.Count != 1)
             {
@@ -321,7 +321,7 @@ namespace CodeDeeds.Xslt.XPath
         {
             if (value.Kind is XPathValueKind.Sequence or XPathValueKind.NodeSet or XPathValueKind.Node)
             {
-                List<XPathValue> items = XdmSequence.Items(value);
+                IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
                 if (items.Count == 0)
                 {

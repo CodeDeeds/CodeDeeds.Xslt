@@ -513,9 +513,17 @@ namespace CodeDeeds.Xslt.Conformance
             // A tree for the names to be numbered against: the tree of the first node among the items, so
             // that a question naming an element of the result reads the same names it was built with, and
             // an empty one where there is no node to take names from.
-            XdmTree tree = items.FirstOrDefault(item => item.Kind == XPathValueKind.Node) is XPathValue node
-                ? node.NodeTree
-                : XdmTreeBuilder.Empty();
+            XdmTree? tree = null;
+            foreach (XPathValue item in items)
+            {
+                if (item.Kind == XPathValueKind.Node)
+                {
+                    tree = item.NodeTree;
+                    break;
+                }
+            }
+
+            tree ??= XdmTreeBuilder.Empty();
 
             try
             {

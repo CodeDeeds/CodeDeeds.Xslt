@@ -154,7 +154,7 @@ namespace CodeDeeds.Xslt.XPath
 
             if (value.Kind == XPathValueKind.Sequence)
             {
-                List<XPathValue> items = XdmSequence.Items(value);
+                IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
                 if (items.Count == 0 || IsAllNodes(items))
                 {
@@ -174,10 +174,11 @@ namespace CodeDeeds.Xslt.XPath
 
         /// <summary>Whether every item of a sequence is a node.</summary>
         /// <param name="items">The items to look at.</param>
-        private static bool IsAllNodes(List<XPathValue> items)
+        private static bool IsAllNodes(IReadOnlyList<XPathValue> items)
         {
-            foreach (XPathValue item in items)
+            for (int i = 0; i < items.Count; i++)
             {
+                XPathValue item = items[i];
                 if (item.Kind != XPathValueKind.Node)
                 {
                     return false;

@@ -28,9 +28,12 @@ namespace CodeDeeds.Xslt.Compiler
         {
             List<KeyValuePair<XPathValue, XPathValue>> entries = new();
 
-            foreach (XPathValue item in XdmSequence.Items(
-                VariableInstruction.CaptureSequence(m_body, ref context, runtime)))
+            IReadOnlyList<XPathValue> produced = XdmSequence.Items(
+                VariableInstruction.CaptureSequence(m_body, ref context, runtime));
+
+            for (int i = 0; i < produced.Count; i++)
             {
+                XPathValue item = produced[i];
                 if (item.Kind != XPathValueKind.Map)
                 {
                     throw XsltErrors.Error(

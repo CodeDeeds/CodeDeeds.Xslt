@@ -404,11 +404,11 @@ over the documents under `Data/DocBook`, written to a writer that keeps nothing.
 
 | Document | Mean | Allocated |
 |---|---:|---:|
-| A book of 77 paragraphs, 44 KB | 53.4 ms | 32.6 MB |
-| A table of 100 rows, 26 KB | 161.5 ms | 92.5 MB |
-| A table of 1,000 rows, 257 KB | 1,645.0 ms | 1,082.4 MB |
+| A book of 77 paragraphs, 44 KB | 28.9 ms | 27.0 MB |
+| A table of 100 rows, 26 KB | 75.6 ms | 62.4 MB |
+| A table of 1,000 rows, 257 KB | 719.5 ms | 581.1 MB |
 
-The class has been run three times, and the first two found something that was not the documents'.
+The class has been run four times, and the first three found something that was not the documents'.
 
 The stylesheets put every document through four stylesheets of their own with `fn:transform()` before
 formatting it. When the class was first run each of the four was read and compiled again at every
@@ -420,13 +420,24 @@ call that named it, which made them 60.2 ms and 44.8 MB, 165.7 ms and 104.8 MB, 
 The stylesheets also declare 224 parameters and hand them on in one `xsl:map`, which the stylesheets they
 run build again, and `xsl:map` made a new map for every entry, each a copy of the last: twelve megabytes of every
 transformation and a quarter of what a short document took. It builds a map in one pass now, and two
-searches of a list that were made for every parameter are lookups, which is the table above.
+searches of a list that were made for every parameter are lookups, which made the rows 53.4 ms and
+32.6 MB, 161.5 ms and 92.5 MB, and 1,645.0 ms and 1,082.4 MB.
+
+The third run found four things the engine did for every temporary tree, whitespace node and sequence,
+which the DocBook stylesheets have more of than most: a tree built by a variable had a name table of its
+own, so a path into it and a template applied to it cost a mapping of the stylesheet's names and an index
+of its templates, 130 and 8 of them for a document of three hundred characters; the strip-space
+declarations, two hundred of them, were walked for every whitespace-only text node of every document
+parsed; every sequence a function read or an `as` checked was laid out again in a list of its own; and
+the evaluation context carried seven fields that never change. The trees of a transformation share one
+table now, the decisions are kept by name, a sequence reads as itself, and the context is 96 bytes where
+it was 144, which is the table above.
 
 What is left that is not the document's is what the stylesheets do for any document at all. One of
-three hundred characters takes 20 ms and 12 MB: four transformations before the one that formats, each
-setting up its own parameters, and the localization and the title page templates read each time. And a
-row of the table costs 1.6 ms and 1.1 MB, which is the stylesheets' way with a CALS table and this
-engine's way with what they write, and has not been looked into.
+three hundred characters takes 11 ms and 10 MB: the title-page templates, a document the stylesheets
+build from thirty-nine templates by a recursive copy, 4.7 ms of it; the localization file, 84 KB parsed
+once a transformation, 1.3; the four maps of 224 parameters, 1.5; and the formatting. And a row of the
+table costs 0.7 ms and 0.6 MB, which is the stylesheets' way with a CALS table, a tree a cell.
 
 ## Benchmark Methodology
 

@@ -89,11 +89,12 @@ namespace CodeDeeds.Xslt.XPath
                 return value;
             }
 
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
             List<XPathValue> coerced = new List<XPathValue>(items.Count);
 
-            foreach (XPathValue item in items)
+            for (int i = 0; i < items.Count; i++)
             {
+                XPathValue item = items[i];
                 coerced.Add(item.Kind == XPathValueKind.Function ? type.Coerce(item) : item);
             }
 
@@ -102,11 +103,12 @@ namespace CodeDeeds.Xslt.XPath
 
         private static XPathValue Convert(XPathValue value, XdmSequenceType type)
         {
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
             List<XPathValue> converted = new List<XPathValue>(items.Count);
 
-            foreach (XPathValue item in items)
+            for (int i = 0; i < items.Count; i++)
             {
+                XPathValue item = items[i];
                 converted.Add(ConvertItem(item, type));
             }
 
@@ -265,7 +267,7 @@ namespace CodeDeeds.Xslt.XPath
         /// <returns>The complaint, as a sentence wanting only its final stop.</returns>
         private static string Mismatch(XPathValue value, XdmSequenceType type)
         {
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
             if (!type.Admits(items.Count))
             {
@@ -315,7 +317,7 @@ namespace CodeDeeds.Xslt.XPath
 
         internal static string Describe(XPathValue value)
         {
-            List<XPathValue> items = XdmSequence.Items(value);
+            IReadOnlyList<XPathValue> items = XdmSequence.Items(value);
 
             return items.Count switch
             {

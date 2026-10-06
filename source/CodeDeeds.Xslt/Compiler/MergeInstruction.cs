@@ -320,7 +320,7 @@ namespace CodeDeeds.Xslt.Compiler
             ref DynamicContext context,
             XsltRuntime runtime)
         {
-            List<XPathValue>? contexts = null;
+            IReadOnlyList<XPathValue>? contexts = null;
 
             if (source.ForEachItem is not null)
             {
@@ -330,7 +330,8 @@ namespace CodeDeeds.Xslt.Compiler
             {
                 // Each item names a document, which is what lets one xsl:merge-source stand for a whole
                 // collection of files that share a shape.
-                contexts = new List<XPathValue>();
+                List<XPathValue> documents = new List<XPathValue>();
+                contexts = documents;
                 foreach (XPathValue href in XdmSequence.Items(source.ForEachSource.Evaluate(ref context)))
                 {
                     // The attribute is xs:string*, read by the function conversion rules: a node is its
@@ -346,7 +347,7 @@ namespace CodeDeeds.Xslt.Compiler
 
                     XdmTree document = runtime.LoadDocument(href.ToStringValue(), source.BaseUri);
                     runtime.MakeAvailable(document, source.Accumulators ?? AccumulatorSet.None);
-                    contexts.Add(XPathValue.FromNode(document, XdmTree.RootNode));
+                    documents.Add(XPathValue.FromNode(document, XdmTree.RootNode));
                 }
             }
 
@@ -358,7 +359,7 @@ namespace CodeDeeds.Xslt.Compiler
             for (int round = 0; round < rounds; round++)
             {
                 DynamicContext inner = contexts is null ? context : context.WithItem(contexts[round]);
-                List<XPathValue> items = XdmSequence.Items(source.Select.Evaluate(ref inner));
+                IReadOnlyList<XPathValue> items = XdmSequence.Items(source.Select.Evaluate(ref inner));
                 List<Entry> entries = new List<Entry>(items.Count);
 
                 for (int i = 0; i < items.Count; i++)

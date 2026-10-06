@@ -142,12 +142,13 @@ namespace CodeDeeds.Xslt.XPath
 
                 case HigherOrderFunction.ForEach:
                 {
-                    List<XPathValue> items = Items(0, ref context);
+                    IReadOnlyList<XPathValue> items = Items(0, ref context);
                     XdmFunction action = Function(1, ref context);
                     List<XPathValue> results = new List<XPathValue>(items.Count);
 
-                    foreach (XPathValue item in items)
+                    for (int i = 0; i < items.Count; i++)
                     {
+                        XPathValue item = items[i];
                         results.AddRange(XdmSequence.Items(Call(action, ref context, item)));
                     }
 
@@ -156,12 +157,13 @@ namespace CodeDeeds.Xslt.XPath
 
                 case HigherOrderFunction.Filter:
                 {
-                    List<XPathValue> items = Items(0, ref context);
+                    IReadOnlyList<XPathValue> items = Items(0, ref context);
                     XdmFunction test = Function(1, ref context);
                     List<XPathValue> kept = new List<XPathValue>(items.Count);
 
-                    foreach (XPathValue item in items)
+                    for (int i = 0; i < items.Count; i++)
                     {
+                        XPathValue item = items[i];
                         if (Holds(test, ref context, item))
                         {
                             kept.Add(item);
@@ -173,14 +175,15 @@ namespace CodeDeeds.Xslt.XPath
 
                 case HigherOrderFunction.FoldLeft:
                 {
-                    List<XPathValue> items = Items(0, ref context);
+                    IReadOnlyList<XPathValue> items = Items(0, ref context);
                     XPathValue total = m_arguments[1].Evaluate(ref context);
                     XdmFunction combine = Function(2, ref context);
 
                     // The accumulator comes first, which is the whole difference from fold-right and the
                     // reason both exist: '(((zero, a), b), c)' rather than '(a, (b, (c, zero)))'.
-                    foreach (XPathValue item in items)
+                    for (int i = 0; i < items.Count; i++)
                     {
+                        XPathValue item = items[i];
                         total = Call(combine, ref context, total, item);
                     }
 
@@ -189,7 +192,7 @@ namespace CodeDeeds.Xslt.XPath
 
                 case HigherOrderFunction.FoldRight:
                 {
-                    List<XPathValue> items = Items(0, ref context);
+                    IReadOnlyList<XPathValue> items = Items(0, ref context);
                     XPathValue total = m_arguments[1].Evaluate(ref context);
                     XdmFunction combine = Function(2, ref context);
 
@@ -203,8 +206,8 @@ namespace CodeDeeds.Xslt.XPath
 
                 case HigherOrderFunction.ForEachPair:
                 {
-                    List<XPathValue> first = Items(0, ref context);
-                    List<XPathValue> second = Items(1, ref context);
+                    IReadOnlyList<XPathValue> first = Items(0, ref context);
+                    IReadOnlyList<XPathValue> second = Items(1, ref context);
                     XdmFunction action = Function(2, ref context);
 
                     // It stops at the shorter of the two rather than erroring or padding, so zipping a
@@ -255,7 +258,7 @@ namespace CodeDeeds.Xslt.XPath
 
                 default:
                 {
-                    List<XPathValue> items = Items(0, ref context);
+                    IReadOnlyList<XPathValue> items = Items(0, ref context);
 
                     Collation collation = m_arguments.Length >= 2
                         ? Collation.Resolve(m_arguments[1].Evaluate(ref context).ToStringValue(), ref context)
@@ -287,7 +290,7 @@ namespace CodeDeeds.Xslt.XPath
         /// <param name="collation">The collation string keys are compared under.</param>
         /// <param name="context">The context calls are made in.</param>
         internal static List<XPathValue> Sort(
-            List<XPathValue> items,
+            IReadOnlyList<XPathValue> items,
             XdmFunction? key,
             Collation collation,
             ref DynamicContext context)
@@ -335,7 +338,7 @@ namespace CodeDeeds.Xslt.XPath
         /// Orders two key sequences, item by item, with a shorter sequence coming first where they agree so
         /// far.
         /// </summary>
-        private static int CompareKeys(List<XPathValue> left, List<XPathValue> right, Collation collation)
+        private static int CompareKeys(IReadOnlyList<XPathValue> left, IReadOnlyList<XPathValue> right, Collation collation)
         {
             int shared = Math.Min(left.Count, right.Count);
 
@@ -373,7 +376,7 @@ namespace CodeDeeds.Xslt.XPath
             return left.Count.CompareTo(right.Count);
         }
 
-        private List<XPathValue> Items(int index, ref DynamicContext context)
+        private IReadOnlyList<XPathValue> Items(int index, ref DynamicContext context)
         {
             return XdmSequence.Items(m_arguments[index].Evaluate(ref context));
         }

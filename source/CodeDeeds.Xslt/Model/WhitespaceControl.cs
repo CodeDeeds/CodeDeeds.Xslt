@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace CodeDeeds.Xslt.Model
 {
     /// <summary>
@@ -15,6 +17,13 @@ namespace CodeDeeds.Xslt.Model
     /// one named exactly; then specificity, an exact name beating <c>prefix:*</c> and <c>*:name</c>, which
     /// beat <c>*</c>; then the last one written, which is why entries record the order they came in.
     /// </para>
+    /// <para>
+    /// The declarations are walked once for each element name and the answer kept: a document is asked about
+    /// every whitespace-only text node in it, and the DocBook stylesheets declare two hundred names, which
+    /// made the walk half of what parsing their localization file cost. The answers are shared by every
+    /// transformation using the stylesheet, so they are kept in a collection that can be read and written
+    /// from several threads at once.
+    /// </para>
     /// </remarks>
     public sealed class WhitespaceControl
     {
@@ -22,6 +31,7 @@ namespace CodeDeeds.Xslt.Model
         public static WhitespaceControl PreserveAll { get; } = new WhitespaceControl();
 
         private readonly List<Entry> m_entries = new();
+        private readonly ConcurrentDictionary<(string NamespaceUri, string LocalName), bool> m_decided = new();
 
         /// <summary>Gets whether any declaration has been added.</summary>
         public bool IsEmpty => m_entries.Count == 0;
@@ -47,6 +57,7 @@ namespace CodeDeeds.Xslt.Model
             // name test carries as a pattern, since these are name tests and that is what they are for.
             int specificity = (namespaceUri is null ? 0 : 1) + (localName == "*" ? 0 : 1);
             m_entries.Add(new Entry(namespaceUri, localName, specificity, strip, m_entries.Count, precedence));
+            m_decided.Clear();
         }
 
         /// <summary>
@@ -55,6 +66,28 @@ namespace CodeDeeds.Xslt.Model
         /// <param name="namespaceUri">The element's namespace URI.</param>
         /// <param name="localName">The element's local name.</param>
         public bool ShouldStrip(string namespaceUri, string localName)
+        {
+            if (m_entries.Count == 0)
+            {
+                return false;
+            }
+
+            (string, string) name = (namespaceUri, localName);
+
+            if (m_decided.TryGetValue(name, out bool decided))
+            {
+                return decided;
+            }
+
+            // Two threads deciding the same name at once decide it the same way, so whichever writes last
+            // changes nothing.
+            decided = Decide(namespaceUri, localName);
+            m_decided[name] = decided;
+            return decided;
+        }
+
+        /// <summary>Walks the declarations for one element name.</summary>
+        private bool Decide(string namespaceUri, string localName)
         {
             Entry? best = null;
 
