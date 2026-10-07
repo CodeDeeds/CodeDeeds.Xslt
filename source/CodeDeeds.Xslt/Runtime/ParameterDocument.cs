@@ -46,6 +46,11 @@ namespace CodeDeeds.Xslt.Runtime
                 return null;
             }
 
+            if (resolved.Document is XdmTree parsed)
+            {
+                return parsed;
+            }
+
             try
             {
                 return XdmTreeBuilder.FromXml(

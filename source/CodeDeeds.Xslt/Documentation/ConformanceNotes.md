@@ -10697,6 +10697,51 @@ thousand items under a megabyte. The conformance driver had chosen a null tree f
 which the old mapping tolerated by never touching it; it chooses the empty tree now, and prints a stack
 trace for a fault when `CDX_TRACE` is set.
 
+### A document parsed once and read by every transformation
+
+Of the ten milliseconds a DocBook document of three hundred characters still took, 4.7 were the title-page
+templates and 1.3 the localization file, and a stopwatch in every instruction, function and copy of the
+templates build found no hot spot in it: a 40-level recursive function that rebuilds a document a template
+at a time, copying the earlier templates into the later ones, spread over 1,200 template calls, 3,000
+copied nodes, 762 type checks and 968 concatenations at a microsecond or two each, with the parse of the
+22-kilobyte templates file, 0.5, the largest single piece. What is left to gain there is a tenth or two of
+it; what the stylesheet does is what it costs.
+
+Both the parse and the build are the same every run of the same compiled stylesheet, as the localization
+file's parse is, and the first of the two ways of not paying them again is done here: a resolver may hand
+a document back already parsed. `ResolvedResource` has a second constructor, taking an `XdmTree` and the
+URI, and `Document` beside `Reader`; `document()`, `doc()`, `doc-available()`, a static expression's
+`doc()` and a parameter document take the tree as it is, and `Reader` on such a resource throws a message
+saying what was given, which is what a stylesheet module, a schema, an entity or `unparsed-text()`
+handed a tree meets. `Xslt.ParseDocument` parses text the way the stylesheet's `document()` would — its
+whitespace stripping, its entity resolver, the URI as the base URI — so that the tree a resolver keeps is
+the tree the stylesheet would have built. The engine never writes to a tree, and the lazily built things
+in one are made under a lock, so one tree may be read by any number of transformations at once; it keeps
+the name table it came with, and each transformation maps the stylesheet's names to it once, two kilobytes
+and some thirty microseconds, which is less than parsing anything.
+
+What it is worth is what the caller's documents cost to parse. For the DocBook stylesheets, with a
+resolver that keeps the localization file and the templates file, the short document is 11.8 to 9.7
+milliseconds and 9.8 to 8.5 megabytes, the book 31.1 to 28.1 and 27.4 to 24.8, three fresh processes
+turn about; by BenchmarkDotNet, the class run alone, the book 32.1 milliseconds and 27.0 megabytes parsing them and
+28.2 and 24.5 with them kept. The templates document is still built from the tree every run,
+and the second way, keeping a global that depends on nothing but the stylesheet and its documents between
+runs, is not done: it needs either an analysis of what a global reaches, through every function it calls
+and every template of every mode it applies, or the author's word on an `xsl:variable`, and in either
+case the caller's promise that the documents do not change, which this constructor is one way of giving.
+
+All eight conformance runs are identical test for test: 8,061 of 8,071 at 3.0, 5,678 of 5,701 at 2.0
+and 8,668 of 8,683 schema-aware, each on both backends, and 18,268 of 18,285 and 14,553 of 14,577 on the
+XPath runs.
+
+Eight unit tests in `ParsedDocumentTests`, 3,184 in all: the same answer from a tree as from its text, with
+the base URI the tree's own and a second transformation reading the same tree; `ParseDocument` stripping
+what the stylesheet strips where a tree parsed otherwise is taken as it is; one tree read by sixteen
+transformations at once, each applying templates to it; `doc-available()`, a static expression and two
+spellings of one document; the refusals, by the resource, by `unparsed-text()` and by `xsl:include`; and
+a document of two thousand elements read parsed allocating less than a tenth of what parsing it did. The
+DocBook benchmark class has a fourth row, the book with the two documents kept.
+
 ### Which results the suite asks for and does not get
 
 The rest of what differs on the two XSLT runs, and why. The errors are written up under *Which error

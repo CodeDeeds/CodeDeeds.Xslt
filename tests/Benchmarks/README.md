@@ -403,6 +403,7 @@ writer that keeps nothing.
 | Document | Mean | Allocated |
 |---|---:|---:|
 | A book of 77 paragraphs, 44 KB | 31.8 ms | 27.0 MB |
+| The book, the documents read kept parsed | 28.2 ms | 24.5 MB |
 | A table of 100 rows, 26 KB | 80.3 ms | 62.4 MB |
 | A table of 1,000 rows, 257 KB | 769.6 ms | 581.1 MB |
 
@@ -439,6 +440,12 @@ three hundred characters takes 11 ms and 10 MB: the title-page templates, a docu
 build from thirty-nine templates by a recursive copy, 4.7 ms of it; the localization file, 84 KB parsed
 once a transformation, 1.3; the four maps of 224 parameters, 1.5; and the formatting. And a row of the
 table costs 0.7 ms and 0.6 MB, which is the stylesheets' way with a CALS table, a tree a cell.
+
+The second row of the table is the first with the two documents the stylesheets read, the localization
+file and the title-page templates, parsed once by the resolver with `Xslt.ParseDocument` and handed back
+as trees through `ResolvedResource(XdmTree, string)` to every transformation after, which a caller whose
+documents do not change can do; measured on 7 October with the class alone, when the first row read 32.1 ms and 27.0 MB. The templates document is still built from the
+tree every time.
 
 ## Benchmark Methodology
 

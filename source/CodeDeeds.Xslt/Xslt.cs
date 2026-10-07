@@ -663,6 +663,55 @@ namespace CodeDeeds.Xslt
         /// Parses XML held in a string, letting the tree size its storage from the text rather than grow
         /// into it.
         /// </summary>
+        /// <summary>
+        /// Parses a document the way this stylesheet reads one with <c>document()</c> or <c>doc()</c>, for
+        /// a resolver to keep and hand back parsed.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A document a stylesheet reads for itself is parsed again by every transformation; one that does
+        /// not change between them can be parsed once instead, and given back through
+        /// <see cref="ResolvedResource(XdmTree, string)"/> from a resolver that keeps it. Parsed here it is
+        /// what the stylesheet would have read: its <c>xsl:strip-space</c> and <c>xsl:preserve-space</c>
+        /// applied, its entity resolver used, and the URI given as the base URI of the document.
+        /// </para>
+        /// <para>
+        /// The tree is the caller's, is never changed by the engine, and may be read by several
+        /// transformations at once. What is not applied is a validation a resolver would have asked for
+        /// through <see cref="ResolvedResource.Validation"/>, which is for text.
+        /// </para>
+        /// </remarks>
+        /// <param name="document">The document text.</param>
+        /// <param name="uri">The document's absolute URI.</param>
+        /// <returns>The parsed document.</returns>
+        /// <example>
+        /// <code>
+        /// Xslt xslt = new Xslt(stylesheet, new XsltOptions { DocumentResolver = cache });
+        /// cache.Keep(uri, xslt.ParseDocument(File.OpenText(path), uri));
+        /// </code>
+        /// </example>
+        public XdmTree ParseDocument(TextReader document, string uri)
+        {
+            ArgumentNullException.ThrowIfNull(document);
+            ArgumentNullException.ThrowIfNull(uri);
+
+            return XdmTreeBuilder.FromXml(
+                document, null, m_stylesheet.Whitespace, false, m_options.EntityResolver, uri);
+        }
+
+        /// <summary>
+        /// Parses a document the way this stylesheet reads one with <c>document()</c> or <c>doc()</c>, for
+        /// a resolver to keep and hand back parsed; see <see cref="ParseDocument(TextReader, string)"/>.
+        /// </summary>
+        /// <param name="document">The document text.</param>
+        /// <param name="uri">The document's absolute URI.</param>
+        /// <returns>The parsed document.</returns>
+        public XdmTree ParseDocument(string document, string uri)
+        {
+            ArgumentNullException.ThrowIfNull(document);
+            return ParseDocument(new StringReader(document), uri);
+        }
+
         private XdmTree ParseXmlText(string xmlInput)
         {
             return XdmTreeBuilder.FromXmlPooled(

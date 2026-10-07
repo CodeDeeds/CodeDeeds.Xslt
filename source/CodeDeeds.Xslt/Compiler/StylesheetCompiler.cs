@@ -13130,6 +13130,11 @@ namespace CodeDeeds.Xslt.Compiler
                     $"The document '{href}' could not be found for a static expression to read.");
             }
 
+            if (resolved.Document is XdmTree parsed)
+            {
+                return parsed;
+            }
+
             using (resolved.Reader)
             {
                 return XdmTreeBuilder.FromXml(resolved.Reader, entityResolver: m_options.EntityResolver, baseUri: resolved.Uri);

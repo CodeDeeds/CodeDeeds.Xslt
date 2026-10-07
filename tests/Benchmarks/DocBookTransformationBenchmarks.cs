@@ -42,6 +42,7 @@ namespace CodeDeeds.Xslt.Benchmarks
         private readonly CountingWriter m_writer = new CountingWriter();
 
         private Xslt m_stylesheet = null!;
+        private Xslt m_keeping = null!;
         private string m_book = null!;
         private string m_table100 = null!;
         private string m_table1000 = null!;
@@ -66,6 +67,22 @@ namespace CodeDeeds.Xslt.Benchmarks
                     WarningWriter = TextWriter.Null,
                 });
 
+            // The same stylesheet with a resolver that parses each document the stylesheets read once,
+            // the way the stylesheet reads it, and hands the tree back to every transformation after.
+            KeepingResolver keeping = new KeepingResolver(resolver);
+            m_keeping = new Xslt(
+                File.ReadAllText("Stylesheets/DocBook.xslt"),
+                new XsltOptions
+                {
+                    StylesheetResolver = resolver,
+                    DocumentResolver = keeping,
+                    InputUri = "https://example.org/docbook/input.xml",
+                    BaseOutputUri = "https://example.org/docbook/output.html",
+                    MessageWriter = TextWriter.Null,
+                    WarningWriter = TextWriter.Null,
+                });
+            keeping.Parser = m_keeping;
+
             m_book = File.ReadAllText("Data/DocBook/book.001.xml");
             m_table1000 = File.ReadAllText("Data/DocBook/table-cals.049-1000-rows.xml");
             m_table100 = FirstRows(m_table1000, 100);
@@ -80,9 +97,63 @@ namespace CodeDeeds.Xslt.Benchmarks
                     throw new InvalidOperationException("A DocBook document did not transform to a page of HTML.");
                 }
             }
+
+            // The two differ in the dc.modified stamp of the moment each ran and in nothing else.
+            if (Unstamped(m_keeping.TransformXml(m_book)) != Unstamped(m_stylesheet.TransformXml(m_book)))
+            {
+                throw new InvalidOperationException("The book transformed differently with the documents kept parsed.");
+            }
+        }
+
+        /// <summary>
+        /// A resolver that parses each document once, as the stylesheet would read it, and gives the tree
+        /// back for every transformation after: what a caller does whose documents do not change.
+        /// </summary>
+        private sealed class KeepingResolver : IXsltResolver
+        {
+            private readonly IXsltResolver m_inner;
+            private readonly Dictionary<string, Model.XdmTree> m_kept = new(StringComparer.Ordinal);
+
+            public KeepingResolver(IXsltResolver inner) => m_inner = inner;
+
+            public Xslt? Parser { get; set; }
+
+            public ResolvedResource? Resolve(string href, string? baseUri)
+            {
+                ResolvedResource? resolved = m_inner.Resolve(href, baseUri);
+
+                if (resolved is null)
+                {
+                    return null;
+                }
+
+                lock (m_kept)
+                {
+                    if (!m_kept.TryGetValue(resolved.Uri, out Model.XdmTree? tree))
+                    {
+                        using (resolved.Reader)
+                        {
+                            tree = Parser!.ParseDocument(resolved.Reader, resolved.Uri);
+                        }
+
+                        m_kept[resolved.Uri] = tree;
+                    }
+                    else
+                    {
+                        resolved.Reader.Dispose();
+                    }
+
+                    return new ResolvedResource(tree, resolved.Uri);
+                }
+            }
         }
 
         /// <summary>The table with only its first rows, everything else as it was.</summary>
+        private static string Unstamped(string page)
+        {
+            return System.Text.RegularExpressions.Regex.Replace(page, "name=\"dc.modified\" content=\"[^\"]*\"", "name=\"dc.modified\"");
+        }
+
         private static string FirstRows(string table, int count)
         {
             int at = 0;
@@ -99,6 +170,13 @@ namespace CodeDeeds.Xslt.Benchmarks
         public long Book()
         {
             m_stylesheet.TransformXml(m_book, m_writer);
+            return m_writer.Characters;
+        }
+
+        [Benchmark(Description = "The book, the documents read kept parsed")]
+        public long BookWithDocumentsKept()
+        {
+            m_keeping.TransformXml(m_book, m_writer);
             return m_writer.Characters;
         }
 

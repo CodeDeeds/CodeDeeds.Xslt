@@ -66,25 +66,67 @@ namespace CodeDeeds.Xslt
     }
 
     /// <summary>
-    /// A stylesheet located by <see cref="IXsltResolver"/>, together with the identity that nested
-    /// references inside it resolve against.
+    /// A resource located by <see cref="IXsltResolver"/>, together with the identity that nested
+    /// references inside it resolve against: text to be read, or a document already parsed.
     /// </summary>
     public sealed class ResolvedResource
     {
-        /// <summary>Initializes a resolved stylesheet.</summary>
-        /// <param name="reader">The stylesheet text. The compiler disposes it.</param>
+        private readonly TextReader? m_reader;
+
+        /// <summary>Initializes a resolved resource that is read as text.</summary>
+        /// <param name="reader">The text. The engine disposes it.</param>
         /// <param name="uri">
-        /// An absolute identity for the stylesheet. Used as the base for references inside it, and to detect a
-        /// reference cycle, so it must be the same string every time the same stylesheet is returned.
+        /// An absolute identity for the resource. Used as the base for references inside it, and to detect a
+        /// reference cycle, so it must be the same string every time the same resource is returned.
         /// </param>
         public ResolvedResource(TextReader reader, string uri)
         {
-            Reader = reader;
+            ArgumentNullException.ThrowIfNull(reader);
+            m_reader = reader;
             Uri = uri;
         }
 
-        /// <summary>Gets the stylesheet text.</summary>
-        public TextReader Reader { get; }
+        /// <summary>Initializes a resolved document that has already been parsed.</summary>
+        /// <remarks>
+        /// <para>
+        /// For a resolver that keeps the documents a stylesheet reads with <c>document()</c> or <c>doc()</c>
+        /// between transformations, so that each reads a tree parsed once rather than parsing the text
+        /// again: the localization and template files the DocBook stylesheets read for every document
+        /// are a fifth of what a short document costs them. The tree is used as it is, so it is parsed the
+        /// way the stylesheet would have read it, which <see cref="Xslt.ParseDocument(TextReader, string)"/>
+        /// does: the stylesheet's whitespace stripping applied and its entity resolver used.
+        /// </para>
+        /// <para>
+        /// The engine never changes a tree it is given and may read one from several transformations at
+        /// once, so one tree can serve them all. Only a document is taken this way: a stylesheet module,
+        /// a schema, an entity or an <c>unparsed-text()</c> resource is text, and a resolver handing a
+        /// tree back for one is refused when the engine comes to read it.
+        /// </para>
+        /// </remarks>
+        /// <param name="document">The document, parsed.</param>
+        /// <param name="uri">
+        /// An absolute identity for the document, the same string every time the same document is returned.
+        /// </param>
+        public ResolvedResource(Model.XdmTree document, string uri)
+        {
+            ArgumentNullException.ThrowIfNull(document);
+            Document = document;
+            Uri = uri;
+        }
+
+        /// <summary>
+        /// Gets the text of the resource.
+        /// </summary>
+        /// <exception cref="XsltException">The resource was given as a parsed document, which has no text.</exception>
+        public TextReader Reader => m_reader
+            ?? throw new XsltException(
+                $"The resource '{Uri}' was resolved to a document already parsed, and only document() and "
+                + "doc() read one: what reads this resource reads text.");
+
+        /// <summary>
+        /// Gets the document, where the resolver gave it parsed; <see langword="null"/> where it gave text.
+        /// </summary>
+        public Model.XdmTree? Document { get; }
 
         /// <summary>Gets the stylesheet's absolute identity.</summary>
         public string Uri { get; }

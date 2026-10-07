@@ -964,6 +964,11 @@ namespace CodeDeeds.Xslt.Runtime
                 return false;
             }
 
+            if (resolved.Document is not null)
+            {
+                return true;
+            }
+
             using (resolved.Reader)
             {
                 return XdmTreeBuilder.StartsAsXml(resolved.Reader, m_options.EntityResolver, resolved.Uri);
@@ -1000,12 +1005,42 @@ namespace CodeDeeds.Xslt.Runtime
             // have been read under another, and the nodes have to be the same nodes.
             if (m_documents.TryGetValue((resolved.Uri, scope), out cached))
             {
-                resolved.Reader.Dispose();
+                if (resolved.Document is null)
+                {
+                    resolved.Reader.Dispose();
+                }
+
                 m_documents[asWritten] = cached;
                 return cached;
             }
 
-            XdmTree tree;
+            // A document the resolver kept parsed is taken as it is, whitespace and all: it was parsed the
+            // way this stylesheet reads, or the resolver has chosen otherwise. Its name table is its own,
+            // and the mapping of the stylesheet's names made for it costs less than parsing it would.
+            XdmTree tree = resolved.Document ?? ReadDocument(resolved, href, package);
+
+            if (m_resultDocuments is not null && m_resultDocuments.Contains(resolved.Uri))
+            {
+                throw XsltErrors.Error(
+                    XsltErrorCode.XTDE1500,
+                    $"The document '{resolved.Uri}' was written by this transformation and is now being read "
+                    + "from it. Whether the read sees what the write put there would depend on an order "
+                    + "nothing settles, so the two together are refused.");
+            }
+
+            m_documentsRead.Add(resolved.Uri);
+
+            // Keyed on the reference as written, so that repeating it in the stylesheet hits the cache, and
+            // also on the resolved identity, so two spellings of one document share a tree.
+            m_documents[asWritten] = tree;
+            m_documents.TryAdd((resolved.Uri, scope), tree);
+            m_documentUris[tree] = resolved.Uri;
+            return tree;
+        }
+
+        /// <summary>Parses the text a resolver gave for a document, as the reading package reads.</summary>
+        private XdmTree ReadDocument(ResolvedResource resolved, string href, int package)
+        {
             try
             {
                 // Read as it stands unless the resolver that supplied it says otherwise. What the caller
@@ -1015,7 +1050,7 @@ namespace CodeDeeds.Xslt.Runtime
 
                 // In this transformation's own name table, the document being kept for this transformation
                 // and no other, so that a path into it and a template applied to it cost no mapping of their own.
-                tree = validation is not null
+                return validation is not null
                     ? XdmTreeBuilder.FromXmlValidated(
                         resolved.Reader, m_stylesheet.WhitespaceIn(package), m_options.EntityResolver, resolved.Uri, validation, TemporaryNames)
                     : XdmTreeBuilder.FromXml(
@@ -1040,24 +1075,6 @@ namespace CodeDeeds.Xslt.Runtime
             {
                 resolved.Reader.Dispose();
             }
-
-            if (m_resultDocuments is not null && m_resultDocuments.Contains(resolved.Uri))
-            {
-                throw XsltErrors.Error(
-                    XsltErrorCode.XTDE1500,
-                    $"The document '{resolved.Uri}' was written by this transformation and is now being read "
-                    + "from it. Whether the read sees what the write put there would depend on an order "
-                    + "nothing settles, so the two together are refused.");
-            }
-
-            m_documentsRead.Add(resolved.Uri);
-
-            // Keyed on the reference as written, so that repeating it in the stylesheet hits the cache, and
-            // also on the resolved identity, so two spellings of one document share a tree.
-            m_documents[asWritten] = tree;
-            m_documents.TryAdd((resolved.Uri, scope), tree);
-            m_documentUris[tree] = resolved.Uri;
-            return tree;
         }
 
         /// <summary>The base URI the caller supplied, which relative references resolve against.</summary>
